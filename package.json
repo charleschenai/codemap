@@ -1,0 +1,7 @@
+{
+  "name": "graph",
+  "version": "1.0.0",
+  "description": "Codebase dependency analysis CLI — zero dependencies",
+  "bin": { "graph": "./graph.ts" },
+  "type": "module"
+}

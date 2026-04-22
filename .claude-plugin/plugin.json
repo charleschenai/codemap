@@ -1,0 +1,6 @@
+{
+  "name": "graph",
+  "description": "Codebase dependency analysis — trace imports, find dead code, detect phone-home URLs, measure blast radius. Zero dependencies.",
+  "version": "1.0.0",
+  "keywords": ["graph", "dependencies", "imports", "analysis", "codebase"]
+}
