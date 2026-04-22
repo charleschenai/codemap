@@ -26,6 +26,7 @@ import { join, relative, resolve, extname, dirname } from "path"
 // ── Patterns ──────────────────────────────────────────────────────────
 
 const IMPORT_RE = /(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm
+const DYNAMIC_IMPORT_RE = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/gm
 const URL_RE = /['"`](https?:\/\/[^'"`\s]{5,})['"`]/gm
 const EXPORT_RE = /export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)/gm
 const SUPPORTED_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go", ".java", ".rb", ".php"])
@@ -44,6 +45,105 @@ interface GraphNode {
 interface Graph {
   nodes: Map<string, GraphNode>
   scanDir: string
+}
+
+// ── Resolution ───────────────────────────────────────────────────────
+
+/**
+ * Resolve an import specifier to a file path.
+ * Uses manual resolution with tsconfig path alias support.
+ * Falls back to raw specifier for unresolvable packages.
+ */
+
+let _tsconfigPaths: Map<string, string> | null = null
+
+function loadTsconfigPaths(scanDir: string): Map<string, string> {
+  if (_tsconfigPaths) return _tsconfigPaths
+  _tsconfigPaths = new Map()
+  // Walk up from scanDir to find tsconfig.json
+  let searchDir = scanDir
+  for (let i = 0; i < 5; i++) {
+    try {
+      const tsconfigPath = join(searchDir, "tsconfig.json")
+      const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf-8"))
+      const paths = tsconfig.compilerOptions?.paths || {}
+      const baseUrl = tsconfig.compilerOptions?.baseUrl || "."
+      const base = resolve(searchDir, baseUrl)
+      for (const [alias, targets] of Object.entries(paths) as [string, string[]][]) {
+        const prefix = alias.replace(/\*$/, "")
+        const target = (targets[0] || "").replace(/\*$/, "")
+        _tsconfigPaths.set(prefix, resolve(base, target))
+      }
+      break
+    } catch {
+      const parent = dirname(searchDir)
+      if (parent === searchDir) break
+      searchDir = parent
+    }
+  }
+  return _tsconfigPaths
+}
+
+function resolveAndAdd(specifier: string, fromFile: string, scanDir: string, node: GraphNode): void {
+  if (specifier.startsWith(".")) {
+    // Relative import — try exact, .js→.ts swap, then extensions
+    const resolved = resolve(dirname(fromFile), specifier)
+    const candidates = [
+      resolved,
+      resolved.replace(/\.js$/, ".ts"),
+      resolved.replace(/\.js$/, ".tsx"),
+      resolved.replace(/\.jsx$/, ".tsx"),
+      resolved.replace(/\.mjs$/, ".mts"),
+    ]
+    for (const base of candidates) {
+      try {
+        statSync(base)
+        node.imports.push(relative(scanDir, base))
+        return
+      } catch {}
+    }
+    // Try adding extensions
+    for (const ext of [".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.tsx", "/index.js"]) {
+      try {
+        const candidate = resolved + ext
+        statSync(candidate)
+        node.imports.push(relative(scanDir, candidate))
+        return
+      } catch {}
+    }
+    return
+  }
+
+  // Try tsconfig path aliases
+  const paths = loadTsconfigPaths(scanDir)
+  for (const [prefix, target] of paths) {
+    if (specifier.startsWith(prefix)) {
+      const rest = specifier.slice(prefix.length)
+      const resolved = join(target, rest)
+      // Try exact, then swap .js→.ts, then extensions, then index
+      const candidates = [
+        resolved,
+        resolved.replace(/\.js$/, ".ts"),
+        resolved.replace(/\.js$/, ".tsx"),
+        resolved.replace(/\.jsx$/, ".tsx"),
+        resolved + ".ts",
+        resolved + ".tsx",
+        resolved + ".js",
+        resolved + "/index.ts",
+        resolved + "/index.js",
+      ]
+      for (const candidate of candidates) {
+        try {
+          statSync(candidate)
+          node.imports.push(relative(scanDir, candidate))
+          return
+        } catch {}
+      }
+    }
+  }
+
+  // Bare specifier — store package name only
+  node.imports.push(specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/"))
 }
 
 // ── Scanner ───────────────────────────────────────────────────────────
@@ -84,30 +184,21 @@ function scanDirectory(dir: string): Graph {
       lines: content.split("\n").length,
     }
 
-    // Extract imports
+    // Extract imports (static + re-exports)
     let m: RegExpExecArray | null
     IMPORT_RE.lastIndex = 0
     while ((m = IMPORT_RE.exec(content)) !== null) {
       const target = m[1] || m[2]
       if (!target) continue
+      resolveAndAdd(target, file, dir, node)
+    }
 
-      if (target.startsWith(".")) {
-        // Resolve relative import
-        const resolved = resolve(dirname(file), target)
-        for (const ext of ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.js"]) {
-          try {
-            const candidate = resolved + ext
-            statSync(candidate)
-            node.imports.push(relative(dir, candidate))
-            break
-          } catch {
-            // try next extension
-          }
-        }
-      } else {
-        // Package import
-        node.imports.push(target)
-      }
+    // Extract dynamic imports: import('./foo'), await import('./foo')
+    DYNAMIC_IMPORT_RE.lastIndex = 0
+    while ((m = DYNAMIC_IMPORT_RE.exec(content)) !== null) {
+      const target = m[1]
+      if (!target) continue
+      resolveAndAdd(target, file, dir, node)
     }
 
     // Extract URLs
