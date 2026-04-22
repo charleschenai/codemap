@@ -1,25 +1,25 @@
 ---
-name: graph
+name: codemap
 description: Analyze codebase dependency structure — trace imports, blast radius, phone-home detection, dead files, circular deps, function callers. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(bun *)
   - Bash(graph *)
-  - Bash(~/Desktop/graph/graph.ts *)
+  - Bash(~/Desktop/codemap/codemap.ts *)
   - Read
   - Grep
 ---
 
-# /graph — Codebase Dependency Analysis
+# /codemap — Codebase Dependency Analysis
 
 Scan a codebase and answer structural questions about it. Run the graph CLI via Bash.
 
 ## Usage
 
-The graph tool is at `~/Desktop/graph/graph.ts`. Run it with Bun:
+The graph tool is at `~/Desktop/codemap/codemap.ts`. Run it with Bun:
 
 ```bash
-bun ~/Desktop/graph/graph.ts [--dir <path>] <action> [target]
+bun ~/Desktop/codemap/codemap.ts [--dir <path>] <action> [target]
 ```
 
 Default directory is the current working directory.
@@ -56,5 +56,5 @@ Default directory is the current working directory.
 ## For a Different Directory
 
 ```bash
-bun ~/Desktop/graph/graph.ts --dir ~/Desktop/other-project stats
+bun ~/Desktop/codemap/codemap.ts --dir ~/Desktop/other-project stats
 ```

@@ -1,4 +1,4 @@
-# graph
+# codemap
 
 Codebase dependency analysis. Zero dependencies. Single file.
 
@@ -12,18 +12,18 @@ bun link
 ## Usage
 
 ```bash
-graph trace src/utils/auth.ts        # who imports this, what it imports
-graph blast-radius src/api/client.ts  # everything affected if this changes
-graph phone-home                      # find all external URLs
-graph coupling @some/package          # find files importing a package
-graph dead-files                      # files nothing imports
-graph circular                        # detect circular dependencies
-graph functions src/utils/auth.ts     # list exports in a file
-graph callers getApiKey               # find where a function is used
-graph stats                           # codebase overview
+codemap trace src/utils/auth.ts        # who imports this, what it imports
+codemap blast-radius src/api/client.ts  # everything affected if this changes
+codemap phone-home                      # find all external URLs
+codemap coupling @some/package          # find files importing a package
+codemap dead-files                      # files nothing imports
+codemap circular                        # detect circular dependencies
+codemap functions src/utils/auth.ts     # list exports in a file
+codemap callers getApiKey               # find where a function is used
+codemap stats                           # codebase overview
 
 # Scan a different directory
-graph --dir ~/Desktop/my-project stats
+codemap --dir ~/Desktop/my-project stats
 ```
 
 ## How it works

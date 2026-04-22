@@ -1,7 +1,7 @@
 {
-  "name": "graph",
+  "name": "codemap",
   "version": "1.0.0",
   "description": "Codebase dependency analysis CLI — zero dependencies",
-  "bin": { "graph": "./graph.ts" },
+  "bin": { "codemap": "./graph.ts" },
   "type": "module"
 }
