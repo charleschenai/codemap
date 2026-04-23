@@ -572,6 +572,7 @@ fn extract_functions_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<Func
             if let Some(f) = func {
                 let callee = if f.kind() == "member_expression" || f.kind() == "field_expression" {
                     f.child_by_field_name("property")
+                        .or_else(|| f.child_by_field_name("field"))
                         .map(|p| text(p, src).to_string())
                         .unwrap_or_else(|| text(f, src).to_string())
                 } else {
