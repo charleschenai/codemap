@@ -392,6 +392,7 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
     let etypes = export_types(grammar);
 
     if is_js_like(grammar) {
+        let export_default_re = Regex::new(r"export\s+default\s+(?:class|function\s*\*?)\s+(\w+)").unwrap();
         for node in collect(root, etypes) {
             let node_text = text(node, src);
             if node_text.starts_with("export type") || node_text.starts_with("export interface") {
@@ -408,8 +409,7 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
                     }
                 }
             } else if node_text.contains("export default") {
-                let re = Regex::new(r"export\s+default\s+(?:class|function\s*\*?)\s+(\w+)").unwrap();
-                if let Some(caps) = re.captures(node_text) {
+                if let Some(caps) = export_default_re.captures(node_text) {
                     exports.push(caps[1].to_string());
                 } else {
                     exports.push("default".to_string());
@@ -562,6 +562,7 @@ fn extract_functions_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<Func
     let mut functions = Vec::new();
     let ftypes = func_types(grammar);
 
+    let kernel_re = Regex::new(r"(\w+)\s*<<<[^>]*>>>").unwrap();
     for node in collect(root, ftypes) {
         let name = get_function_name(node, grammar, src);
         let name = match name {
@@ -599,7 +600,6 @@ fn extract_functions_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<Func
         // CUDA kernel launches: detect <<<>>> syntax
         if grammar == "cpp" || grammar == "c" {
             let body_text = text(node, src);
-            let kernel_re = Regex::new(r"(\w+)\s*<<<[^>]*>>>").unwrap();
             for caps in kernel_re.captures_iter(body_text) {
                 let kernel_name = caps[1].to_string();
                 if !kernel_name.is_empty() && seen.insert(kernel_name.clone()) {
@@ -1315,13 +1315,13 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 
     // @triton.jit decorator
     let triton_jit_re = Regex::new(r#"@\s*triton\s*\.\s*jit"#).unwrap();
+    let def_fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
     for m in triton_jit_re.find_iter(content) {
         let pos = m.start();
         let line = content[..pos].matches('\n').count() + 1;
         // Get function name from next line: def func_name(
         let after = &content[m.end()..];
-        let fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
-        if let Some(caps) = fn_re.captures(after) {
+        if let Some(caps) = def_fn_re.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::TritonKernel,
@@ -1339,8 +1339,7 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
         let pos = m.start();
         let line = content[..pos].matches('\n').count() + 1;
         let after = &content[m.end()..];
-        let fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
-        if let Some(caps) = fn_re.captures(after) {
+        if let Some(caps) = def_fn_re.captures(after) {
             let name = caps[1].to_string();
             // Only add if not already caught by @triton.jit
             if !bridges.iter().any(|b| b.kind == BridgeKind::TritonKernel && b.name == name) {
@@ -1646,6 +1645,12 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 }
 
 fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], bridges: &mut Vec<BridgeInfo>) {
+    // Pre-compile regexes used inside loops
+    let struct_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:struct|enum)\s+(\w+)"#).unwrap();
+    let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:fn|async\s+fn)\s+(\w+)"#).unwrap();
+    let impl_re = Regex::new(r#"(?s)\s*impl\s+(\w+)"#).unwrap();
+    let pub_fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?fn\s+(\w+)"#).unwrap();
+
     // #[pyclass] or #[pyclass(name = "PythonName")]
     let pyclass_re = Regex::new(r#"#\[pyclass(?:\s*\([^)]*name\s*=\s*"(\w+)"[^)]*\))?\]"#).unwrap();
     for caps in pyclass_re.captures_iter(content) {
@@ -1653,7 +1658,6 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
         let line = content[..pos].matches('\n').count() + 1;
         // Get the struct/enum name from the next line
         let after = &content[caps.get(0).unwrap().end()..];
-        let struct_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:struct|enum)\s+(\w+)"#).unwrap();
         if let Some(sc) = struct_re.captures(after) {
             let rust_name = sc[1].to_string();
             let py_name = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_else(|| rust_name.clone());
@@ -1673,7 +1677,6 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
         let pos = m.start();
         let line = content[..pos].matches('\n').count() + 1;
         let after = &content[m.end()..];
-        let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:fn|async\s+fn)\s+(\w+)"#).unwrap();
         if let Some(caps) = fn_re.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
@@ -1693,7 +1696,6 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
         let line = content[..pos].matches('\n').count() + 1;
         // Get the impl block name
         let after = &content[m.end()..];
-        let impl_re = Regex::new(r#"(?s)\s*impl\s+(\w+)"#).unwrap();
         if let Some(caps) = impl_re.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
@@ -1712,8 +1714,7 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
         let pos = m.start();
         let line = content[..pos].matches('\n').count() + 1;
         let after = &content[m.end()..];
-        let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?fn\s+(\w+)"#).unwrap();
-        if let Some(caps) = fn_re.captures(after) {
+        if let Some(caps) = pub_fn_re.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::PyO3Function,
