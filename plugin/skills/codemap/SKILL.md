@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase dependency structure — trace imports, blast radius, phone-home detection, dead files, circular deps, function callers. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase dependency structure — trace imports, blast radius, phone-home detection, dead files, circular deps, function callers, hotspots, layers, diff analysis, orphan exports, import paths, size ranking, A/B compare. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(bun *)
@@ -37,14 +37,24 @@ Default directory is the current working directory.
 | `circular` | Detect circular dependency chains | `codemap circular` |
 | `functions <file>` | List exports in a file | `codemap functions src/utils/auth.ts` |
 | `callers <name>` | Find where a function is used | `codemap callers getApiKey` |
+| `hotspots` | Most coupled files (imports + importers) | `codemap hotspots` |
+| `layers` | Auto-detect architectural layers | `codemap layers` |
+| `diff <ref>` | Blast radius of changes since a git ref | `codemap diff HEAD~5` |
+| `orphan-exports` | Exports nothing in the codebase uses | `codemap orphan-exports` |
+| `why <A> <B>` | Shortest import path between two files | `codemap why src/cli.ts src/utils/auth.ts` |
+| `size` | Files ranked by line count | `codemap size` |
+| `compare <dir>` | Structural A/B diff vs another codebase | `codemap compare ~/Desktop/old-version` |
 
 ## When to Use
 
 - Before deleting or refactoring files — check blast radius first
 - When auditing a codebase for security — phone-home finds every external URL
-- When understanding a new codebase — stats + trace gives you the architecture
-- When cleaning up — dead-files shows what can be removed safely
+- When understanding a new codebase — stats + hotspots + layers gives you the architecture
+- When cleaning up — dead-files and orphan-exports show what can be removed
 - When removing a dependency — coupling shows every file that imports it
+- Before/after refactors — compare two versions to verify structural improvements
+- When debugging unexpected breakage — why shows the import chain between files
+- When reviewing PRs — diff shows the blast radius of recent changes
 
 ## Process
 

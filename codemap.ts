@@ -6,18 +6,25 @@
  * No dependencies. Single file. Works with any language.
  *
  * Usage:
- *   codemap trace src/utils/auth.ts
- *   codemap blast-radius src/utils/auth.ts
- *   codemap phone-home
- *   codemap dead-files
- *   codemap circular
- *   codemap coupling @anthropic-ai/sdk
- *   codemap functions src/utils/auth.ts
- *   codemap callers getApiKey
- *   codemap stats
+ *   codemap stats                              # codebase overview
+ *   codemap trace src/utils/auth.ts            # imports + importers
+ *   codemap blast-radius src/api/client.ts     # all affected files
+ *   codemap phone-home                         # external URLs
+ *   codemap coupling @anthropic-ai/sdk         # files importing a package
+ *   codemap dead-files                         # files nothing imports
+ *   codemap circular                           # circular dependencies
+ *   codemap functions src/utils/auth.ts        # exports in a file
+ *   codemap callers getApiKey                  # find function usage
+ *   codemap hotspots                           # most coupled files
+ *   codemap layers                             # architectural layers
+ *   codemap diff HEAD~5                        # blast radius of git changes
+ *   codemap orphan-exports                     # unused exports
+ *   codemap why fileA fileB                    # shortest import path
+ *   codemap size                               # files by line count
+ *   codemap compare ~/other-project            # structural A/B diff
  *
  * Or point it at a different directory:
- *   codemap --dir ~/Desktop/my-project trace src/foo.ts
+ *   codemap --dir ~/Desktop/my-project stats
  */
 
 import { readdirSync, readFileSync, statSync } from "fs"
@@ -454,6 +461,364 @@ function stats(graph: Graph): string {
   return lines.join("\n")
 }
 
+// ── New Actions ──────────────────────────────────────────────────────
+
+function hotspots(graph: Graph): string {
+  const scored: { id: string; imports: number; importers: number; total: number }[] = []
+  for (const [id, node] of graph.nodes) {
+    const total = node.imports.length + node.importedBy.length
+    if (total > 0) scored.push({ id, imports: node.imports.length, importers: node.importedBy.length, total })
+  }
+  scored.sort((a, b) => b.total - a.total)
+  const top = scored.slice(0, 30)
+  if (!top.length) return "No coupling found in codebase."
+  const lines = [`=== Hotspots (top ${top.length} most coupled files) ===`, ""]
+  for (const s of top) {
+    lines.push(`  ${s.total.toString().padStart(4)} coupling  ${s.id}  (${s.imports}→ ${s.importers}←)`)
+  }
+  return lines.join("\n")
+}
+
+function layers(graph: Graph): string {
+  // Assign layers using BFS from entry points (files with no importers)
+  // Following import edges downward. Circular deps are broken by visiting each node only once.
+  const roots: string[] = []
+  for (const [id, node] of graph.nodes) {
+    if (node.importedBy.length === 0) roots.push(id)
+  }
+
+  const depth = new Map<string, number>()
+  // BFS from roots, following imports. First visit wins (shortest path = shallowest layer).
+  const queue: [string, number][] = roots.map(r => [r, 0])
+  const visited = new Set<string>()
+
+  while (queue.length) {
+    const [id, d] = queue.shift()!
+    if (visited.has(id)) continue
+    visited.add(id)
+    depth.set(id, d)
+    const node = graph.nodes.get(id)
+    if (node) {
+      for (const imp of node.imports) {
+        if (graph.nodes.has(imp) && !visited.has(imp)) {
+          queue.push([imp, d + 1])
+        }
+      }
+    }
+  }
+  // Files in cycles not reachable from roots
+  for (const id of graph.nodes.keys()) {
+    if (!depth.has(id)) depth.set(id, 0)
+  }
+
+  // Group by depth
+  const layerMap = new Map<number, string[]>()
+  for (const [id, d] of depth) {
+    if (!layerMap.has(d)) layerMap.set(d, [])
+    layerMap.get(d)!.push(id)
+  }
+
+  const sortedLayers = [...layerMap.entries()].sort((a, b) => a[0] - b[0])
+  const lines = [`=== Architecture Layers (${sortedLayers.length} levels) ===`, ""]
+
+  const labelGuess = (d: number, max: number) => {
+    if (d === 0) return "entry points"
+    if (d === max) return "leaf modules"
+    if (d <= max * 0.3) return "orchestration"
+    if (d <= max * 0.6) return "services"
+    return "utilities"
+  }
+
+  const maxDepth = sortedLayers.length ? sortedLayers[sortedLayers.length - 1][0] : 0
+  for (const [d, files] of sortedLayers) {
+    files.sort()
+    lines.push(`Layer ${d} — ${labelGuess(d, maxDepth)} (${files.length} files):`)
+    for (const f of files.slice(0, 10)) lines.push(`  ${f}`)
+    if (files.length > 10) lines.push(`  ... and ${files.length - 10} more`)
+    lines.push("")
+  }
+
+  // Check for cross-layer violations (deeper importing shallower)
+  const violations: string[] = []
+  for (const [id, node] of graph.nodes) {
+    const myDepth = depth.get(id) ?? 0
+    for (const imp of node.imports) {
+      const impDepth = depth.get(imp)
+      if (impDepth !== undefined && impDepth < myDepth && (myDepth - impDepth) > 1) {
+        violations.push(`  ${id} (L${myDepth}) → ${imp} (L${impDepth})`)
+      }
+    }
+  }
+  if (violations.length) {
+    lines.push(`Cross-layer imports (${violations.length} — deeper importing shallower, skipping layers):`)
+    for (const v of violations.slice(0, 20)) lines.push(v)
+    if (violations.length > 20) lines.push(`  ... and ${violations.length - 20} more`)
+  }
+
+  return lines.join("\n")
+}
+
+function diff(graph: Graph, gitRef: string): string {
+  if (!gitRef) return "Usage: codemap diff <git-ref>  (e.g. codemap diff HEAD~3, codemap diff main)"
+
+  let changedFiles: string[]
+  try {
+    const result = Bun.spawnSync(["git", "diff", "--name-only", gitRef], { cwd: graph.scanDir })
+    const output = result.stdout.toString().trim()
+    if (!output) return `No files changed since ${gitRef}.`
+    changedFiles = output.split("\n").filter(f => f.trim())
+  } catch {
+    return `Failed to run git diff against "${gitRef}". Make sure you're in a git repo.`
+  }
+
+  // Filter to files we scanned
+  const relevant = changedFiles.filter(f => graph.nodes.has(f))
+  if (!relevant.length) return `${changedFiles.length} files changed since ${gitRef}, but none are in the scanned source.`
+
+  // Compute combined blast radius
+  const allAffected = new Set<string>()
+  for (const file of relevant) {
+    const visited = new Set<string>()
+    const queue = [file]
+    visited.add(file)
+    while (queue.length) {
+      const current = queue.shift()!
+      const n = graph.nodes.get(current)
+      if (!n) continue
+      for (const dep of n.importedBy) {
+        if (!visited.has(dep)) { visited.add(dep); queue.push(dep) }
+      }
+    }
+    visited.delete(file)
+    for (const v of visited) allAffected.add(v)
+  }
+
+  const lines = [
+    `=== Diff Analysis: ${gitRef} ===`,
+    `Changed source files: ${relevant.length}`,
+    `Total blast radius: ${allAffected.size} additional files affected`,
+    "",
+    "Changed files:"
+  ]
+  for (const f of relevant.sort()) lines.push(`  * ${f}`)
+
+  if (allAffected.size) {
+    lines.push("", "Affected by changes:")
+    for (const f of [...allAffected].sort()) lines.push(`  ${f}`)
+  }
+
+  return lines.join("\n")
+}
+
+function orphanExports(graph: Graph): string {
+  const orphans: { file: string; name: string }[] = []
+
+  for (const [id, node] of graph.nodes) {
+    if (!node.exports.length) continue
+    const content = (() => {
+      try { return readFileSync(join(graph.scanDir, id), "utf-8") } catch { return "" }
+    })()
+
+    for (const exp of node.exports) {
+      const re = new RegExp(`\\b${exp}\\b`)
+      let found = false
+      for (const [otherId, otherNode] of graph.nodes) {
+        if (otherId === id) continue
+        // Only check files that import this file
+        if (!otherNode.imports.includes(id)) continue
+        try {
+          const otherContent = readFileSync(join(graph.scanDir, otherId), "utf-8")
+          if (re.test(otherContent)) { found = true; break }
+        } catch { continue }
+      }
+      if (!found) orphans.push({ file: id, name: exp })
+    }
+  }
+
+  if (!orphans.length) return "No orphan exports found — all exports are used somewhere."
+  orphans.sort((a, b) => a.file.localeCompare(b.file) || a.name.localeCompare(b.name))
+  const lines = [`${orphans.length} orphan exports (exported but never imported):`, ""]
+  let lastFile = ""
+  for (const o of orphans.slice(0, 100)) {
+    if (o.file !== lastFile) { lines.push(`  ${o.file}:`); lastFile = o.file }
+    lines.push(`    ▸ ${o.name}`)
+  }
+  if (orphans.length > 100) lines.push(`  ... and ${orphans.length - 100} more`)
+  return lines.join("\n")
+}
+
+function why(graph: Graph, args: string): string {
+  const parts = args.split(/\s+/)
+  if (parts.length < 2) return "Usage: codemap why <fileA> <fileB>"
+  const [a, b] = parts
+  const nodeA = findNode(graph, a)
+  const nodeB = findNode(graph, b)
+  if (!nodeA) return `File not found: ${a}`
+  if (!nodeB) return `File not found: ${b}`
+
+  // BFS from A to B following imports
+  const queue: string[][] = [[nodeA.id]]
+  const visited = new Set<string>([nodeA.id])
+
+  while (queue.length) {
+    const path = queue.shift()!
+    const current = path[path.length - 1]
+    if (current === nodeB.id) {
+      const lines = [`Shortest path (${path.length - 1} hops):`, ""]
+      lines.push("  " + path.join("\n  → "))
+      return lines.join("\n")
+    }
+    const node = graph.nodes.get(current)
+    if (!node) continue
+    for (const imp of node.imports) {
+      if (!visited.has(imp) && graph.nodes.has(imp)) {
+        visited.add(imp)
+        queue.push([...path, imp])
+      }
+    }
+  }
+
+  // Try reverse direction
+  const queue2: string[][] = [[nodeB.id]]
+  const visited2 = new Set<string>([nodeB.id])
+  while (queue2.length) {
+    const path = queue2.shift()!
+    const current = path[path.length - 1]
+    if (current === nodeA.id) {
+      const reversed = path.reverse()
+      const lines = [`Shortest path (${reversed.length - 1} hops, reverse direction):`, ""]
+      lines.push("  " + reversed.join("\n  → "))
+      return lines.join("\n")
+    }
+    const node = graph.nodes.get(current)
+    if (!node) continue
+    for (const imp of node.imports) {
+      if (!visited2.has(imp) && graph.nodes.has(imp)) {
+        visited2.add(imp)
+        queue2.push([...path, imp])
+      }
+    }
+  }
+
+  return `No import path found between ${nodeA.id} and ${nodeB.id}.`
+}
+
+function size(graph: Graph): string {
+  const files = [...graph.nodes.entries()]
+    .map(([id, node]) => ({ id, lines: node.lines }))
+    .sort((a, b) => b.lines - a.lines)
+
+  const top = files.slice(0, 30)
+  if (!top.length) return "No files found."
+  const total = files.reduce((s, f) => s + f.lines, 0)
+  const lines = [`=== File Size Ranking (top ${top.length} of ${files.length}) ===`, `Total: ${total.toLocaleString()} lines`, ""]
+  for (const f of top) {
+    const pct = ((f.lines / total) * 100).toFixed(1)
+    lines.push(`  ${f.lines.toString().padStart(6)} lines  (${pct.padStart(5)}%)  ${f.id}`)
+  }
+  return lines.join("\n")
+}
+
+function compare(graph: Graph, otherDir: string): string {
+  if (!otherDir) return "Usage: codemap compare <other-dir>  (e.g. codemap compare ~/Desktop/old-version)"
+  const resolvedDir = resolve(otherDir)
+
+  let otherGraph: Graph
+  try {
+    otherGraph = scanDirectory(resolvedDir)
+  } catch {
+    return `Failed to scan directory: ${resolvedDir}`
+  }
+
+  const aFiles = new Set(graph.nodes.keys())
+  const bFiles = new Set(otherGraph.nodes.keys())
+
+  const added = [...aFiles].filter(f => !bFiles.has(f)).sort()
+  const removed = [...bFiles].filter(f => !aFiles.has(f)).sort()
+  const common = [...aFiles].filter(f => bFiles.has(f))
+
+  // Compare stats
+  let aLines = 0, bLines = 0, aImports = 0, bImports = 0, aUrls = 0, bUrls = 0
+  for (const [, n] of graph.nodes) { aLines += n.lines; aImports += n.imports.length; aUrls += n.urls.length }
+  for (const [, n] of otherGraph.nodes) { bLines += n.lines; bImports += n.imports.length; bUrls += n.urls.length }
+
+  // Coupling changes in common files
+  const couplingChanges: { id: string; before: number; after: number }[] = []
+  for (const id of common) {
+    const a = graph.nodes.get(id)!
+    const b = otherGraph.nodes.get(id)!
+    const aCoupling = a.imports.length + a.importedBy.length
+    const bCoupling = b.imports.length + b.importedBy.length
+    if (aCoupling !== bCoupling) {
+      couplingChanges.push({ id, before: bCoupling, after: aCoupling })
+    }
+  }
+  couplingChanges.sort((a, b) => Math.abs(b.after - b.before) - Math.abs(a.after - a.before))
+
+  // New URLs
+  const aUrlSet = new Set<string>()
+  const bUrlSet = new Set<string>()
+  for (const [, n] of graph.nodes) for (const u of n.urls) aUrlSet.add(u)
+  for (const [, n] of otherGraph.nodes) for (const u of n.urls) bUrlSet.add(u)
+  const newUrls = [...aUrlSet].filter(u => !bUrlSet.has(u)).sort()
+  const removedUrls = [...bUrlSet].filter(u => !aUrlSet.has(u)).sort()
+
+  const delta = (a: number, b: number) => {
+    const d = a - b
+    return d > 0 ? `+${d}` : d.toString()
+  }
+
+  const lines = [
+    `=== Compare: current vs ${resolvedDir} ===`,
+    "",
+    `           Current    Other    Delta`,
+    `Files:     ${aFiles.size.toString().padStart(7)}  ${bFiles.size.toString().padStart(7)}  ${delta(aFiles.size, bFiles.size).padStart(7)}`,
+    `Lines:     ${aLines.toString().padStart(7)}  ${bLines.toString().padStart(7)}  ${delta(aLines, bLines).padStart(7)}`,
+    `Imports:   ${aImports.toString().padStart(7)}  ${bImports.toString().padStart(7)}  ${delta(aImports, bImports).padStart(7)}`,
+    `URLs:      ${aUrls.toString().padStart(7)}  ${bUrls.toString().padStart(7)}  ${delta(aUrls, bUrls).padStart(7)}`,
+    "",
+  ]
+
+  if (added.length) {
+    lines.push(`Added files (${added.length}):`)
+    for (const f of added.slice(0, 20)) lines.push(`  + ${f}`)
+    if (added.length > 20) lines.push(`  ... and ${added.length - 20} more`)
+    lines.push("")
+  }
+
+  if (removed.length) {
+    lines.push(`Removed files (${removed.length}):`)
+    for (const f of removed.slice(0, 20)) lines.push(`  - ${f}`)
+    if (removed.length > 20) lines.push(`  ... and ${removed.length - 20} more`)
+    lines.push("")
+  }
+
+  if (couplingChanges.length) {
+    lines.push(`Coupling changes (${couplingChanges.length} files):`)
+    for (const c of couplingChanges.slice(0, 20)) {
+      const d = c.after - c.before
+      lines.push(`  ${d > 0 ? "+" : ""}${d} coupling  ${c.id}  (${c.before} → ${c.after})`)
+    }
+    if (couplingChanges.length > 20) lines.push(`  ... and ${couplingChanges.length - 20} more`)
+    lines.push("")
+  }
+
+  if (newUrls.length) {
+    lines.push(`New URLs (${newUrls.length}):`)
+    for (const u of newUrls.slice(0, 15)) lines.push(`  + ${u}`)
+    if (newUrls.length > 15) lines.push(`  ... and ${newUrls.length - 15} more`)
+    lines.push("")
+  }
+
+  if (removedUrls.length) {
+    lines.push(`Removed URLs (${removedUrls.length}):`)
+    for (const u of removedUrls.slice(0, 15)) lines.push(`  - ${u}`)
+    if (removedUrls.length > 15) lines.push(`  ... and ${removedUrls.length - 15} more`)
+  }
+
+  return lines.join("\n")
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function findNode(graph: Graph, target: string): GraphNode | undefined {
@@ -498,6 +863,13 @@ Actions:
   functions <file>      List exports in a file
   callers <name>        Find where a function is used
   stats                 Show codebase statistics
+  hotspots              Most coupled files (imports + importers)
+  layers                Auto-detect architectural layers
+  diff <ref>            Blast radius of changes since a git ref
+  orphan-exports        Exports nothing uses
+  why <A> <B>           Shortest import path between two files
+  size                  Files ranked by line count
+  compare <dir>         Structural A/B diff vs another codebase
 
 Options:
   --dir <path>          Directory to scan (default: cwd)
@@ -506,9 +878,10 @@ Examples:
   codemap trace src/utils/auth.ts
   codemap blast-radius src/services/api/client.ts
   codemap phone-home
-  codemap coupling @anthropic-ai/sdk
-  codemap dead-files
-  codemap callers getApiKey
+  codemap hotspots
+  codemap diff HEAD~5
+  codemap why src/cli.ts src/utils/auth.ts
+  codemap compare ~/Desktop/old-version
   codemap --dir ~/Desktop/my-project stats`)
   process.exit(0)
 }
@@ -530,5 +903,12 @@ switch (action) {
   case "functions": console.log(functions(graph, target)); break
   case "callers": console.log(callers(graph, target)); break
   case "stats": console.log(stats(graph)); break
+  case "hotspots": console.log(hotspots(graph)); break
+  case "layers": console.log(layers(graph)); break
+  case "diff": console.log(diff(graph, target)); break
+  case "orphan-exports": console.log(orphanExports(graph)); break
+  case "why": console.log(why(graph, target)); break
+  case "size": console.log(size(graph)); break
+  case "compare": console.log(compare(graph, target)); break
   default: console.error(`Unknown action: ${action}. Run 'codemap --help' for usage.`); process.exit(1)
 }
