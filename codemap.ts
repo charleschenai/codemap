@@ -1,23 +1,23 @@
 #!/usr/bin/env bun
 /**
- * graph — Codebase dependency analysis CLI
- * 
+ * codemap — Codebase dependency analysis CLI
+ *
  * Scans source files, builds an import graph, answers structural questions.
  * No dependencies. Single file. Works with any language.
  *
  * Usage:
- *   graph trace src/utils/auth.ts
- *   graph blast-radius src/utils/auth.ts
- *   graph phone-home
- *   graph dead-files
- *   graph circular
- *   graph coupling @anthropic-ai/sdk
- *   graph functions src/utils/auth.ts
- *   graph callers getApiKey
- *   graph stats
+ *   codemap trace src/utils/auth.ts
+ *   codemap blast-radius src/utils/auth.ts
+ *   codemap phone-home
+ *   codemap dead-files
+ *   codemap circular
+ *   codemap coupling @anthropic-ai/sdk
+ *   codemap functions src/utils/auth.ts
+ *   codemap callers getApiKey
+ *   codemap stats
  *
  * Or point it at a different directory:
- *   graph --dir ~/Desktop/my-project trace src/foo.ts
+ *   codemap --dir ~/Desktop/my-project trace src/foo.ts
  */
 
 import { readdirSync, readFileSync, statSync } from "fs"
@@ -236,7 +236,7 @@ function scanDirectory(dir: string): Graph {
 
 function trace(graph: Graph, target: string): string {
   const node = findNode(graph, target)
-  if (!node) return `File not found in graph: ${target}`
+  if (!node) return `File not found: ${target}`
 
   const lines = [`=== ${node.id} (${node.lines} lines) ===`, ""]
 
@@ -272,7 +272,7 @@ function trace(graph: Graph, target: string): string {
 
 function blastRadius(graph: Graph, target: string): string {
   const node = findNode(graph, target)
-  if (!node) return `File not found in graph: ${target}`
+  if (!node) return `File not found: ${target}`
 
   const visited = new Set<string>()
   const queue = [node.id]
@@ -439,7 +439,7 @@ function stats(graph: Graph): string {
   }
 
   const lines = [
-    `=== Graph Stats ===`,
+    `=== Codemap Stats ===`,
     `Files: ${graph.nodes.size}`,
     `Lines: ${totalLines.toLocaleString()}`,
     `Import edges: ${totalImports}`,
@@ -484,9 +484,9 @@ const action = actionArgs[0]
 const target = actionArgs.slice(1).join(" ")
 
 if (!action || action === "--help" || action === "-h") {
-  console.log(`graph — Codebase dependency analysis
+  console.log(`codemap — Codebase dependency analysis
 
-Usage: graph [--dir <path>] <action> [target]
+Usage: codemap [--dir <path>] <action> [target]
 
 Actions:
   trace <file>          Show imports and importers of a file
@@ -503,13 +503,13 @@ Options:
   --dir <path>          Directory to scan (default: cwd)
 
 Examples:
-  graph trace src/utils/auth.ts
-  graph blast-radius src/services/api/client.ts
-  graph phone-home
-  graph coupling @anthropic-ai/sdk
-  graph dead-files
-  graph callers getApiKey
-  graph --dir ~/Desktop/my-project stats`)
+  codemap trace src/utils/auth.ts
+  codemap blast-radius src/services/api/client.ts
+  codemap phone-home
+  codemap coupling @anthropic-ai/sdk
+  codemap dead-files
+  codemap callers getApiKey
+  codemap --dir ~/Desktop/my-project stats`)
   process.exit(0)
 }
 
@@ -530,5 +530,5 @@ switch (action) {
   case "functions": console.log(functions(graph, target)); break
   case "callers": console.log(callers(graph, target)); break
   case "stats": console.log(stats(graph)); break
-  default: console.error(`Unknown action: ${action}. Run 'graph --help' for usage.`); process.exit(1)
+  default: console.error(`Unknown action: ${action}. Run 'codemap --help' for usage.`); process.exit(1)
 }

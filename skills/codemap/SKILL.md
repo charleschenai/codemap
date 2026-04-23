@@ -4,7 +4,7 @@ description: Analyze codebase dependency structure — trace imports, blast radi
 user-invocable: true
 allowed-tools:
   - Bash(bun *)
-  - Bash(graph *)
+  - Bash(codemap *)
   - Bash(~/bin/codemap *)
   - Read
   - Grep
@@ -12,11 +12,11 @@ allowed-tools:
 
 # /codemap — Codebase Dependency Analysis
 
-Scan a codebase and answer structural questions about it. Run the graph CLI via Bash.
+Scan a codebase and answer structural questions about it. Run the codemap CLI via Bash.
 
 ## Usage
 
-The graph tool is at `~/bin/codemap`. Run it with Bun:
+The codemap tool is at `~/bin/codemap`. Run it with Bun:
 
 ```bash
 bun ~/bin/codemap [--dir <path>] <action> [target]
@@ -28,15 +28,15 @@ Default directory is the current working directory.
 
 | Action | What | Example |
 |--------|------|---------|
-| `stats` | Codebase overview (files, lines, imports, URLs) | `graph stats` |
-| `trace <file>` | Show imports and importers of a file | `graph trace src/utils/auth.ts` |
-| `blast-radius <file>` | All files affected if this changes | `graph blast-radius src/api/client.ts` |
-| `phone-home` | Find all files with external URLs | `graph phone-home` |
-| `coupling <pattern>` | Find files importing a package/pattern | `graph coupling @anthropic-ai/sdk` |
-| `dead-files` | Files nothing imports | `graph dead-files` |
-| `circular` | Detect circular dependency chains | `graph circular` |
-| `functions <file>` | List exports in a file | `graph functions src/utils/auth.ts` |
-| `callers <name>` | Find where a function is used | `graph callers getApiKey` |
+| `stats` | Codebase overview (files, lines, imports, URLs) | `codemap stats` |
+| `trace <file>` | Show imports and importers of a file | `codemap trace src/utils/auth.ts` |
+| `blast-radius <file>` | All files affected if this changes | `codemap blast-radius src/api/client.ts` |
+| `phone-home` | Find all files with external URLs | `codemap phone-home` |
+| `coupling <pattern>` | Find files importing a package/pattern | `codemap coupling @anthropic-ai/sdk` |
+| `dead-files` | Files nothing imports | `codemap dead-files` |
+| `circular` | Detect circular dependency chains | `codemap circular` |
+| `functions <file>` | List exports in a file | `codemap functions src/utils/auth.ts` |
+| `callers <name>` | Find where a function is used | `codemap callers getApiKey` |
 
 ## When to Use
 
