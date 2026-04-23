@@ -1248,16 +1248,303 @@ fn extract_bridges(content: &str, ext: &str, root: Option<tree_sitter::Node>, sr
     bridges
 }
 
-fn extract_python_bridges(_content: &str, _bridges: &mut Vec<BridgeInfo>) {
-    // Will be filled by Feature 1 (torch.ops), Feature 2 (@triton.jit)
+fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    // torch.ops.namespace.op_name(...)
+    let torch_ops_re = Regex::new(r#"torch\.ops\.(\w+)\.(\w+)"#).unwrap();
+    for caps in torch_ops_re.captures_iter(content) {
+        let ns = caps[1].to_string();
+        let op = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TorchOps,
+            name: op,
+            target: None,
+            line,
+            namespace: Some(ns),
+        });
+    }
+
+    // @triton.jit decorator
+    let triton_jit_re = Regex::new(r#"@\s*triton\s*\.\s*jit"#).unwrap();
+    for m in triton_jit_re.find_iter(content) {
+        let pos = m.start();
+        let line = content[..pos].matches('\n').count() + 1;
+        // Get function name from next line: def func_name(
+        let after = &content[m.end()..];
+        let fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
+        if let Some(caps) = fn_re.captures(after) {
+            let name = caps[1].to_string();
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::TritonKernel,
+                name: name.clone(),
+                target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // @triton.autotune wrapping @triton.jit
+    let autotune_re = Regex::new(r#"@\s*triton\s*\.\s*autotune"#).unwrap();
+    for m in autotune_re.find_iter(content) {
+        let pos = m.start();
+        let line = content[..pos].matches('\n').count() + 1;
+        let after = &content[m.end()..];
+        let fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
+        if let Some(caps) = fn_re.captures(after) {
+            let name = caps[1].to_string();
+            // Only add if not already caught by @triton.jit
+            if !bridges.iter().any(|b| b.kind == BridgeKind::TritonKernel && b.name == name) {
+                bridges.push(BridgeInfo {
+                    kind: BridgeKind::TritonKernel,
+                    name: name.clone(),
+                    target: Some(name),
+                    line,
+                    namespace: None,
+                });
+            }
+        }
+    }
+
+    // Triton kernel launch: kernel_name[grid](args) -- subscript followed by call
+    let triton_launch_re = Regex::new(r#"(\w+)\s*\[([^\]]+)\]\s*\("#).unwrap();
+    for caps in triton_launch_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        // Filter out obvious non-kernel subscripts (dict access, list indexing with numbers)
+        let grid = &caps[2];
+        if grid.contains(',') || grid.contains("BLOCK") || grid.contains("grid") || grid.contains("n_") || grid.contains("cdiv") {
+            let pos = caps.get(0).unwrap().start();
+            let line = content[..pos].matches('\n').count() + 1;
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::TritonLaunch,
+                name: name.clone(),
+                target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // triton.jit(fn) -- function-call form (Unsloth pattern)
+    let triton_fn_re = Regex::new(r#"(\w+)\s*=\s*triton\s*\.\s*jit\s*\(\s*(\w+)\s*\)"#).unwrap();
+    for caps in triton_fn_re.captures_iter(content) {
+        let var_name = caps[1].to_string();
+        let fn_name = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TritonKernel,
+            name: var_name,
+            target: Some(fn_name),
+            line,
+            namespace: None,
+        });
+    }
 }
 
-fn extract_cpp_bridges(_content: &str, _bridges: &mut Vec<BridgeInfo>) {
-    // Will be filled by Feature 1 (TORCH_LIBRARY), Feature 3 (pybind11)
+fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    // TORCH_LIBRARY(namespace, m) { ... }
+    let lib_re = Regex::new(r#"TORCH_LIBRARY\s*\(\s*(\w+)"#).unwrap();
+    for caps in lib_re.captures_iter(content) {
+        let ns = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TorchLibrary,
+            name: format!("TORCH_LIBRARY({ns})"),
+            target: None,
+            line,
+            namespace: Some(ns),
+        });
+    }
+
+    // m.def("op_name(...)")  and  m.impl("op_name", &cpp_func)
+    let def_re = Regex::new(r#"m\s*\.\s*def\s*\(\s*"(\w+)"#).unwrap();
+    for caps in def_re.captures_iter(content) {
+        let op = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TorchLibrary,
+            name: op,
+            target: None,
+            line,
+            namespace: None,
+        });
+    }
+
+    let impl_re = Regex::new(r#"m\s*\.\s*impl\s*\(\s*"(\w+)"\s*,\s*(?:&\s*)?(\w+)"#).unwrap();
+    for caps in impl_re.captures_iter(content) {
+        let op = caps[1].to_string();
+        let func = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TorchLibrary,
+            name: op,
+            target: Some(func),
+            line,
+            namespace: None,
+        });
+    }
+
+    // TORCH_IMPL_FUNC(op_name)
+    let impl_func_re = Regex::new(r#"TORCH_IMPL_FUNC\s*\(\s*(\w+)"#).unwrap();
+    for caps in impl_func_re.captures_iter(content) {
+        let op = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::TorchLibrary,
+            name: op.clone(),
+            target: Some(op),
+            line,
+            namespace: None,
+        });
+    }
+
+    // PYBIND11_MODULE(name, m)
+    let pybind_re = Regex::new(r#"PYBIND11_MODULE\s*\(\s*(\w+)"#).unwrap();
+    for caps in pybind_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::Pybind11,
+            name: name.clone(),
+            target: None,
+            line,
+            namespace: Some(name),
+        });
+    }
+
+    // py::class_<Type>(m, "PythonName")
+    let class_re = Regex::new(r#"py::class_<\s*(\w+)\s*>\s*\(\s*\w+\s*,\s*"(\w+)""#).unwrap();
+    for caps in class_re.captures_iter(content) {
+        let cpp_type = caps[1].to_string();
+        let py_name = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::Pybind11,
+            name: py_name,
+            target: Some(cpp_type),
+            line,
+            namespace: None,
+        });
+    }
+
+    // CUDA kernel declarations: __global__ void kernel_name(...)
+    let cuda_kernel_re = Regex::new(r#"__global__\s+\w+\s+(\w+)\s*\("#).unwrap();
+    for caps in cuda_kernel_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::CudaKernel,
+            name: name.clone(),
+            target: Some(name),
+            line,
+            namespace: None,
+        });
+    }
+
+    // CUDA kernel launches: kernel<<<grid, block>>>(args)
+    let cuda_launch_re = Regex::new(r#"(\w+)\s*<<<[^>]*>>>"#).unwrap();
+    for caps in cuda_launch_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::CudaLaunch,
+            name: name.clone(),
+            target: Some(name),
+            line,
+            namespace: None,
+        });
+    }
 }
 
-fn extract_rust_bridges(_content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], _bridges: &mut Vec<BridgeInfo>) {
-    // Will be filled by Feature 3 (PyO3)
+fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], bridges: &mut Vec<BridgeInfo>) {
+    // #[pyclass] or #[pyclass(name = "PythonName")]
+    let pyclass_re = Regex::new(r#"#\[pyclass(?:\s*\([^)]*name\s*=\s*"(\w+)"[^)]*\))?\]"#).unwrap();
+    for caps in pyclass_re.captures_iter(content) {
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        // Get the struct/enum name from the next line
+        let after = &content[caps.get(0).unwrap().end()..];
+        let struct_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:struct|enum)\s+(\w+)"#).unwrap();
+        if let Some(sc) = struct_re.captures(after) {
+            let rust_name = sc[1].to_string();
+            let py_name = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_else(|| rust_name.clone());
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::PyO3Class,
+                name: py_name,
+                target: Some(rust_name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // #[pyfunction]
+    let pyfn_re = Regex::new(r#"#\[pyfunction\]"#).unwrap();
+    for m in pyfn_re.find_iter(content) {
+        let pos = m.start();
+        let line = content[..pos].matches('\n').count() + 1;
+        let after = &content[m.end()..];
+        let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:fn|async\s+fn)\s+(\w+)"#).unwrap();
+        if let Some(caps) = fn_re.captures(after) {
+            let name = caps[1].to_string();
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::PyO3Function,
+                name: name.clone(),
+                target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // #[pymethods]
+    let pymethods_re = Regex::new(r#"#\[pymethods\]"#).unwrap();
+    for m in pymethods_re.find_iter(content) {
+        let pos = m.start();
+        let line = content[..pos].matches('\n').count() + 1;
+        // Get the impl block name
+        let after = &content[m.end()..];
+        let impl_re = Regex::new(r#"(?s)\s*impl\s+(\w+)"#).unwrap();
+        if let Some(caps) = impl_re.captures(after) {
+            let name = caps[1].to_string();
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::PyO3Methods,
+                name: name.clone(),
+                target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // #[pymodule]
+    let pymod_re = Regex::new(r#"#\[pymodule\]"#).unwrap();
+    for m in pymod_re.find_iter(content) {
+        let pos = m.start();
+        let line = content[..pos].matches('\n').count() + 1;
+        let after = &content[m.end()..];
+        let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?fn\s+(\w+)"#).unwrap();
+        if let Some(caps) = fn_re.captures(after) {
+            let name = caps[1].to_string();
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::PyO3Function,
+                name: name.clone(),
+                target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
 }
 
 // ── Regex Fallback ──────────────────────────────────────────────────
