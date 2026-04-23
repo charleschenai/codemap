@@ -73,6 +73,8 @@ const C_CPP_EXTS: &[&str] = &[
     ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cu", ".cuh",
 ];
 
+const RUST_EXTS: &[&str] = &[".rs", "/mod.rs"];
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /// Resolve a single import specifier from `from_file` and push the resolved ID
@@ -88,6 +90,57 @@ pub fn resolve_and_add(
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
+
+    // ── Rust module resolution ─────────────────────────────────────
+    // Must come before generic relative import handler so .rs files
+    // don't fall through to JS/TS extension probing.
+    if from_ext == ".rs" {
+        // ./module imports from mod declarations
+        if specifier.starts_with("./") {
+            let mod_name = &specifier[2..];
+            let from_dir = Path::new(from_file).parent().unwrap_or(Path::new(""));
+
+            for ext in RUST_EXTS {
+                let candidate = from_dir.join(format!("{mod_name}{ext}"));
+                if candidate.exists() {
+                    if let Ok(rel) = candidate.strip_prefix(scan_dir) {
+                        node_imports.push(normalize_path(&rel.to_string_lossy()));
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        // crate:: imports → resolve relative to crate root (scan_dir)
+        if specifier.starts_with("crate::") {
+            let rest = &specifier[7..]; // strip "crate::"
+            // Clean up tree-sitter artifacts like "{Foo, Bar}"
+            let module = rest.split("::{").next().unwrap_or(rest);
+            let module = module.split("::").next().unwrap_or(module);
+
+            for ext in RUST_EXTS {
+                let candidate = scan_dir.join(format!("{module}{ext}"));
+                if candidate.exists() {
+                    if let Ok(rel) = candidate.strip_prefix(scan_dir) {
+                        node_imports.push(normalize_path(&rel.to_string_lossy()));
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        // self:: and super:: — resolve relative to current module or parent, not separate files
+        if specifier.starts_with("self::") || specifier.starts_with("super::") {
+            return;
+        }
+
+        // External crates (std::, serde::, rayon::, etc.) — skip, don't store as imports
+        if !specifier.contains('/') {
+            return;
+        }
+    }
 
     // ── 1. Relative imports ─────────────────────────────────────────
     if specifier.starts_with('.') {
