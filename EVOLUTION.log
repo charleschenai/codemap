@@ -10,3 +10,6 @@
 [2026-04-23 16:09] clean: remove unused once_cell dependency
   source: grep — no references in source code
 
+[2026-04-23 16:11] upgrade: add integration test suite — 21 tests covering all action categories
+  source: zero tests existed, self-referential testing against own codebase
+
