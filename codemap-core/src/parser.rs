@@ -105,13 +105,17 @@ fn parse_with_treesitter(content: &str, grammar: &'static str) -> Option<Tree> {
 // ── AST Node Collection ─────────────────────────────────────────────
 
 fn collect_nodes<'a>(node: Node<'a>, type_set: &HashSet<&str>, results: &mut Vec<Node<'a>>) {
-    if type_set.contains(node.kind()) {
-        results.push(node);
-    }
-    let count = node.child_count();
-    for i in 0..count {
-        if let Some(child) = node.child(i) {
-            collect_nodes(child, type_set, results);
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
+        if type_set.contains(current.kind()) {
+            results.push(current);
+        }
+        // Push children in reverse order so we process left-to-right
+        let count = current.child_count();
+        for i in (0..count).rev() {
+            if let Some(child) = current.child(i) {
+                stack.push(child);
+            }
         }
     }
 }
@@ -1354,6 +1358,10 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
         // Filter out obvious non-kernel subscripts (dict access, list indexing with numbers)
         let grid = &caps[2];
         if grid.contains(',') || grid.contains("BLOCK") || grid.contains("grid") || grid.contains("n_") || grid.contains("cdiv") {
+            // Skip common false positives
+            if name == "dict" || name == "list" || name == "type" || name == "super" || name == "getattr" {
+                continue;
+            }
             let pos = caps.get(0).unwrap().start();
             let line = content[..pos].matches('\n').count() + 1;
             bridges.push(BridgeInfo {
@@ -1390,6 +1398,11 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
         let original = caps[2].to_string();
         let replacement = caps[3].to_string();
         if original != replacement {
+            // Skip self/cls attribute assignments (not monkey-patching)
+            let path = &caps[1];
+            if path.starts_with("self.") || path.starts_with("cls.") {
+                continue;
+            }
             let pos = caps.get(0).unwrap().start();
             let line = content[..pos].matches('\n').count() + 1;
             bridges.push(BridgeInfo {
@@ -1563,7 +1576,7 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // CUDA kernel launches: kernel<<<grid, block>>>(args)
-    let cuda_launch_re = Regex::new(r#"(\w+)\s*<<<[^>]*>>>"#).unwrap();
+    let cuda_launch_re = Regex::new(r#"(\w+)\s*<<<.+?>>>"#).unwrap();
     for caps in cuda_launch_re.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
@@ -1712,6 +1725,10 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
     let cfg_re = Regex::new(r#"#\[cfg\s*\(\s*feature\s*=\s*"(\w+)"\s*\)\]"#).unwrap();
     for caps in cfg_re.captures_iter(content) {
         let feature = caps[1].to_string();
+        let gpu_features = ["cuda", "metal", "opencl", "hip", "vulkan", "wgpu", "accelerate"];
+        if !gpu_features.iter().any(|&f| feature == f) {
+            continue;
+        }
         let pos = caps.get(0).unwrap().start();
         let line = content[..pos].matches('\n').count() + 1;
         bridges.push(BridgeInfo {

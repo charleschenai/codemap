@@ -13,7 +13,7 @@ use std::time::Instant;
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CACHE_VERSION: u32 = 7;
+const CACHE_VERSION: u32 = 8;
 const MAX_DEPTH: usize = 50;
 
 /// Directories to skip during walk.
@@ -57,6 +57,10 @@ fn cache_path(dir: &str) -> PathBuf {
 fn load_cache(dir: &str) -> Option<CacheData> {
     let path = cache_path(dir);
     let bytes = fs::read(&path).ok()?;
+    if bytes.len() > 256 * 1024 * 1024 {
+        eprintln!("Warning: cache file too large ({}MB), ignoring", bytes.len() / 1024 / 1024);
+        return None;
+    }
     let data: CacheData = bincode::deserialize(&bytes).ok()?;
     if data.version != CACHE_VERSION {
         return None;
@@ -65,9 +69,8 @@ fn load_cache(dir: &str) -> Option<CacheData> {
     let files: HashMap<String, CacheEntry> = data
         .files
         .into_iter()
-        .filter(|(id, entry)| {
+        .filter(|(id, _)| {
             !id.contains("..") && !id.starts_with('/')
-                && !entry.imports.is_empty() || entry.imports.is_empty() // always pass, just validate arrays exist
         })
         .collect();
     Some(CacheData {
@@ -343,6 +346,13 @@ fn scan_single_dir(
                 .to_string()
                 .replace('\\', "/");
 
+            // Skip files larger than 10MB
+            if let Ok(meta) = fs::metadata(file) {
+                if meta.len() > 10_000_000 {
+                    return None;
+                }
+            }
+
             let content = match fs::read_to_string(file) {
                 Ok(c) => c,
                 Err(_) => return None,
@@ -509,7 +519,7 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
 
             for unres in &unresolved {
                 let base_name = unres.split('/').last().unwrap_or(unres);
-                let mut matched_id: Option<String> = None;
+                let mut matches: Vec<String> = Vec::new();
                 for other_id in &all_ids {
                     if other_id == id {
                         continue;
@@ -517,11 +527,14 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
                     if other_id.ends_with(&format!("/{base_name}"))
                         || other_id.ends_with(&format!("/{unres}"))
                     {
-                        matched_id = Some(other_id.clone());
-                        break;
+                        matches.push(other_id.clone());
                     }
                 }
-                if let Some(match_id) = matched_id {
+                // Only link if exactly one match (skip ambiguous)
+                if matches.len() != 1 {
+                    continue;
+                }
+                if let Some(match_id) = matches.into_iter().next() {
                     // Replace unresolved import with matched cross-repo file
                     if let Some(node) = merged_nodes.get_mut(id) {
                         if let Some(idx) = node.imports.iter().position(|i| i == unres) {

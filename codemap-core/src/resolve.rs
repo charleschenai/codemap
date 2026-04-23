@@ -256,8 +256,7 @@ pub fn resolve_and_add(
     node_imports.push(pkg);
 }
 
-/// Normalize path separators to forward slash (for Windows compat) and
-/// collapse any ".." or "." segments.
+/// Normalize path separators to forward slash (for Windows compat).
 fn normalize_path(p: &str) -> String {
     p.replace('\\', "/")
 }

@@ -19,14 +19,14 @@ pub fn scan(dirs: Vec<String>, include_paths: Option<Vec<String>>, no_cache: Opt
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let files = graph.nodes.len() as u32;
     let key = graph.scan_dir.clone();
-    let mut graphs = GRAPHS.lock().unwrap();
+    let mut graphs = GRAPHS.lock().unwrap_or_else(|p| p.into_inner());
     graphs.insert(key, graph);
     Ok(files)
 }
 
 #[napi]
 pub fn execute(scan_dir: String, action: String, target: String, tree_mode: Option<bool>) -> napi::Result<String> {
-    let mut graphs = GRAPHS.lock().unwrap();
+    let mut graphs = GRAPHS.lock().unwrap_or_else(|p| p.into_inner());
     let graph = graphs.get_mut(&scan_dir)
         .ok_or_else(|| napi::Error::from_reason(format!("No graph loaded for {scan_dir}. Call scan() first.")))?;
     codemap_core::execute(graph, &action, &target, tree_mode.unwrap_or(false))
@@ -35,7 +35,7 @@ pub fn execute(scan_dir: String, action: String, target: String, tree_mode: Opti
 
 #[napi]
 pub fn clear(scan_dir: Option<String>) {
-    let mut graphs = GRAPHS.lock().unwrap();
+    let mut graphs = GRAPHS.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(dir) = scan_dir {
         graphs.remove(&dir);
     } else {

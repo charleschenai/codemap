@@ -351,7 +351,7 @@ pub fn matches_pattern(callee: &str, pattern: &str) -> bool {
             if ok { return true; }
         }
         if pattern.ends_with(".*") && callee.starts_with(&pattern[..pattern.len()-1]) { return true; }
-    } else if pattern.len() > 5 {
+    } else {
         if let Some(last) = callee.split('.').last() {
             if last == pattern { return true; }
         }
