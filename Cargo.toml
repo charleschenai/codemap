@@ -1,0 +1,3 @@
+[workspace]
+members = ["codemap-core", "codemap-cli"]
+resolver = "2"
