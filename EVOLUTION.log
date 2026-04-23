@@ -16,3 +16,6 @@
 [2026-04-23 16:13] fix: handle "." target as "all files" in complexity, call-graph, sinks, lang-bridges
   source: manual testing — "." was treated as a filename instead of wildcard
 
+[2026-04-23 16:15] upgrade: add tree-sitter-php for proper AST parsing — replaces regex fallback
+  source: parser.rs returned None for PHP grammar, web research on tree-sitter crates
+

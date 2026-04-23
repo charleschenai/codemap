@@ -76,10 +76,7 @@ fn grammar_to_language(grammar: &str) -> Option<Language> {
         "ruby" => Some(tree_sitter_ruby::LANGUAGE.into()),
         "c" => Some(tree_sitter_c::LANGUAGE.into()),
         "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
-        "php" => {
-            // tree-sitter-php not available — regex fallback only
-            None
-        }
+        "php" => Some(tree_sitter_php::LANGUAGE_PHP.into()),
         _ => None,
     }
 }
