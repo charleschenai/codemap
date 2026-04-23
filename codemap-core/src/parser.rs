@@ -134,7 +134,7 @@ fn import_types(grammar: &str) -> &'static [&'static str] {
     match grammar {
         "typescript" | "tsx" | "javascript" => &["import_statement", "export_statement"],
         "python" => &["import_statement", "import_from_statement"],
-        "rust" => &["use_declaration"],
+        "rust" => &["use_declaration", "mod_item"],
         "go" => &["import_spec"],
         "java" => &["import_declaration"],
         "ruby" => &["call", "command_call", "command"],
@@ -253,14 +253,30 @@ fn extract_imports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
         }
     } else if grammar == "rust" {
         for node in collect(root, itypes) {
-            let path_node = node.child_by_field_name("argument").or_else(|| node.child(1));
-            if let Some(pn) = path_node {
-                let t = text(pn, src);
-                if t != "use" && !t.is_empty() {
-                    // Take first 2 :: segments
-                    let trimmed = t.trim_end_matches(';');
-                    let segments: Vec<&str> = trimmed.split("::").take(2).collect();
-                    imports.push(segments.join("::"));
+            if node.kind() == "mod_item" {
+                // mod foo; → import "foo" (resolved to foo.rs or foo/mod.rs)
+                if let Some(name) = node.child_by_field_name("name") {
+                    let mod_name = text(name, src);
+                    if !mod_name.is_empty() {
+                        // Check if this is a `mod foo;` (external) vs `mod foo { ... }` (inline)
+                        // Inline mods have a body child; external ones don't
+                        let has_body = node.child_by_field_name("body").is_some();
+                        if !has_body {
+                            imports.push(format!("./{mod_name}"));
+                        }
+                    }
+                }
+            } else {
+                // use_declaration
+                let path_node = node.child_by_field_name("argument").or_else(|| node.child(1));
+                if let Some(pn) = path_node {
+                    let t = text(pn, src);
+                    if t != "use" && !t.is_empty() {
+                        // Take first 2 :: segments
+                        let trimmed = t.trim_end_matches(';');
+                        let segments: Vec<&str> = trimmed.split("::").take(2).collect();
+                        imports.push(segments.join("::"));
+                    }
                 }
             }
         }
