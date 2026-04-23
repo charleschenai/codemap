@@ -13,11 +13,11 @@ use std::time::Instant;
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 const MAX_DEPTH: usize = 50;
 
 /// Directories to skip during walk.
-const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", ".codemap"];
+const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", ".codemap", "target"];
 
 /// Supported file extensions (with leading dot).
 const SUPPORTED_EXTS: &[&str] = &[
