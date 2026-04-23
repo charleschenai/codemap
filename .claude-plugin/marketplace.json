@@ -1,0 +1,13 @@
+{
+  "name": "codemap",
+  "owner": {
+    "name": "Charles Chen"
+  },
+  "plugins": [
+    {
+      "name": "codemap",
+      "version": "1.1.0",
+      "source": "./plugin"
+    }
+  ]
+}
