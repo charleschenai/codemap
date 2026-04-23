@@ -754,7 +754,7 @@ fn extract_data_flow_from_ast(
     root: Node,
     grammar: &str,
     src: &[u8],
-    functions: &mut Vec<FunctionInfo>,
+    functions: &mut [FunctionInfo],
 ) -> FileDataFlow {
     let mut definitions = Vec::new();
     let mut uses = Vec::new();

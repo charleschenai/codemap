@@ -100,6 +100,7 @@ pub fn paths(graph: &Graph, target: &str) -> String {
     let max_depth = 10usize;
     let mut all_paths: Vec<Vec<String>> = Vec::new();
 
+    #[allow(clippy::too_many_arguments)]
     fn dfs(
         graph: &Graph,
         current: &str,
