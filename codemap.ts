@@ -819,6 +819,515 @@ function compare(graph: Graph, otherDir: string): string {
   return lines.join("\n")
 }
 
+// ── Graph Analysis Actions ───────────────────────────────────────────
+
+function subgraph(graph: Graph, target: string): string {
+  if (!target) return "Usage: codemap subgraph <file-or-pattern>"
+  // Find all matching nodes
+  const seeds: string[] = []
+  for (const id of graph.nodes.keys()) {
+    if (id.includes(target)) seeds.push(id)
+  }
+  if (!seeds.length) {
+    const node = findNode(graph, target)
+    if (node) seeds.push(node.id)
+  }
+  if (!seeds.length) return `No files matching "${target}".`
+
+  // BFS in both directions to get full connected component
+  const component = new Set<string>()
+  const queue = [...seeds]
+  for (const s of seeds) component.add(s)
+
+  while (queue.length) {
+    const current = queue.shift()!
+    const node = graph.nodes.get(current)
+    if (!node) continue
+    for (const imp of node.imports) {
+      if (graph.nodes.has(imp) && !component.has(imp)) {
+        component.add(imp)
+        queue.push(imp)
+      }
+    }
+    for (const imp of node.importedBy) {
+      if (!component.has(imp)) {
+        component.add(imp)
+        queue.push(imp)
+      }
+    }
+  }
+
+  const sorted = [...component].sort()
+  const lines = [`=== Subgraph around "${target}" (${sorted.length} files) ===`, ""]
+  for (const id of sorted) {
+    const node = graph.nodes.get(id)!
+    const inCount = node.imports.filter(i => component.has(i)).length
+    const outCount = node.importedBy.filter(i => component.has(i)).length
+    lines.push(`  ${id}  (${inCount}→ ${outCount}←)`)
+  }
+  return lines.join("\n")
+}
+
+function dot(graph: Graph, target: string): string {
+  let nodes: Map<string, GraphNode>
+
+  if (target) {
+    // Build subgraph around target
+    const seeds: string[] = []
+    const node = findNode(graph, target)
+    if (node) seeds.push(node.id)
+    else {
+      for (const id of graph.nodes.keys()) {
+        if (id.includes(target)) seeds.push(id)
+      }
+    }
+    if (!seeds.length) return `No files matching "${target}".`
+
+    // BFS 2 hops out
+    const component = new Set<string>(seeds)
+    let frontier = [...seeds]
+    for (let hop = 0; hop < 2; hop++) {
+      const next: string[] = []
+      for (const id of frontier) {
+        const n = graph.nodes.get(id)
+        if (!n) continue
+        for (const imp of n.imports) {
+          if (graph.nodes.has(imp) && !component.has(imp)) { component.add(imp); next.push(imp) }
+        }
+        for (const imp of n.importedBy) {
+          if (!component.has(imp)) { component.add(imp); next.push(imp) }
+        }
+      }
+      frontier = next
+    }
+    nodes = new Map([...graph.nodes].filter(([id]) => component.has(id)))
+  } else {
+    nodes = graph.nodes
+  }
+
+  const lines = ["digraph codemap {", '  rankdir=LR;', '  node [shape=box, fontsize=10];', ""]
+  // Sanitize IDs for DOT
+  const dotId = (s: string) => '"' + s.replace(/"/g, '\\"') + '"'
+  for (const [id, node] of nodes) {
+    for (const imp of node.imports) {
+      if (nodes.has(imp)) {
+        lines.push(`  ${dotId(id)} -> ${dotId(imp)};`)
+      }
+    }
+  }
+  lines.push("}")
+  return lines.join("\n")
+}
+
+function islands(graph: Graph): string {
+  // Find connected components (undirected — imports in either direction)
+  const visited = new Set<string>()
+  const components: string[][] = []
+
+  for (const id of graph.nodes.keys()) {
+    if (visited.has(id)) continue
+    const component: string[] = []
+    const queue = [id]
+    visited.add(id)
+    while (queue.length) {
+      const current = queue.shift()!
+      component.push(current)
+      const node = graph.nodes.get(current)
+      if (!node) continue
+      for (const imp of node.imports) {
+        if (graph.nodes.has(imp) && !visited.has(imp)) { visited.add(imp); queue.push(imp) }
+      }
+      for (const imp of node.importedBy) {
+        if (!visited.has(imp)) { visited.add(imp); queue.push(imp) }
+      }
+    }
+    components.push(component)
+  }
+
+  components.sort((a, b) => b.length - a.length)
+  const lines = [`=== Islands (${components.length} disconnected components) ===`, ""]
+
+  for (let i = 0; i < components.length; i++) {
+    const c = components[i]
+    c.sort()
+    lines.push(`Island ${i + 1} (${c.length} files):`)
+    for (const f of c.slice(0, 8)) lines.push(`  ${f}`)
+    if (c.length > 8) lines.push(`  ... and ${c.length - 8} more`)
+    lines.push("")
+  }
+  return lines.join("\n")
+}
+
+function pagerank(graph: Graph): string {
+  const d = 0.85 // damping factor
+  const iterations = 20
+  const n = graph.nodes.size
+  if (n === 0) return "No files to rank."
+
+  const ids = [...graph.nodes.keys()]
+  let scores = new Map<string, number>()
+  for (const id of ids) scores.set(id, 1 / n)
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const newScores = new Map<string, number>()
+    for (const id of ids) newScores.set(id, (1 - d) / n)
+
+    for (const [id, node] of graph.nodes) {
+      if (node.imports.length === 0) continue
+      const share = (scores.get(id) || 0) / node.imports.length
+      for (const imp of node.imports) {
+        if (graph.nodes.has(imp)) {
+          newScores.set(imp, (newScores.get(imp) || 0) + d * share)
+        }
+      }
+    }
+    scores = newScores
+  }
+
+  const ranked = ids.map(id => ({ id, score: scores.get(id) || 0 }))
+    .sort((a, b) => b.score - a.score)
+
+  const top = ranked.slice(0, 30)
+  const lines = [`=== PageRank (top ${top.length} most important files) ===`, ""]
+  for (const r of top) {
+    lines.push(`  ${(r.score * 1000).toFixed(2).padStart(7)} rank  ${r.id}`)
+  }
+  return lines.join("\n")
+}
+
+function bridges(graph: Graph): string {
+  // Find articulation points using Tarjan's algorithm (iterative)
+  const ids = [...graph.nodes.keys()]
+  const disc = new Map<string, number>()
+  const low = new Map<string, number>()
+  const parent = new Map<string, string | null>()
+  const articulationPoints = new Set<string>()
+  let timer = 0
+
+  // Build undirected adjacency
+  const adj = new Map<string, Set<string>>()
+  for (const [id, node] of graph.nodes) {
+    if (!adj.has(id)) adj.set(id, new Set())
+    for (const imp of node.imports) {
+      if (graph.nodes.has(imp)) {
+        adj.get(id)!.add(imp)
+        if (!adj.has(imp)) adj.set(imp, new Set())
+        adj.get(imp)!.add(id)
+      }
+    }
+  }
+
+  for (const startId of ids) {
+    if (disc.has(startId)) continue
+
+    // Iterative DFS using explicit stack
+    const stack: { id: string; neighborIter: Iterator<string>; childCount: number }[] = []
+    disc.set(startId, timer)
+    low.set(startId, timer)
+    timer++
+    parent.set(startId, null)
+    const neighbors = adj.get(startId)
+    stack.push({ id: startId, neighborIter: (neighbors || new Set()).values(), childCount: 0 })
+
+    while (stack.length) {
+      const frame = stack[stack.length - 1]
+      const next = frame.neighborIter.next()
+
+      if (!next.done) {
+        const v = next.value
+        if (!disc.has(v)) {
+          parent.set(v, frame.id)
+          disc.set(v, timer)
+          low.set(v, timer)
+          timer++
+          frame.childCount++
+          const vNeighbors = adj.get(v)
+          stack.push({ id: v, neighborIter: (vNeighbors || new Set()).values(), childCount: 0 })
+        } else if (v !== parent.get(frame.id)) {
+          low.set(frame.id, Math.min(low.get(frame.id)!, disc.get(v)!))
+        }
+      } else {
+        // Done with this node, pop and update parent
+        stack.pop()
+        if (stack.length) {
+          const parentFrame = stack[stack.length - 1]
+          low.set(parentFrame.id, Math.min(low.get(parentFrame.id)!, low.get(frame.id)!))
+
+          // Check articulation point conditions
+          if (parent.get(parentFrame.id) !== null && low.get(frame.id)! >= disc.get(parentFrame.id)!) {
+            articulationPoints.add(parentFrame.id)
+          }
+        } else {
+          // Root node — articulation point if it has 2+ children
+          if (frame.childCount > 1) {
+            articulationPoints.add(frame.id)
+          }
+        }
+      }
+    }
+  }
+
+  if (!articulationPoints.size) return "No bridge files found — the graph stays connected if any single file is removed."
+
+  // Rank by how many files depend on them
+  const ranked = [...articulationPoints].map(id => {
+    const node = graph.nodes.get(id)!
+    return { id, connections: node.imports.length + node.importedBy.length }
+  }).sort((a, b) => b.connections - a.connections)
+
+  const lines = [`=== Bridge Files (${ranked.length} articulation points) ===`,
+    "Removing any of these disconnects parts of the graph:", ""]
+  for (const r of ranked.slice(0, 30)) {
+    lines.push(`  ${r.connections.toString().padStart(4)} connections  ${r.id}`)
+  }
+  if (ranked.length > 30) lines.push(`  ... and ${ranked.length - 30} more`)
+  return lines.join("\n")
+}
+
+function similar(graph: Graph, target: string): string {
+  if (!target) return "Usage: codemap similar <file>"
+  const node = findNode(graph, target)
+  if (!node) return `File not found: ${target}`
+
+  const myImports = new Set(node.imports)
+  const myImporters = new Set(node.importedBy)
+
+  const scores: { id: string; score: number; shared: number }[] = []
+  for (const [id, other] of graph.nodes) {
+    if (id === node.id) continue
+    const otherImports = new Set(other.imports)
+    const otherImporters = new Set(other.importedBy)
+
+    // Jaccard similarity on imports
+    const importUnion = new Set([...myImports, ...otherImports])
+    const importIntersect = [...myImports].filter(i => otherImports.has(i)).length
+
+    // Jaccard similarity on importers
+    const importerUnion = new Set([...myImporters, ...otherImporters])
+    const importerIntersect = [...myImporters].filter(i => otherImporters.has(i)).length
+
+    const importJaccard = importUnion.size ? importIntersect / importUnion.size : 0
+    const importerJaccard = importerUnion.size ? importerIntersect / importerUnion.size : 0
+
+    const score = (importJaccard + importerJaccard) / 2
+    const shared = importIntersect + importerIntersect
+    if (score > 0) scores.push({ id, score, shared })
+  }
+
+  scores.sort((a, b) => b.score - a.score)
+  const top = scores.slice(0, 20)
+  if (!top.length) return `No files similar to ${node.id}.`
+
+  const lines = [`=== Files similar to ${node.id} ===`, ""]
+  for (const s of top) {
+    lines.push(`  ${(s.score * 100).toFixed(1).padStart(5)}% similar  ${s.id}  (${s.shared} shared deps)`)
+  }
+  return lines.join("\n")
+}
+
+function hubs(graph: Graph): string {
+  // HITS algorithm — iterative
+  const iterations = 20
+  const ids = [...graph.nodes.keys()]
+  let hubScores = new Map<string, number>()
+  let authScores = new Map<string, number>()
+  for (const id of ids) { hubScores.set(id, 1); authScores.set(id, 1) }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Authority = sum of hub scores of nodes pointing to it
+    const newAuth = new Map<string, number>()
+    for (const id of ids) newAuth.set(id, 0)
+    for (const [id, node] of graph.nodes) {
+      for (const imp of node.imports) {
+        if (graph.nodes.has(imp)) {
+          newAuth.set(imp, (newAuth.get(imp) || 0) + (hubScores.get(id) || 0))
+        }
+      }
+    }
+
+    // Hub = sum of authority scores of nodes it points to
+    const newHub = new Map<string, number>()
+    for (const [id, node] of graph.nodes) {
+      let h = 0
+      for (const imp of node.imports) {
+        if (graph.nodes.has(imp)) h += (newAuth.get(imp) || 0)
+      }
+      newHub.set(id, h)
+    }
+
+    // Normalize
+    let hubNorm = 0, authNorm = 0
+    for (const v of newHub.values()) hubNorm += v * v
+    for (const v of newAuth.values()) authNorm += v * v
+    hubNorm = Math.sqrt(hubNorm) || 1
+    authNorm = Math.sqrt(authNorm) || 1
+    for (const id of ids) {
+      newHub.set(id, (newHub.get(id) || 0) / hubNorm)
+      newAuth.set(id, (newAuth.get(id) || 0) / authNorm)
+    }
+    hubScores = newHub
+    authScores = newAuth
+  }
+
+  const topHubs = ids.map(id => ({ id, score: hubScores.get(id) || 0 }))
+    .sort((a, b) => b.score - a.score).slice(0, 20)
+  const topAuth = ids.map(id => ({ id, score: authScores.get(id) || 0 }))
+    .sort((a, b) => b.score - a.score).slice(0, 20)
+
+  const lines = [`=== Hubs (orchestrators — import many things) ===`, ""]
+  for (const h of topHubs) {
+    if (h.score < 0.001) break
+    lines.push(`  ${(h.score * 100).toFixed(2).padStart(7)}  ${h.id}`)
+  }
+  lines.push("", `=== Authorities (core — everyone imports them) ===`, "")
+  for (const a of topAuth) {
+    if (a.score < 0.001) break
+    lines.push(`  ${(a.score * 100).toFixed(2).padStart(7)}  ${a.id}`)
+  }
+  return lines.join("\n")
+}
+
+function clusters(graph: Graph): string {
+  // Label propagation community detection (iterative, no randomness)
+  const labels = new Map<string, string>()
+  const ids = [...graph.nodes.keys()]
+  for (const id of ids) labels.set(id, id) // each node starts as its own community
+
+  // Build undirected adjacency
+  const adj = new Map<string, string[]>()
+  for (const [id, node] of graph.nodes) {
+    if (!adj.has(id)) adj.set(id, [])
+    for (const imp of node.imports) {
+      if (graph.nodes.has(imp)) {
+        adj.get(id)!.push(imp)
+        if (!adj.has(imp)) adj.set(imp, [])
+        adj.get(imp)!.push(id)
+      }
+    }
+  }
+
+  // Iterate — each node adopts the most common label among neighbors
+  for (let iter = 0; iter < 15; iter++) {
+    let changed = false
+    for (const id of ids) {
+      const neighbors = adj.get(id) || []
+      if (!neighbors.length) continue
+
+      const counts = new Map<string, number>()
+      for (const n of neighbors) {
+        const l = labels.get(n)!
+        counts.set(l, (counts.get(l) || 0) + 1)
+      }
+
+      let bestLabel = labels.get(id)!
+      let bestCount = 0
+      for (const [l, c] of counts) {
+        if (c > bestCount) { bestCount = c; bestLabel = l }
+      }
+
+      if (bestLabel !== labels.get(id)) {
+        labels.set(id, bestLabel)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+
+  // Group by label
+  const groups = new Map<string, string[]>()
+  for (const [id, label] of labels) {
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label)!.push(id)
+  }
+
+  // Sort by size, filter out singletons
+  const sorted = [...groups.values()]
+    .filter(g => g.length > 1)
+    .sort((a, b) => b.length - a.length)
+
+  if (!sorted.length) return "No clusters found — all files are independent."
+
+  const lines = [`=== Clusters (${sorted.length} communities, ${ids.length - sorted.reduce((s, g) => s + g.length, 0)} singletons excluded) ===`, ""]
+  for (let i = 0; i < Math.min(sorted.length, 20); i++) {
+    const cluster = sorted[i]
+    cluster.sort()
+
+    // Compute internal vs external edges
+    const clusterSet = new Set(cluster)
+    let internal = 0, external = 0
+    for (const id of cluster) {
+      const node = graph.nodes.get(id)!
+      for (const imp of node.imports) {
+        if (clusterSet.has(imp)) internal++
+        else if (graph.nodes.has(imp)) external++
+      }
+    }
+    const cohesion = internal + external > 0 ? ((internal / (internal + external)) * 100).toFixed(0) : "100"
+
+    lines.push(`Cluster ${i + 1} (${cluster.length} files, ${cohesion}% internal coupling):`)
+    for (const f of cluster.slice(0, 8)) lines.push(`  ${f}`)
+    if (cluster.length > 8) lines.push(`  ... and ${cluster.length - 8} more`)
+    lines.push("")
+  }
+  if (sorted.length > 20) lines.push(`... and ${sorted.length - 20} more clusters`)
+  return lines.join("\n")
+}
+
+function paths(graph: Graph, args: string): string {
+  const parts = args.split(/\s+/)
+  if (parts.length < 2) return "Usage: codemap paths <fileA> <fileB>"
+  const [a, b] = parts
+  const nodeA = findNode(graph, a)
+  const nodeB = findNode(graph, b)
+  if (!nodeA) return `File not found: ${a}`
+  if (!nodeB) return `File not found: ${b}`
+
+  // DFS to find all paths (with depth limit to prevent explosion)
+  const allPaths: string[][] = []
+  const maxPaths = 20
+  const maxDepth = 10
+
+  function dfs(current: string, target: string, path: string[], visited: Set<string>) {
+    if (allPaths.length >= maxPaths) return
+    if (path.length > maxDepth) return
+    if (current === target) { allPaths.push([...path]); return }
+
+    const node = graph.nodes.get(current)
+    if (!node) return
+    for (const imp of node.imports) {
+      if (graph.nodes.has(imp) && !visited.has(imp)) {
+        visited.add(imp)
+        path.push(imp)
+        dfs(imp, target, path, visited)
+        path.pop()
+        visited.delete(imp)
+      }
+    }
+  }
+
+  // Try A→B
+  dfs(nodeA.id, nodeB.id, [nodeA.id], new Set([nodeA.id]))
+
+  // Try B→A if no paths found
+  if (!allPaths.length) {
+    dfs(nodeB.id, nodeA.id, [nodeB.id], new Set([nodeB.id]))
+    if (allPaths.length) {
+      for (const p of allPaths) p.reverse()
+    }
+  }
+
+  if (!allPaths.length) return `No import paths found between ${nodeA.id} and ${nodeB.id} (searched up to ${maxDepth} hops).`
+
+  allPaths.sort((a, b) => a.length - b.length)
+  const lines = [`=== All paths: ${nodeA.id} → ${nodeB.id} (${allPaths.length} found) ===`, ""]
+  for (let i = 0; i < allPaths.length; i++) {
+    lines.push(`Path ${i + 1} (${allPaths[i].length - 1} hops):`)
+    lines.push("  " + allPaths[i].join(" → "))
+    lines.push("")
+  }
+  return lines.join("\n")
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function findNode(graph: Graph, target: string): GraphNode | undefined {
@@ -853,34 +1362,54 @@ if (!action || action === "--help" || action === "-h") {
 
 Usage: codemap [--dir <path>] <action> [target]
 
-Actions:
+Analysis:
+  stats                 Codebase overview (files, lines, imports, URLs)
   trace <file>          Show imports and importers of a file
-  blast-radius <file>   Show all files affected if a file changes
+  blast-radius <file>   All files affected if this changes
   phone-home            Find all files with external URLs
-  coupling <pattern>    Find files importing a package/pattern
-  dead-files            Find files nothing imports
+  coupling <pattern>    Files importing a package/pattern
+  dead-files            Files nothing imports
   circular              Detect circular dependency chains
   functions <file>      List exports in a file
   callers <name>        Find where a function is used
-  stats                 Show codebase statistics
   hotspots              Most coupled files (imports + importers)
+  size                  Files ranked by line count
   layers                Auto-detect architectural layers
   diff <ref>            Blast radius of changes since a git ref
   orphan-exports        Exports nothing uses
+
+Navigation:
   why <A> <B>           Shortest import path between two files
-  size                  Files ranked by line count
+  paths <A> <B>         ALL import paths between two files
+  subgraph <pattern>    Connected component around a file/pattern
+  similar <file>        Files with most similar import profiles
+
+Graph Theory:
+  pagerank              Recursive importance ranking
+  hubs                  Hub/authority analysis (HITS algorithm)
+  bridges               Articulation points (critical infrastructure)
+  clusters              Community detection (natural module boundaries)
+  islands               Disconnected components
+  dot [target]          Export as Graphviz DOT format
+
+Comparison:
   compare <dir>         Structural A/B diff vs another codebase
 
 Options:
   --dir <path>          Directory to scan (default: cwd)
 
 Examples:
-  codemap trace src/utils/auth.ts
-  codemap blast-radius src/services/api/client.ts
-  codemap phone-home
+  codemap stats
   codemap hotspots
+  codemap pagerank
+  codemap bridges
+  codemap hubs
+  codemap clusters
+  codemap similar src/utils/auth.ts
+  codemap paths src/cli.ts src/utils/auth.ts
+  codemap subgraph utils
+  codemap dot src/services | dot -Tpng -o graph.png
   codemap diff HEAD~5
-  codemap why src/cli.ts src/utils/auth.ts
   codemap compare ~/Desktop/old-version
   codemap --dir ~/Desktop/my-project stats`)
   process.exit(0)
@@ -910,5 +1439,14 @@ switch (action) {
   case "why": console.log(why(graph, target)); break
   case "size": console.log(size(graph)); break
   case "compare": console.log(compare(graph, target)); break
+  case "subgraph": console.log(subgraph(graph, target)); break
+  case "dot": console.log(dot(graph, target)); break
+  case "islands": console.log(islands(graph)); break
+  case "pagerank": console.log(pagerank(graph)); break
+  case "bridges": console.log(bridges(graph)); break
+  case "similar": console.log(similar(graph, target)); break
+  case "hubs": console.log(hubs(graph)); break
+  case "clusters": console.log(clusters(graph)); break
+  case "paths": console.log(paths(graph, target)); break
   default: console.error(`Unknown action: ${action}. Run 'codemap --help' for usage.`); process.exit(1)
 }
