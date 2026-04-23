@@ -4,7 +4,18 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (42 actions, multi-repo)")]
+#[command(name = "codemap", version, about = "Codebase dependency analysis (42 actions, multi-repo)", after_help = "\
+Actions:
+  Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
+                circular, exports/functions, callers, hotspots, size, layers, diff,
+                orphan-exports
+  Navigation:   why, paths, subgraph, similar
+  Graph Theory: pagerank, hubs, bridges, clusters, islands, dot
+  Functions:    call-graph, dead-functions, fn-info, diff-functions, complexity,
+                import-cost, churn, api-diff
+  Data Flow:    data-flow, taint, slice, trace-value, sinks
+  Cross-Lang:   lang-bridges, gpu-functions, monkey-patches, dispatch-map
+  Comparison:   compare")]
 struct Cli {
     /// Directory to scan (repeatable for multi-repo)
     #[arg(long = "dir", value_name = "PATH")]

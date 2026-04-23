@@ -2,25 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use regex::Regex;
 use crate::types::{Graph, escape_regex};
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    if len <= 3 {
-        return s;
-    }
-    let mut result = String::with_capacity(len + len / 3);
-    for (i, &b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
-            result.push(',');
-        }
-        result.push(b as char);
-    }
-    result
-}
+use crate::utils::format_number;
 
 fn ext_of(path: &str) -> String {
     match path.rfind('.') {

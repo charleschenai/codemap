@@ -5,6 +5,7 @@ use std::process::Command;
 use regex::Regex;
 
 use crate::types::Graph;
+use crate::utils::format_number;
 
 // ── call_graph ──────────────────────────────────────────────────────
 
@@ -685,24 +686,6 @@ pub fn api_diff(graph: &Graph, target: &str) -> String {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-/// Format a number with locale-style thousands separators (commas).
-fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    if len <= 3 {
-        return s;
-    }
-    let mut result = String::with_capacity(len + len / 3);
-    for (i, &b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
-            result.push(',');
-        }
-        result.push(b as char);
-    }
-    result
-}
 
 enum GitDiffResult {
     Ok(Vec<String>),

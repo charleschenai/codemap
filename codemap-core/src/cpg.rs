@@ -1,4 +1,5 @@
 use crate::types::*;
+use crate::utils::{truncate, pad_end};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // ── CPG Builder ─────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ fn build_cpg(graph: &Graph) -> CodePropertyGraph {
                 line: def.line,
                 name: def.name.clone(),
                 version: None,
-                expr: Some(safe_truncate(&def.rhs, 200)),
+                expr: Some(truncate(&def.rhs, 200)),
                 scope: Some(def.scope.clone()),
             });
         }
@@ -421,7 +422,7 @@ pub fn render_tree(trees: &[TreeNode], prefix: &str) -> Vec<String> {
         let is_last = i == trees.len() - 1;
         let conn = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
         let expr_part = match &t.node.expr {
-            Some(e) => format!("  {}", safe_truncate(e, 80)),
+            Some(e) => format!("  {}", truncate(e, 80)),
             None => String::new(),
         };
         lines.push(format!("{prefix}{conn}{}:{}  {}  {}{expr_part}",
@@ -444,15 +445,3 @@ pub fn render_tree(trees: &[TreeNode], prefix: &str) -> Vec<String> {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-fn safe_truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { return s.to_string(); }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
-    s[..end].to_string()
-}
-
-fn pad_end(s: &str, width: usize) -> String {
-    if s.len() >= width { return s.to_string(); }
-    format!("{s}{}", " ".repeat(width - s.len()))
-}

@@ -1,4 +1,5 @@
 pub mod types;
+pub mod utils;
 pub mod parser;
 pub mod resolve;
 pub mod scanner;

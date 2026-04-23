@@ -1,5 +1,6 @@
 use crate::cpg;
 use crate::types::*;
+use crate::utils::{truncate, pad_end};
 use std::collections::HashSet;
 
 pub fn data_flow(graph: &mut Graph, target: &str, _tree_mode: bool) -> String {
@@ -284,16 +285,3 @@ pub fn sinks(graph: &mut Graph, target: &str) -> String {
     lines.join("\n")
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { return s.to_string(); }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
-    s[..end].to_string()
-}
-
-fn pad_end(s: &str, width: usize) -> String {
-    if s.len() >= width { return s.to_string(); }
-    format!("{s}{}", " ".repeat(width - s.len()))
-}

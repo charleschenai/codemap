@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 38 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT export, A/B compare, data-flow CPG, taint analysis, backward slicing, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase structure with 42 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT export, A/B compare, data-flow CPG, taint analysis, backward slicing, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -12,7 +12,7 @@ allowed-tools:
 
 # /codemap — Codebase Dependency Analysis
 
-38 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
+42 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
 
 ## Usage
 
@@ -83,6 +83,14 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `slice <file>:<line>` | Backward slice — what feeds this line |
 | `trace-value <f>:<l>:<n>` | Forward trace — where does this value go |
 | `sinks [file]` | List all detected sinks |
+
+### Cross-Language
+| Action | What |
+|--------|------|
+| `lang-bridges [file]` | Show cross-language bridge edges (pybind11, PyO3, TORCH_LIBRARY, Triton, CUDA) |
+| `gpu-functions` | List all GPU-tagged functions (CUDA __global__, @triton.jit) |
+| `monkey-patches` | Show Python module-level class/function replacements |
+| `dispatch-map` | Show op→implementation mappings per device |
 
 ### Comparison
 | Action | What |

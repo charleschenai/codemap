@@ -1,4 +1,5 @@
 use crate::types::*;
+use crate::utils::truncate;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -75,7 +76,10 @@ fn grammar_to_language(grammar: &str) -> Option<Language> {
         "ruby" => Some(tree_sitter_ruby::LANGUAGE.into()),
         "c" => Some(tree_sitter_c::LANGUAGE.into()),
         "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
-        // PHP has no tree-sitter crate in deps — falls through to regex
+        "php" => {
+            // tree-sitter-php not available — regex fallback only
+            None
+        }
         _ => None,
     }
 }
@@ -1802,16 +1806,3 @@ fn regex_extract_exports(content: &str) -> Vec<String> {
     exports
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    // Find a valid char boundary at or before max
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s[..end].to_string()
-}

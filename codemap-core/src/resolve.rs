@@ -142,6 +142,43 @@ pub fn resolve_and_add(
         }
     }
 
+    // ── Python relative imports ────────────────────────────────────
+    if from_ext == ".py" && specifier.starts_with('.') {
+        let from_dir = Path::new(from_file).parent().unwrap_or(Path::new(""));
+        // Count leading dots for parent directory traversal
+        let dots = specifier.chars().take_while(|&c| c == '.').count();
+        let module = &specifier[dots..];
+
+        let mut base = from_dir.to_path_buf();
+        for _ in 1..dots {
+            base = base.parent().unwrap_or(Path::new("")).to_path_buf();
+        }
+
+        if module.is_empty() {
+            // from . import X — refers to __init__.py in current package
+            let candidate = base.join("__init__.py");
+            if candidate.exists() {
+                if let Ok(rel) = candidate.strip_prefix(scan_dir) {
+                    node_imports.push(normalize_path(&rel.to_string_lossy()));
+                    return;
+                }
+            }
+        } else {
+            // from .module import X — try module.py then module/__init__.py
+            let mod_path = module.replace('.', "/");
+            for suffix in &[".py", "/__init__.py"] {
+                let candidate = base.join(format!("{mod_path}{suffix}"));
+                if candidate.exists() {
+                    if let Ok(rel) = candidate.strip_prefix(scan_dir) {
+                        node_imports.push(normalize_path(&rel.to_string_lossy()));
+                        return;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     // ── 1. Relative imports ─────────────────────────────────────────
     if specifier.starts_with('.') {
         let from_dir = Path::new(from_file).parent().unwrap_or(Path::new(""));
