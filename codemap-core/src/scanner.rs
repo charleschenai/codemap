@@ -1,6 +1,6 @@
 use crate::parser;
 use crate::resolve::{self, ResolveContext};
-use crate::types::{Graph, GraphNode};
+use crate::types::{BridgeKind, Graph, GraphNode};
 use crate::{CodemapError, ScanOptions};
 
 use rayon::prelude::*;
@@ -178,6 +178,92 @@ struct ParsedFile {
     node: GraphNode,
 }
 
+// ── Bridge Resolution ──────────────────────────────────────────────
+
+/// Resolve cross-language bridge edges: match registrations to calls.
+fn resolve_bridge_edges(nodes: &mut HashMap<String, GraphNode>) {
+    // Build index: bridge_name → file_id for registrations
+    let mut registrations: HashMap<String, Vec<String>> = HashMap::new();
+    // Build index: cuda/triton kernel name → file_id
+    let mut gpu_kernels: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (id, node) in nodes.iter() {
+        for b in &node.bridges {
+            if b.kind.is_registration() {
+                registrations
+                    .entry(b.name.clone())
+                    .or_default()
+                    .push(id.clone());
+            }
+            if b.kind.is_gpu() {
+                gpu_kernels
+                    .entry(b.name.clone())
+                    .or_default()
+                    .push(id.clone());
+            }
+        }
+    }
+
+    // Collect edges to add (can't mutate while iterating)
+    let mut new_edges: Vec<(String, String)> = Vec::new();
+
+    for (id, node) in nodes.iter() {
+        for b in &node.bridges {
+            if b.kind.is_call() {
+                // Find matching registration
+                if let Some(reg_files) = registrations.get(&b.name) {
+                    for reg_file in reg_files {
+                        if reg_file != id {
+                            new_edges.push((id.clone(), reg_file.clone()));
+                        }
+                    }
+                }
+                // For CUDA launches, also link to kernel declarations
+                if b.kind == BridgeKind::CudaLaunch {
+                    if let Some(kernel_files) = gpu_kernels.get(&b.name) {
+                        for kf in kernel_files {
+                            if kf != id {
+                                new_edges.push((id.clone(), kf.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+            // For Triton launches, link to kernel declarations
+            if b.kind == BridgeKind::TritonLaunch {
+                if let Some(kernel_files) = gpu_kernels.get(&b.name) {
+                    for kf in kernel_files {
+                        if kf != id {
+                            new_edges.push((id.clone(), kf.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply edges
+    for (from, to) in &new_edges {
+        if let Some(node) = nodes.get_mut(from) {
+            if !node.imports.contains(to) {
+                node.imports.push(to.clone());
+            }
+        }
+        if let Some(node) = nodes.get_mut(to) {
+            if !node.imported_by.contains(from) {
+                node.imported_by.push(from.clone());
+            }
+        }
+    }
+
+    if !new_edges.is_empty() {
+        eprintln!(
+            "Bridge edges: {} cross-language links resolved",
+            new_edges.len()
+        );
+    }
+}
+
 // ── Single-directory scan ───────────────────────────────────────────
 
 fn scan_single_dir(
@@ -319,6 +405,9 @@ fn scan_single_dir(
         }
     }
 
+    // Resolve cross-language bridge edges
+    resolve_bridge_edges(&mut nodes);
+
     // Save cache
     save_cache(&dir_str, &nodes);
 
@@ -444,6 +533,9 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
                 }
             }
         }
+
+        // Resolve cross-language bridge edges
+        resolve_bridge_edges(&mut merged_nodes);
 
         let elapsed = t0.elapsed().as_millis();
         eprintln!("Scanned {} files in {}ms\n", merged_nodes.len(), elapsed);
