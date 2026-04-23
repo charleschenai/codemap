@@ -3,6 +3,7 @@ pub mod navigation;
 pub mod graph_theory;
 pub mod functions;
 pub mod dataflow;
+pub mod bridges;
 pub mod compare;
 
 use crate::types::Graph;
@@ -54,6 +55,9 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "sinks" => Ok(dataflow::sinks(graph, target)),
         // Comparison (1)
         "compare" => Ok(compare::compare(graph, target)),
+        // Cross-Language (2)
+        "lang-bridges" => Ok(bridges::bridges(graph, target)),
+        "gpu-functions" => Ok(bridges::gpu_functions(graph)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
