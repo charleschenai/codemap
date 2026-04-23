@@ -2,7 +2,7 @@
 
 **Know your codebase before you touch it.**
 
-codemap builds a full import graph of any project and answers 25 structural questions about it — in under 500ms. One file. Zero dependencies. No config.
+codemap builds a full import graph of any project and answers 28 structural questions about it. AST-powered for TS/JS, scope-aware for Python/Rust/Go/Java/Ruby/PHP. One file. Zero dependencies. No config.
 
 ```
 $ codemap stats
@@ -107,6 +107,24 @@ Shortest path (1 hops):
 | `codemap functions <file>` | Exports in a file |
 | `codemap callers <name>` | Where a function/class is referenced |
 
+### Function-Level (AST)
+
+| Command | What it tells you |
+|---------|-------------------|
+| `codemap call-graph [file]` | Cross-file function call graph — who calls what |
+| `codemap dead-functions` | Exported functions that nothing in the codebase calls |
+| `codemap fn-info <file>` | Functions in a file with their calls, line ranges, export status |
+
+```
+$ codemap fn-info src/Tool.ts
+=== Functions in src/Tool.ts (4) ===
+
+  L312-319  filterToolProgressMessages() [exported] → calls: filter
+  L348-349  toolMatchesName() [exported]
+  L358-360  findToolByName() [exported] → calls: find, toolMatchesName
+  L783-792  buildTool() [exported]
+```
+
 ### Compare and Visualize
 
 | Command | What it tells you |
@@ -114,30 +132,18 @@ Shortest path (1 hops):
 | `codemap compare <dir>` | Structural A/B diff — files, imports, coupling, URLs |
 | `codemap dot [target]` | Graphviz DOT output (pipe to `dot -Tpng -o graph.png`) |
 
-```
-$ codemap compare ~/Desktop/old-version
-=== Compare: current vs /Users/you/Desktop/old-version ===
-
-           Current    Other    Delta
-Files:        1946     1946        0
-Lines:      495552   495552        0
-Imports:     14267    14267        0
-URLs:          103      103        0
-
-Added files (30):
-  + src/services/api/newClient.ts
-  ...
-```
-
 ## How It Works
 
 1. Walks the directory tree (skips `node_modules`, `.git`, `dist`, `build`)
-2. Regex-extracts all `import`/`export`/`require`/dynamic `import()` statements
-3. Resolves imports (relative paths, tsconfig path aliases, `.js` → `.ts` swaps)
-4. Builds a directed graph with reverse edges (importedBy)
-5. Runs the requested analysis on the graph
-
-No AST parsing. No tree-sitter. No dependencies to install. The tradeoff is precision on edge cases — but for structural analysis, regex catches 99% of real imports and runs 100x faster.
+2. **TS/JS**: Uses `Bun.Transpiler` AST for accurate imports/exports (strips type-only imports, catches re-exports, default exports, enums)
+3. **Other languages**: Regex extraction as fallback
+4. Resolves imports (relative paths, tsconfig path aliases, `.js` → `.ts` swaps)
+5. Extracts function declarations with scope-aware boundary tracking:
+   - **Brace-delimited** (TS/JS/Rust/Go/Java/PHP): tracks `{`/`}` depth
+   - **Indentation-based** (Python): tracks indent level for `def`/`async def`
+   - **End-delimited** (Ruby): tracks `def`/`end` blocks
+6. Identifies function calls within each function body
+7. Builds a directed graph with reverse edges (importedBy) and function-level call edges
 
 ### Algorithms
 
@@ -147,10 +153,16 @@ No AST parsing. No tree-sitter. No dependencies to install. The tradeoff is prec
 - **Clusters** — Label propagation with convergence detection
 - **Similarity** — Jaccard coefficient on combined import + importer sets
 - **Layers** — BFS from entry points with cycle-safe first-visit depth assignment
+- **Call Graph** — Cross-file function resolution via export map + import edges
 
 ## Supported Languages
 
-TypeScript, JavaScript, Python, Rust, Go, Java, Ruby, PHP — anything with `import`, `from`, or `require` statements.
+TypeScript, JavaScript, Python, Rust, Go, Java, Ruby, PHP.
+
+- **TS/JS**: Full AST via Bun.Transpiler (imports, exports) + scope-aware function extraction
+- **Python/Ruby**: Language-specific scope tracking (indentation / `end` blocks)
+- **Rust/Go/Java/PHP**: Brace-delimited scope tracking with language-specific patterns
+- **All languages**: URL extraction, comment/string stripping
 
 ## Plugin
 
