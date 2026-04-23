@@ -357,9 +357,11 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
     // Cache file contents, read each file once
     let mut content_cache: HashMap<&str, Vec<String>> = HashMap::new();
 
-    let branch_re =
-        Regex::new(r"\b(if|else if|for|while|do|switch|case|catch)\b|\?\?|&&|\|\||\?(?=[^?.])")
-            .unwrap();
+    // Rust regex doesn't support lookahead, so we use two regexes
+    let keyword_re = Regex::new(r"\b(if|else if|for|while|do|switch|case|catch)\b").unwrap();
+    let operator_re = Regex::new(r"\?\?|&&|\|\|").unwrap();
+    // For ternary ?, we count ? that aren't ?? or ?. (optional chaining)
+    let ternary_re = Regex::new(r"\?[^?.]").unwrap();
 
     for file_id in &files_to_check {
         let node = match graph.nodes.get(*file_id) {
@@ -384,7 +386,7 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
             let start = if f.start_line > 0 { f.start_line - 1 } else { 0 };
             let end = f.end_line.min(file_lines.len());
             for line in &file_lines[start..end] {
-                for _ in branch_re.find_iter(line) {
+                for _ in keyword_re.find_iter(line).chain(operator_re.find_iter(line)).chain(ternary_re.find_iter(line)) {
                     cc += 1;
                 }
             }
