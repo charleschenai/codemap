@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", about = "Codebase dependency analysis (40 actions, multi-repo)")]
+#[command(name = "codemap", about = "Codebase dependency analysis (42 actions, multi-repo)")]
 struct Cli {
     /// Directory to scan (repeatable for multi-repo)
     #[arg(long = "dir", value_name = "PATH")]
