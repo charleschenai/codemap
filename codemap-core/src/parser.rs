@@ -1341,6 +1341,63 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
             namespace: None,
         });
     }
+
+    // Module monkey-patching: module.path.ClassName = ReplacementClass
+    // Pattern: dotted.path.Name = SomeName (where Name is capitalized)
+    let monkey_re = Regex::new(r#"(\w+(?:\.\w+)+)\.([A-Z]\w+)\s*=\s*([A-Z]\w+)"#).unwrap();
+    for caps in monkey_re.captures_iter(content) {
+        let full_path = format!("{}.{}", &caps[1], &caps[2]);
+        let original = caps[2].to_string();
+        let replacement = caps[3].to_string();
+        if original != replacement {
+            let pos = caps.get(0).unwrap().start();
+            let line = content[..pos].matches('\n').count() + 1;
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::MonkeyPatch,
+                name: original,
+                target: Some(replacement),
+                line,
+                namespace: Some(full_path),
+            });
+        }
+    }
+
+    // torch.autograd.Function subclass
+    // Pattern: class Name(torch.autograd.Function): or class Name(autograd.Function):
+    let autograd_re = Regex::new(r#"class\s+(\w+)\s*\(\s*(?:torch\.)?autograd\.Function\s*\)"#).unwrap();
+    for caps in autograd_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::AutogradFunc,
+            name: name.clone(),
+            target: Some(name),
+            line,
+            namespace: None,
+        });
+    }
+
+    // .apply() invocations for autograd functions: ClassName.apply(args)
+    let apply_re = Regex::new(r#"(\w+)\s*\.\s*apply\s*\("#).unwrap();
+    for caps in apply_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        // Only if the name starts with uppercase (likely a class)
+        if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            let pos = caps.get(0).unwrap().start();
+            let line = content[..pos].matches('\n').count() + 1;
+            // Skip if it's a common non-autograd .apply (like pd.apply)
+            if name != "DataFrame" && name != "Series" && name != "GroupBy" {
+                bridges.push(BridgeInfo {
+                    kind: BridgeKind::AutogradFunc,
+                    name: format!("{name}.apply"),
+                    target: Some(name),
+                    line,
+                    namespace: None,
+                });
+            }
+        }
+    }
 }
 
 fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {

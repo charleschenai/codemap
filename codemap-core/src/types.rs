@@ -35,6 +35,8 @@ pub enum BridgeKind {
     TritonLaunch,    // Python kernel[grid](args)
     CudaKernel,      // C++ __global__ function
     CudaLaunch,      // C++ kernel<<<grid>>>(args)
+    MonkeyPatch,     // Python module.Class = Replacement
+    AutogradFunc,    // Python torch.autograd.Function subclass
 }
 
 impl BridgeKind {
@@ -50,6 +52,8 @@ impl BridgeKind {
             BridgeKind::TritonLaunch => "triton_launch",
             BridgeKind::CudaKernel => "cuda_kernel",
             BridgeKind::CudaLaunch => "cuda_launch",
+            BridgeKind::MonkeyPatch => "monkey_patch",
+            BridgeKind::AutogradFunc => "autograd_func",
         }
     }
 
