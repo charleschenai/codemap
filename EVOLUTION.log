@@ -7,3 +7,6 @@
 [2026-04-23 16:08] fix: eliminate final 2 clippy warnings — &mut Vec→&mut slice, allow too_many_arguments on DFS
   source: cargo clippy — ptr_arg, too_many_arguments
 
+[2026-04-23 16:09] clean: remove unused once_cell dependency
+  source: grep — no references in source code
+

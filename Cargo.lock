@@ -146,7 +146,6 @@ name = "codemap-core"
 version = "4.1.0"
 dependencies = [
  "bincode",
- "once_cell",
  "rayon",
  "regex",
  "serde",
