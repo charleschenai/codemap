@@ -40,6 +40,14 @@ const SUPPORTED_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".
 
 // ── Types ─────────────────────────────────────────────────────────────
 
+interface FunctionInfo {
+  name: string
+  startLine: number
+  endLine: number
+  calls: string[]       // function names called within this function
+  isExported: boolean
+}
+
 interface GraphNode {
   id: string
   imports: string[]
@@ -47,11 +55,337 @@ interface GraphNode {
   urls: string[]
   exports: string[]
   lines: number
+  functions: FunctionInfo[]  // function-level data (AST/scope-aware)
 }
 
 interface Graph {
   nodes: Map<string, GraphNode>
   scanDir: string
+}
+
+// ── AST / Scope-Aware Parsing ────────────────────────────────────────
+
+const BUN_LOADER: Record<string, string> = {
+  ".ts": "ts", ".tsx": "tsx", ".js": "js", ".jsx": "jsx", ".mjs": "js", ".cjs": "js"
+}
+
+const CALL_RE = /\b([a-zA-Z_$][\w$]*)\s*\(/g
+const FUNC_KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "throw", "new", "typeof", "instanceof", "await", "yield", "delete", "void", "import", "export", "from", "const", "let", "var", "else", "do", "try", "finally", "case", "break", "continue", "in", "of", "with", "debugger", "super", "this", "class", "extends", "implements"])
+
+/**
+ * Strip comments and string literals from source code.
+ * Returns cleaned source with original line structure preserved (for line number accuracy).
+ */
+function stripCommentsAndStrings(content: string): string {
+  // Replace string contents and comments with spaces (preserving newlines)
+  let result = ""
+  let i = 0
+  while (i < content.length) {
+    const ch = content[i]
+    // Line comment
+    if (ch === "/" && content[i + 1] === "/") {
+      while (i < content.length && content[i] !== "\n") { result += " "; i++ }
+      continue
+    }
+    // Block comment
+    if (ch === "/" && content[i + 1] === "*") {
+      i += 2; result += "  "
+      while (i < content.length && !(content[i] === "*" && content[i + 1] === "/")) {
+        result += content[i] === "\n" ? "\n" : " "; i++
+      }
+      if (i < content.length) { result += "  "; i += 2 }
+      continue
+    }
+    // String literals
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch
+      result += " "; i++
+      while (i < content.length) {
+        if (content[i] === "\\" && quote !== "`") { result += "  "; i += 2; continue }
+        if (content[i] === quote) { result += " "; i++; break }
+        result += content[i] === "\n" ? "\n" : " "; i++
+      }
+      continue
+    }
+    // Python triple-quote strings
+    if ((ch === '"' || ch === "'") && content.substring(i, i + 3) === ch.repeat(3)) {
+      const triple = ch.repeat(3)
+      result += "   "; i += 3
+      while (i < content.length && content.substring(i, i + 3) !== triple) {
+        result += content[i] === "\n" ? "\n" : " "; i++
+      }
+      if (i < content.length) { result += "   "; i += 3 }
+      continue
+    }
+    // Python # comments
+    if (ch === "#") {
+      while (i < content.length && content[i] !== "\n") { result += " "; i++ }
+      continue
+    }
+    result += ch; i++
+  }
+  return result
+}
+
+/**
+ * Extract functions from brace-delimited languages (TS/JS/Rust/Go/Java/PHP).
+ * Tracks brace depth to identify function boundaries.
+ */
+function extractFunctionsBrace(content: string, cleanContent: string, lang: string): FunctionInfo[] {
+  const functions: FunctionInfo[] = []
+  const lines = cleanContent.split("\n")
+
+  // Language-specific function declaration patterns
+  let funcDeclRe: RegExp
+  switch (lang) {
+    case "rust":
+      funcDeclRe = /(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/g; break
+    case "go":
+      funcDeclRe = /func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)/g; break
+    case "java":
+      funcDeclRe = /(?:public|private|protected|static|final|abstract|synchronized|native)?\s*(?:public|private|protected|static|final|abstract|synchronized|native)?\s*(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(/g; break
+    case "php":
+      funcDeclRe = /(?:public|private|protected|static)?\s*function\s+(\w+)/g; break
+    default: // ts/js
+      funcDeclRe = /(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$]\w*)\s*=>|(\w+)\s*\([^)]*\)\s*\{)/g
+      break
+  }
+
+  // Find each function declaration and its body
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx]
+    funcDeclRe.lastIndex = 0
+    const match = funcDeclRe.exec(line)
+    if (!match) continue
+
+    const name = match[1] || match[2] || match[3]
+    if (!name) continue
+
+    // Find the opening brace
+    let braceStart = -1
+    let searchLine = lineIdx
+    while (searchLine < lines.length && braceStart === -1) {
+      const idx = lines[searchLine].indexOf("{")
+      if (idx !== -1) braceStart = searchLine
+      else searchLine++
+      if (searchLine > lineIdx + 3) break // give up if brace not found within 3 lines
+    }
+    if (braceStart === -1) continue
+
+    // Track braces to find end
+    let depth = 0
+    let endLine = braceStart
+    for (let i = braceStart; i < lines.length; i++) {
+      for (const ch of lines[i]) {
+        if (ch === "{") depth++
+        if (ch === "}") { depth--; if (depth === 0) { endLine = i; break } }
+      }
+      if (depth === 0) break
+    }
+
+    // Extract calls within function body
+    const bodyLines = lines.slice(braceStart, endLine + 1)
+    const calls: string[] = []
+    const seen = new Set<string>()
+    for (const bodyLine of bodyLines) {
+      CALL_RE.lastIndex = 0
+      let cm: RegExpExecArray | null
+      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
+        const callee = cm[1]
+        if (callee !== name && !FUNC_KEYWORDS.has(callee) && !seen.has(callee)) {
+          seen.add(callee)
+          calls.push(callee)
+        }
+      }
+    }
+
+    // Check if exported
+    const origLine = content.split("\n")[lineIdx] || ""
+    const isExported = /\bexport\b/.test(origLine) || (lang === "go" && name[0] === name[0].toUpperCase()) || (lang === "rust" && /\bpub\b/.test(origLine)) || (lang === "java" && /\bpublic\b/.test(origLine))
+
+    functions.push({ name, startLine: lineIdx + 1, endLine: endLine + 1, calls, isExported })
+  }
+
+  return functions
+}
+
+/**
+ * Extract functions from Python (indentation-based).
+ */
+function extractFunctionsPython(content: string, cleanContent: string): FunctionInfo[] {
+  const functions: FunctionInfo[] = []
+  const lines = cleanContent.split("\n")
+  const origLines = content.split("\n")
+
+  const pyFuncRe = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/
+  const pyClassMethodRe = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(self/
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = pyFuncRe.exec(lines[i])
+    if (!match) continue
+
+    const indent = match[1].length
+    const name = match[2]
+    const startLine = i + 1
+
+    // Find end by indentation
+    let endLine = i + 1
+    for (let j = i + 1; j < lines.length; j++) {
+      const trimmed = lines[j].trim()
+      if (trimmed === "") continue
+      const lineIndent = lines[j].length - lines[j].trimStart().length
+      if (lineIndent <= indent) break
+      endLine = j + 1
+    }
+
+    // Extract calls within body
+    const bodyLines = lines.slice(i + 1, endLine)
+    const calls: string[] = []
+    const seen = new Set<string>()
+    for (const bodyLine of bodyLines) {
+      CALL_RE.lastIndex = 0
+      let cm: RegExpExecArray | null
+      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
+        const callee = cm[1]
+        if (callee !== name && !FUNC_KEYWORDS.has(callee) && !seen.has(callee) && callee !== "self" && callee !== "cls" && callee !== "print" && callee !== "range" && callee !== "len" && callee !== "str" && callee !== "int" && callee !== "float" && callee !== "list" && callee !== "dict" && callee !== "set" && callee !== "tuple" && callee !== "bool" && callee !== "type" && callee !== "isinstance" && callee !== "issubclass" && callee !== "hasattr" && callee !== "getattr" && callee !== "setattr") {
+          seen.add(callee)
+          calls.push(callee)
+        }
+      }
+    }
+
+    const isExported = !name.startsWith("_")
+    functions.push({ name, startLine, endLine, calls, isExported })
+  }
+
+  return functions
+}
+
+/**
+ * Extract functions from Ruby (end-delimited).
+ */
+function extractFunctionsRuby(content: string, cleanContent: string): FunctionInfo[] {
+  const functions: FunctionInfo[] = []
+  const lines = cleanContent.split("\n")
+
+  const rubyFuncRe = /\bdef\s+(?:self\.)?(\w+[!?]?)/
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = rubyFuncRe.exec(lines[i])
+    if (!match) continue
+
+    const name = match[1]
+    let endLine = i + 1
+    let depth = 1
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const trimmed = lines[j].trim()
+      if (/\b(def|class|module|do|if|unless|while|until|for|case|begin)\b/.test(trimmed) && !trimmed.endsWith("end")) depth++
+      if (trimmed === "end" || trimmed.startsWith("end ") || trimmed.startsWith("end;")) { depth--; if (depth === 0) { endLine = j + 1; break } }
+    }
+
+    const bodyLines = lines.slice(i + 1, endLine)
+    const calls: string[] = []
+    const seen = new Set<string>()
+    for (const bodyLine of bodyLines) {
+      CALL_RE.lastIndex = 0
+      let cm: RegExpExecArray | null
+      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
+        const callee = cm[1]
+        if (callee !== name && !seen.has(callee) && callee !== "puts" && callee !== "require" && callee !== "include" && callee !== "attr_accessor" && callee !== "attr_reader") {
+          seen.add(callee)
+          calls.push(callee)
+        }
+      }
+    }
+
+    functions.push({ name, startLine: i + 1, endLine, calls, isExported: !name.startsWith("_") })
+  }
+
+  return functions
+}
+
+/**
+ * Parse a file using AST (Bun.Transpiler for TS/JS) or scope-aware extraction.
+ * Returns { imports, exports, functions }.
+ */
+function parseFile(filePath: string, content: string, ext: string, scanDir: string, node: GraphNode): void {
+  const cleanContent = stripCommentsAndStrings(content)
+
+  // --- Imports & Exports ---
+  const bunLoader = BUN_LOADER[ext]
+  if (bunLoader) {
+    // Use Bun.Transpiler for accurate TS/JS parsing
+    try {
+      const transpiler = new Bun.Transpiler({ loader: bunLoader as any })
+      const scan = transpiler.scan(content)
+
+      // Imports from Bun
+      for (const imp of scan.imports) {
+        resolveAndAdd(imp.path, filePath, scanDir, node)
+      }
+
+      // Also catch dynamic imports via regex (Bun.scan doesn't report them)
+      let m: RegExpExecArray | null
+      DYNAMIC_IMPORT_RE.lastIndex = 0
+      while ((m = DYNAMIC_IMPORT_RE.exec(cleanContent)) !== null) {
+        if (m[1]) resolveAndAdd(m[1], filePath, scanDir, node)
+      }
+
+      // Exports from Bun
+      node.exports = [...scan.exports].filter(e => e !== "default")
+      // Also add default export with a more useful name
+      if (scan.exports.includes("default")) {
+        const defaultMatch = /export\s+default\s+(?:class|function\s*\*?)\s+(\w+)/.exec(content)
+        if (defaultMatch) node.exports.push(defaultMatch[1])
+        else node.exports.push("default")
+      }
+    } catch {
+      // Fallback to regex if Bun fails
+      fallbackRegexParse(content, cleanContent, filePath, scanDir, node)
+    }
+  } else {
+    // Non-JS/TS: use regex
+    fallbackRegexParse(content, cleanContent, filePath, scanDir, node)
+  }
+
+  // --- URLs (always regex) ---
+  let m: RegExpExecArray | null
+  URL_RE.lastIndex = 0
+  while ((m = URL_RE.exec(content)) !== null) {
+    const url = m[1]
+    if (!url.includes("localhost") && !url.includes("127.0.0.1") && !url.includes("example.com")) {
+      node.urls.push(url.split("?")[0].substring(0, 120))
+    }
+  }
+
+  // --- Function extraction ---
+  const lang = ext === ".py" ? "python" : ext === ".rs" ? "rust" : ext === ".go" ? "go" : ext === ".java" ? "java" : ext === ".rb" ? "ruby" : ext === ".php" ? "php" : "js"
+
+  if (lang === "python") {
+    node.functions = extractFunctionsPython(content, cleanContent)
+  } else if (lang === "ruby") {
+    node.functions = extractFunctionsRuby(content, cleanContent)
+  } else {
+    node.functions = extractFunctionsBrace(content, cleanContent, lang)
+  }
+}
+
+function fallbackRegexParse(content: string, cleanContent: string, filePath: string, scanDir: string, node: GraphNode): void {
+  let m: RegExpExecArray | null
+  IMPORT_RE.lastIndex = 0
+  while ((m = IMPORT_RE.exec(cleanContent)) !== null) {
+    const target = m[1] || m[2]
+    if (target) resolveAndAdd(target, filePath, scanDir, node)
+  }
+  DYNAMIC_IMPORT_RE.lastIndex = 0
+  while ((m = DYNAMIC_IMPORT_RE.exec(cleanContent)) !== null) {
+    if (m[1]) resolveAndAdd(m[1], filePath, scanDir, node)
+  }
+  EXPORT_RE.lastIndex = 0
+  while ((m = EXPORT_RE.exec(cleanContent)) !== null) {
+    node.exports.push(m[1])
+  }
 }
 
 // ── Resolution ───────────────────────────────────────────────────────
@@ -172,7 +506,7 @@ function scanDirectory(dir: string): Graph {
   }
   walk(dir)
 
-  // Parse each file
+  // Parse each file using AST (TS/JS) or scope-aware extraction
   for (const file of allFiles) {
     let content: string
     try {
@@ -182,6 +516,7 @@ function scanDirectory(dir: string): Graph {
     }
 
     const id = relative(dir, file)
+    const ext = extname(file)
     const node: GraphNode = {
       id,
       imports: [],
@@ -189,40 +524,10 @@ function scanDirectory(dir: string): Graph {
       urls: [],
       exports: [],
       lines: content.split("\n").length,
+      functions: [],
     }
 
-    // Extract imports (static + re-exports)
-    let m: RegExpExecArray | null
-    IMPORT_RE.lastIndex = 0
-    while ((m = IMPORT_RE.exec(content)) !== null) {
-      const target = m[1] || m[2]
-      if (!target) continue
-      resolveAndAdd(target, file, dir, node)
-    }
-
-    // Extract dynamic imports: import('./foo'), await import('./foo')
-    DYNAMIC_IMPORT_RE.lastIndex = 0
-    while ((m = DYNAMIC_IMPORT_RE.exec(content)) !== null) {
-      const target = m[1]
-      if (!target) continue
-      resolveAndAdd(target, file, dir, node)
-    }
-
-    // Extract URLs
-    URL_RE.lastIndex = 0
-    while ((m = URL_RE.exec(content)) !== null) {
-      const url = m[1]
-      if (!url.includes("localhost") && !url.includes("127.0.0.1") && !url.includes("example.com")) {
-        node.urls.push(url.split("?")[0].substring(0, 120))
-      }
-    }
-
-    // Extract exports
-    EXPORT_RE.lastIndex = 0
-    while ((m = EXPORT_RE.exec(content)) !== null) {
-      node.exports.push(m[1])
-    }
-
+    parseFile(file, content, ext, dir, node)
     nodes.set(id, node)
   }
 
@@ -1328,6 +1633,125 @@ function paths(graph: Graph, args: string): string {
   return lines.join("\n")
 }
 
+// ── Function-Level Actions ───────────────────────────────────────────
+
+function callGraph(graph: Graph, target: string): string {
+  // Build cross-file call graph: function → function (with file context)
+  // If target is given, show call graph for that file only
+
+  // Build a map of all exported function names → file
+  const exportMap = new Map<string, string[]>() // funcName → [file1, file2, ...]
+  for (const [id, node] of graph.nodes) {
+    for (const fn of node.functions) {
+      if (fn.isExported) {
+        if (!exportMap.has(fn.name)) exportMap.set(fn.name, [])
+        exportMap.get(fn.name)!.push(id)
+      }
+    }
+  }
+
+  const edges: { from: string; fromFunc: string; to: string; toFunc: string }[] = []
+  const filesToScan = target ? [findNode(graph, target)].filter(Boolean).map(n => n!.id) : [...graph.nodes.keys()]
+
+  for (const fileId of filesToScan) {
+    const node = graph.nodes.get(fileId)
+    if (!node) continue
+
+    for (const fn of node.functions) {
+      for (const callName of fn.calls) {
+        // Check if this call resolves to an exported function in an imported file
+        const importedFiles = new Set(node.imports.filter(i => graph.nodes.has(i)))
+        const targets = exportMap.get(callName) || []
+
+        for (const targetFile of targets) {
+          if (importedFiles.has(targetFile) || targetFile === fileId) {
+            edges.push({ from: fileId, fromFunc: fn.name, to: targetFile, toFunc: callName })
+          }
+        }
+      }
+    }
+  }
+
+  if (!edges.length) return target ? `No cross-function calls found in ${target}.` : "No cross-file function calls found."
+
+  // Group by source
+  const grouped = new Map<string, typeof edges>()
+  for (const e of edges) {
+    const key = `${e.from}:${e.fromFunc}`
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key)!.push(e)
+  }
+
+  const lines = [`=== Call Graph${target ? ` for ${target}` : ""} (${edges.length} cross-function calls) ===`, ""]
+  const sorted = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [source, calls] of sorted.slice(0, 50)) {
+    lines.push(`  ${source}:`)
+    for (const c of calls) {
+      lines.push(`    → ${c.to}:${c.toFunc}`)
+    }
+  }
+  if (sorted.length > 50) lines.push(`  ... and ${sorted.length - 50} more`)
+  return lines.join("\n")
+}
+
+function deadFunctions(graph: Graph): string {
+  // Find exported functions that are never called from any other file
+  const allCalls = new Map<string, Set<string>>() // funcName → set of files that call it
+
+  for (const [id, node] of graph.nodes) {
+    for (const fn of node.functions) {
+      for (const callName of fn.calls) {
+        if (!allCalls.has(callName)) allCalls.set(callName, new Set())
+        allCalls.get(callName)!.add(id)
+      }
+    }
+  }
+
+  const dead: { file: string; name: string; line: number }[] = []
+
+  for (const [id, node] of graph.nodes) {
+    for (const fn of node.functions) {
+      if (!fn.isExported) continue
+
+      // Check if any OTHER file calls this function
+      const callers = allCalls.get(fn.name)
+      const calledExternally = callers ? [...callers].some(callerId => callerId !== id) : false
+
+      if (!calledExternally) {
+        dead.push({ file: id, name: fn.name, line: fn.startLine })
+      }
+    }
+  }
+
+  if (!dead.length) return "No dead exported functions found."
+  dead.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
+
+  const lines = [`${dead.length} exported functions with no external callers:`, ""]
+  let lastFile = ""
+  for (const d of dead.slice(0, 100)) {
+    if (d.file !== lastFile) { lines.push(`  ${d.file}:`); lastFile = d.file }
+    lines.push(`    L${d.line}  ${d.name}()`)
+  }
+  if (dead.length > 100) lines.push(`  ... and ${dead.length - 100} more`)
+  return lines.join("\n")
+}
+
+function fnInfo(graph: Graph, target: string): string {
+  if (!target) return "Usage: codemap fn-info <file>"
+  const node = findNode(graph, target)
+  if (!node) return `File not found: ${target}`
+
+  if (!node.functions.length) return `No functions found in ${node.id}`
+
+  const lines = [`=== Functions in ${node.id} (${node.functions.length}) ===`, ""]
+  for (const fn of node.functions) {
+    const exported = fn.isExported ? " [exported]" : ""
+    const callList = fn.calls.length ? ` → calls: ${fn.calls.join(", ")}` : ""
+    lines.push(`  L${fn.startLine}-${fn.endLine}  ${fn.name}()${exported}${callList}`)
+  }
+  return lines.join("\n")
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function findNode(graph: Graph, target: string): GraphNode | undefined {
@@ -1392,6 +1816,11 @@ Graph Theory:
   islands               Disconnected components
   dot [target]          Export as Graphviz DOT format
 
+Function-Level (AST):
+  call-graph [file]     Cross-file function call graph
+  dead-functions        Exported functions nothing calls
+  fn-info <file>        Functions in a file with their calls
+
 Comparison:
   compare <dir>         Structural A/B diff vs another codebase
 
@@ -1403,13 +1832,12 @@ Examples:
   codemap hotspots
   codemap pagerank
   codemap bridges
-  codemap hubs
-  codemap clusters
+  codemap call-graph src/utils/auth.ts
+  codemap dead-functions
+  codemap fn-info src/main.tsx
   codemap similar src/utils/auth.ts
   codemap paths src/cli.ts src/utils/auth.ts
-  codemap subgraph utils
   codemap dot src/services | dot -Tpng -o graph.png
-  codemap diff HEAD~5
   codemap compare ~/Desktop/old-version
   codemap --dir ~/Desktop/my-project stats`)
   process.exit(0)
@@ -1448,5 +1876,8 @@ switch (action) {
   case "hubs": console.log(hubs(graph)); break
   case "clusters": console.log(clusters(graph)); break
   case "paths": console.log(paths(graph, target)); break
+  case "call-graph": console.log(callGraph(graph, target)); break
+  case "dead-functions": console.log(deadFunctions(graph)); break
+  case "fn-info": console.log(fnInfo(graph, target)); break
   default: console.error(`Unknown action: ${action}. Run 'codemap --help' for usage.`); process.exit(1)
 }
