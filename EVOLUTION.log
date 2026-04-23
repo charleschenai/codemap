@@ -22,3 +22,6 @@
 [2026-04-23 16:17] fix: git diff/churn/api-diff broken — "--" before git ref treated ref as filename
   source: manual testing — diff HEAD~1 returned "No files changed"
 
+[2026-04-23 16:18] fix: why/paths accept arrow separator between file arguments
+  source: manual testing — "why parser.rs -> lib.rs" failed with "File not found: ->"
+

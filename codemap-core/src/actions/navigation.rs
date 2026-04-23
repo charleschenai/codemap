@@ -3,9 +3,11 @@ use crate::types::Graph;
 
 /// BFS shortest path A→B via imports. If not found, try reverse via importedBy.
 pub fn why(graph: &Graph, target: &str) -> String {
-    let parts: Vec<&str> = target.split_whitespace().collect();
+    let parts: Vec<&str> = target.split_whitespace()
+        .filter(|p| *p != "->" && *p != "→")
+        .collect();
     if parts.len() < 2 {
-        return "Usage: codemap why <fileA> <fileB>".to_string();
+        return "Usage: codemap why <fileA> <fileB>  (or: codemap why <fileA> -> <fileB>)".to_string();
     }
     let (a, b) = (parts[0], parts[1]);
     let node_a = match graph.find_node(a) {
@@ -80,9 +82,11 @@ pub fn why(graph: &Graph, target: &str) -> String {
 
 /// DFS all paths with depth limit 10, path limit 20. Try both directions.
 pub fn paths(graph: &Graph, target: &str) -> String {
-    let parts: Vec<&str> = target.split_whitespace().collect();
+    let parts: Vec<&str> = target.split_whitespace()
+        .filter(|p| *p != "->" && *p != "→")
+        .collect();
     if parts.len() < 2 {
-        return "Usage: codemap paths <fileA> <fileB>".to_string();
+        return "Usage: codemap paths <fileA> <fileB>  (or: codemap paths <fileA> -> <fileB>)".to_string();
     }
     let (a, b) = (parts[0], parts[1]);
     let node_a = match graph.find_node(a) {
