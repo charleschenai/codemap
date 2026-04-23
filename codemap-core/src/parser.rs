@@ -88,7 +88,9 @@ fn parse_with_treesitter(content: &str, grammar: &'static str) -> Option<Tree> {
         let parser = cache.entry(grammar).or_insert_with(|| {
             let mut p = Parser::new();
             if let Some(lang) = grammar_to_language(grammar) {
-                let _ = p.set_language(&lang);
+                if let Err(e) = p.set_language(&lang) {
+                    eprintln!("Warning: failed to load {grammar} grammar: {e}");
+                }
             }
             p
         });
