@@ -22,7 +22,7 @@ pub fn call_graph(graph: &Graph, target: &str) -> String {
     }
 
     // Determine which files to scan
-    let files_to_scan: Vec<&str> = if !target.is_empty() {
+    let files_to_scan: Vec<&str> = if !target.is_empty() && target != "." {
         match graph.find_node(target) {
             Some(n) => vec![n.id.as_str()],
             None => return format!("No cross-function calls found in {target}."),
@@ -338,7 +338,7 @@ pub fn diff_functions(graph: &Graph, target: &str) -> String {
 // ── complexity ──────────────────────────────────────────────────────
 
 pub fn complexity(graph: &Graph, target: &str) -> String {
-    let files_to_check: Vec<&str> = if !target.is_empty() {
+    let files_to_check: Vec<&str> = if !target.is_empty() && target != "." {
         match graph.find_node(target) {
             Some(n) => vec![n.id.as_str()],
             None => return format!("No functions found in {target}."),

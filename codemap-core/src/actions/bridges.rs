@@ -6,7 +6,7 @@ pub fn bridges(graph: &Graph, target: &str) -> String {
     let mut lines = Vec::new();
     let mut total = 0usize;
 
-    let nodes: Vec<&GraphNode> = if target.is_empty() {
+    let nodes: Vec<&GraphNode> = if target.is_empty() || target == "." {
         let mut ns: Vec<&GraphNode> = graph.nodes.values().collect();
         ns.sort_by(|a, b| a.id.cmp(&b.id));
         ns

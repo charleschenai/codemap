@@ -231,7 +231,7 @@ pub fn trace_value(graph: &mut Graph, target: &str, tree_mode: bool) -> String {
 
 pub fn sinks(graph: &mut Graph, target: &str) -> String {
     let scan_dir = graph.scan_dir.clone();
-    let file_filter = if target.is_empty() {
+    let file_filter = if target.is_empty() || target == "." {
         None
     } else {
         match graph.find_node(target) {

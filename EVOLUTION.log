@@ -13,3 +13,6 @@
 [2026-04-23 16:11] upgrade: add integration test suite — 21 tests covering all action categories
   source: zero tests existed, self-referential testing against own codebase
 
+[2026-04-23 16:13] fix: handle "." target as "all files" in complexity, call-graph, sinks, lang-bridges
+  source: manual testing — "." was treated as a filename instead of wildcard
+
