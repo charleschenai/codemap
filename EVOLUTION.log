@@ -25,3 +25,6 @@
 [2026-04-23 16:18] fix: why/paths accept arrow separator between file arguments
   source: manual testing — "why parser.rs -> lib.rs" failed with "File not found: ->"
 
+[2026-04-23 16:21] fix: diff-functions/api-diff broken for non-JS — regex only matched JS patterns + git_show "--" bug
+  source: manual testing — all Rust functions reported as "Added" instead of "Modified"
+

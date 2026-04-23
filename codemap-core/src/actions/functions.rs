@@ -250,8 +250,20 @@ pub fn diff_functions(graph: &Graph, target: &str) -> String {
     let mut removed: Vec<FnChange> = Vec::new();
     let mut modified: Vec<FnChange> = Vec::new();
 
-    let func_re =
-        Regex::new(r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()").unwrap();
+    // Match function definitions across languages:
+    // JS/TS: function foo, const foo = (, export async function foo
+    // Rust: fn foo, pub fn foo, pub async fn foo
+    // Python: def foo
+    // Go: func foo
+    // Ruby: def foo
+    // Java/PHP: public function foo, private function foo, protected function foo
+    let func_re = Regex::new(concat!(
+        r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()",
+        r"|(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)",
+        r"|def\s+(\w+)",
+        r"|func\s+(\w+)",
+        r"|(?:public|private|protected|static|\s)+\s+function\s+(\w+)",
+    )).unwrap();
 
     for file_id in &relevant {
         let current_node = match graph.nodes.get(*file_id) {
@@ -277,7 +289,12 @@ pub fn diff_functions(graph: &Graph, target: &str) -> String {
         // Parse old version for function names
         let mut old_func_names: HashSet<String> = HashSet::new();
         for caps in func_re.captures_iter(&old_content) {
-            let name = caps.get(1).or_else(|| caps.get(2));
+            let name = caps.get(1)
+                .or_else(|| caps.get(2))
+                .or_else(|| caps.get(3))
+                .or_else(|| caps.get(4))
+                .or_else(|| caps.get(5))
+                .or_else(|| caps.get(6));
             if let Some(m) = name {
                 old_func_names.insert(m.as_str().to_string());
             }
@@ -730,7 +747,7 @@ enum GitShowResult {
 /// Run `git show <ref>:<file>` and return file content.
 fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
     match Command::new("git")
-        .args(["show", "--", &format!("{git_ref}:{file_id}")])
+        .args(["show", &format!("{git_ref}:{file_id}")])
         .current_dir(&graph.scan_dir)
         .output()
     {
