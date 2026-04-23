@@ -27,14 +27,14 @@
  *   codemap --dir ~/Desktop/my-project stats
  */
 
-import { readdirSync, readFileSync, statSync } from "fs"
+import { readdirSync, readFileSync, statSync, existsSync } from "fs"
 import { join, relative, resolve, extname, dirname } from "path"
 
-// ── Patterns ──────────────────────────────────────────────────────────
+// ── Patterns & Constants ─────────────────────────────────────────────
 
+const URL_RE = /['"`](https?:\/\/[^'"`\s]{5,})['"`]/gm
 const IMPORT_RE = /(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm
 const DYNAMIC_IMPORT_RE = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/gm
-const URL_RE = /['"`](https?:\/\/[^'"`\s]{5,})['"`]/gm
 const EXPORT_RE = /export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)/gm
 const SUPPORTED_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go", ".java", ".rb", ".php"])
 
@@ -44,7 +44,7 @@ interface FunctionInfo {
   name: string
   startLine: number
   endLine: number
-  calls: string[]       // function names called within this function
+  calls: string[]
   isExported: boolean
 }
 
@@ -55,7 +55,7 @@ interface GraphNode {
   urls: string[]
   exports: string[]
   lines: number
-  functions: FunctionInfo[]  // function-level data (AST/scope-aware)
+  functions: FunctionInfo[]
 }
 
 interface Graph {
@@ -63,293 +63,324 @@ interface Graph {
   scanDir: string
 }
 
-// ── AST / Scope-Aware Parsing ────────────────────────────────────────
+// ── Tree-Sitter AST ──────────────────────────────────────────────────
 
-const BUN_LOADER: Record<string, string> = {
-  ".ts": "ts", ".tsx": "tsx", ".js": "js", ".jsx": "jsx", ".mjs": "js", ".cjs": "js"
+const TS_MOD = await import("web-tree-sitter")
+const TSParser = TS_MOD.default
+await TS_MOD.init()
+
+const WASM_DIR = join(dirname(new URL(import.meta.url).pathname), "node_modules/tree-sitter-wasms/out")
+
+const EXT_TO_GRAMMAR: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "javascript",
+  ".mjs": "javascript", ".cjs": "javascript",
+  ".py": "python", ".rs": "rust", ".go": "go", ".java": "java", ".rb": "ruby", ".php": "php",
 }
 
-const CALL_RE = /\b([a-zA-Z_$][\w$]*)\s*\(/g
-const FUNC_KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "throw", "new", "typeof", "instanceof", "await", "yield", "delete", "void", "import", "export", "from", "const", "let", "var", "else", "do", "try", "finally", "case", "break", "continue", "in", "of", "with", "debugger", "super", "this", "class", "extends", "implements"])
+// Cache loaded parsers per language
+const parserCache = new Map<string, any>()
 
-/**
- * Strip comments and string literals from source code.
- * Returns cleaned source with original line structure preserved (for line number accuracy).
- */
-function stripCommentsAndStrings(content: string): string {
-  // Replace string contents and comments with spaces (preserving newlines)
-  let result = ""
-  let i = 0
-  while (i < content.length) {
-    const ch = content[i]
-    // Line comment
-    if (ch === "/" && content[i + 1] === "/") {
-      while (i < content.length && content[i] !== "\n") { result += " "; i++ }
-      continue
-    }
-    // Block comment
-    if (ch === "/" && content[i + 1] === "*") {
-      i += 2; result += "  "
-      while (i < content.length && !(content[i] === "*" && content[i + 1] === "/")) {
-        result += content[i] === "\n" ? "\n" : " "; i++
-      }
-      if (i < content.length) { result += "  "; i += 2 }
-      continue
-    }
-    // String literals
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch
-      result += " "; i++
-      while (i < content.length) {
-        if (content[i] === "\\" && quote !== "`") { result += "  "; i += 2; continue }
-        if (content[i] === quote) { result += " "; i++; break }
-        result += content[i] === "\n" ? "\n" : " "; i++
-      }
-      continue
-    }
-    // Python triple-quote strings
-    if ((ch === '"' || ch === "'") && content.substring(i, i + 3) === ch.repeat(3)) {
-      const triple = ch.repeat(3)
-      result += "   "; i += 3
-      while (i < content.length && content.substring(i, i + 3) !== triple) {
-        result += content[i] === "\n" ? "\n" : " "; i++
-      }
-      if (i < content.length) { result += "   "; i += 3 }
-      continue
-    }
-    // Python # comments
-    if (ch === "#") {
-      while (i < content.length && content[i] !== "\n") { result += " "; i++ }
-      continue
-    }
-    result += ch; i++
+async function getParser(ext: string): Promise<any | null> {
+  const grammar = EXT_TO_GRAMMAR[ext]
+  if (!grammar) return null
+  if (parserCache.has(grammar)) return parserCache.get(grammar)
+
+  const wasmPath = join(WASM_DIR, `tree-sitter-${grammar}.wasm`)
+  if (!existsSync(wasmPath)) return null
+
+  try {
+    const parser = new TSParser()
+    const lang = await TSParser.Language.load(wasmPath)
+    parser.setLanguage(lang)
+    parserCache.set(grammar, parser)
+    return parser
+  } catch {
+    return null
   }
-  return result
 }
 
-/**
- * Extract functions from brace-delimited languages (TS/JS/Rust/Go/Java/PHP).
- * Tracks brace depth to identify function boundaries.
- */
-function extractFunctionsBrace(content: string, cleanContent: string, lang: string): FunctionInfo[] {
-  const functions: FunctionInfo[] = []
-  const lines = cleanContent.split("\n")
-
-  // Language-specific function declaration patterns
-  let funcDeclRe: RegExp
-  switch (lang) {
-    case "rust":
-      funcDeclRe = /(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/g; break
-    case "go":
-      funcDeclRe = /func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)/g; break
-    case "java":
-      funcDeclRe = /(?:public|private|protected|static|final|abstract|synchronized|native)?\s*(?:public|private|protected|static|final|abstract|synchronized|native)?\s*(?:\w+(?:<[^>]*>)?)\s+(\w+)\s*\(/g; break
-    case "php":
-      funcDeclRe = /(?:public|private|protected|static)?\s*function\s+(\w+)/g; break
-    default: // ts/js
-      funcDeclRe = /(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$]\w*)\s*=>|(\w+)\s*\([^)]*\)\s*\{)/g
-      break
+// Collect all AST nodes matching given types
+function collectNodes(node: any, types: string[]): any[] {
+  const results: any[] = []
+  if (types.includes(node.type)) results.push(node)
+  for (let i = 0; i < node.childCount; i++) {
+    results.push(...collectNodes(node.child(i), types))
   }
+  return results
+}
 
-  // Find each function declaration and its body
-  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-    const line = lines[lineIdx]
-    funcDeclRe.lastIndex = 0
-    const match = funcDeclRe.exec(line)
-    if (!match) continue
+// ── Tree-Sitter Extractors ───────────────────────────────────────────
 
-    const name = match[1] || match[2] || match[3]
-    if (!name) continue
+// Import node types per language
+const IMPORT_TYPES: Record<string, string[]> = {
+  typescript: ["import_statement", "export_statement"],
+  tsx: ["import_statement", "export_statement"],
+  javascript: ["import_statement", "export_statement"],
+  python: ["import_statement", "import_from_statement"],
+  rust: ["use_declaration"],
+  go: ["import_declaration", "import_spec"],
+  java: ["import_declaration"],
+  ruby: ["call"],  // require/require_relative
+  php: ["namespace_use_declaration"],
+}
 
-    // Find the opening brace
-    let braceStart = -1
-    let searchLine = lineIdx
-    while (searchLine < lines.length && braceStart === -1) {
-      const idx = lines[searchLine].indexOf("{")
-      if (idx !== -1) braceStart = searchLine
-      else searchLine++
-      if (searchLine > lineIdx + 3) break // give up if brace not found within 3 lines
-    }
-    if (braceStart === -1) continue
+// Function node types per language
+const FUNC_TYPES: Record<string, string[]> = {
+  typescript: ["function_declaration", "method_definition", "arrow_function"],
+  tsx: ["function_declaration", "method_definition", "arrow_function"],
+  javascript: ["function_declaration", "method_definition", "arrow_function"],
+  python: ["function_definition"],
+  rust: ["function_item"],
+  go: ["function_declaration", "method_declaration"],
+  java: ["method_declaration", "constructor_declaration"],
+  ruby: ["method", "singleton_method"],
+  php: ["function_definition", "method_declaration"],
+}
 
-    // Track braces to find end
-    let depth = 0
-    let endLine = braceStart
-    for (let i = braceStart; i < lines.length; i++) {
-      for (const ch of lines[i]) {
-        if (ch === "{") depth++
-        if (ch === "}") { depth--; if (depth === 0) { endLine = i; break } }
+// Export node types per language
+const EXPORT_TYPES: Record<string, string[]> = {
+  typescript: ["export_statement"],
+  tsx: ["export_statement"],
+  javascript: ["export_statement"],
+  python: [],  // Python doesn't have export syntax — all non-_ names are public
+  rust: [],     // Handled via visibility_modifier
+  go: [],       // Handled via capitalization
+  java: [],     // Handled via access modifiers
+  ruby: [],
+  php: [],
+}
+
+function extractImportsFromAST(tree: any, grammar: string, content: string): string[] {
+  const imports: string[] = []
+  const importTypes = IMPORT_TYPES[grammar] || []
+
+  if (["typescript", "tsx", "javascript"].includes(grammar)) {
+    for (const node of collectNodes(tree.rootNode, importTypes)) {
+      // Skip type-only imports
+      if (node.text.startsWith("import type")) continue
+      const source = node.childForFieldName("source")
+      if (source) imports.push(source.text.replace(/['"]/g, ""))
+      // Re-exports: export { x } from "./y"
+      if (node.type === "export_statement") {
+        const src = node.childForFieldName("source")
+        if (src) imports.push(src.text.replace(/['"]/g, ""))
       }
-      if (depth === 0) break
     }
-
-    // Extract calls within function body
-    const bodyLines = lines.slice(braceStart, endLine + 1)
-    const calls: string[] = []
-    const seen = new Set<string>()
-    for (const bodyLine of bodyLines) {
-      CALL_RE.lastIndex = 0
-      let cm: RegExpExecArray | null
-      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
-        const callee = cm[1]
-        if (callee !== name && !FUNC_KEYWORDS.has(callee) && !seen.has(callee)) {
-          seen.add(callee)
-          calls.push(callee)
+    // Dynamic imports
+    for (const node of collectNodes(tree.rootNode, ["call_expression"])) {
+      const fn = node.childForFieldName("function") || node.child(0)
+      if (fn?.type === "import") {
+        const args = node.childForFieldName("arguments") || node.child(1)
+        if (args?.childCount) {
+          const arg = args.child(1) || args.child(0)
+          if (arg?.type === "string") imports.push(arg.text.replace(/['"]/g, ""))
         }
       }
     }
-
-    // Check if exported
-    const origLine = content.split("\n")[lineIdx] || ""
-    const isExported = /\bexport\b/.test(origLine) || (lang === "go" && name[0] === name[0].toUpperCase()) || (lang === "rust" && /\bpub\b/.test(origLine)) || (lang === "java" && /\bpublic\b/.test(origLine))
-
-    functions.push({ name, startLine: lineIdx + 1, endLine: endLine + 1, calls, isExported })
-  }
-
-  return functions
-}
-
-/**
- * Extract functions from Python (indentation-based).
- */
-function extractFunctionsPython(content: string, cleanContent: string): FunctionInfo[] {
-  const functions: FunctionInfo[] = []
-  const lines = cleanContent.split("\n")
-  const origLines = content.split("\n")
-
-  const pyFuncRe = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/
-  const pyClassMethodRe = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(self/
-
-  for (let i = 0; i < lines.length; i++) {
-    const match = pyFuncRe.exec(lines[i])
-    if (!match) continue
-
-    const indent = match[1].length
-    const name = match[2]
-    const startLine = i + 1
-
-    // Find end by indentation
-    let endLine = i + 1
-    for (let j = i + 1; j < lines.length; j++) {
-      const trimmed = lines[j].trim()
-      if (trimmed === "") continue
-      const lineIndent = lines[j].length - lines[j].trimStart().length
-      if (lineIndent <= indent) break
-      endLine = j + 1
-    }
-
-    // Extract calls within body
-    const bodyLines = lines.slice(i + 1, endLine)
-    const calls: string[] = []
-    const seen = new Set<string>()
-    for (const bodyLine of bodyLines) {
-      CALL_RE.lastIndex = 0
-      let cm: RegExpExecArray | null
-      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
-        const callee = cm[1]
-        if (callee !== name && !FUNC_KEYWORDS.has(callee) && !seen.has(callee) && callee !== "self" && callee !== "cls" && callee !== "print" && callee !== "range" && callee !== "len" && callee !== "str" && callee !== "int" && callee !== "float" && callee !== "list" && callee !== "dict" && callee !== "set" && callee !== "tuple" && callee !== "bool" && callee !== "type" && callee !== "isinstance" && callee !== "issubclass" && callee !== "hasattr" && callee !== "getattr" && callee !== "setattr") {
-          seen.add(callee)
-          calls.push(callee)
+  } else if (grammar === "python") {
+    for (const node of collectNodes(tree.rootNode, importTypes)) {
+      if (node.type === "import_from_statement") {
+        const mod = node.childForFieldName("module_name")
+        if (mod) imports.push(mod.text)
+      } else {
+        // import X
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)
+          if (child?.type === "dotted_name") imports.push(child.text)
         }
       }
     }
+  } else if (grammar === "rust") {
+    for (const node of collectNodes(tree.rootNode, importTypes)) {
+      // Extract the path from use declarations
+      const path = node.child(1) // skip 'use' keyword
+      if (path) imports.push(path.text.replace(/;$/, "").split("::").slice(0, 2).join("::"))
+    }
+  } else if (grammar === "go") {
+    for (const node of collectNodes(tree.rootNode, ["import_spec"])) {
+      const path = node.childForFieldName("path")
+      if (path) imports.push(path.text.replace(/"/g, ""))
+    }
+  } else if (grammar === "java") {
+    for (const node of collectNodes(tree.rootNode, importTypes)) {
+      const text = node.text.replace(/^import\s+/, "").replace(/;$/, "").trim()
+      imports.push(text)
+    }
+  } else if (grammar === "ruby") {
+    for (const node of collectNodes(tree.rootNode, ["call"])) {
+      const method = node.childForFieldName("method")
+      if (method && (method.text === "require" || method.text === "require_relative")) {
+        const args = node.childForFieldName("arguments")
+        if (args?.childCount) {
+          const arg = args.child(0)
+          if (arg) imports.push(arg.text.replace(/['"]/g, ""))
+        }
+      }
+    }
+  }
 
-    const isExported = !name.startsWith("_")
+  return imports
+}
+
+function extractExportsFromAST(tree: any, grammar: string, content: string): string[] {
+  const exports: string[] = []
+
+  if (["typescript", "tsx", "javascript"].includes(grammar)) {
+    for (const node of collectNodes(tree.rootNode, ["export_statement"])) {
+      // Skip type-only exports
+      if (node.text.startsWith("export type") || node.text.startsWith("export interface")) continue
+      const decl = node.childForFieldName("declaration")
+      if (decl) {
+        const name = decl.childForFieldName("name")
+        if (name) exports.push(name.text)
+        // const/let/var declarations
+        if (["lexical_declaration", "variable_declaration"].includes(decl.type)) {
+          for (const declarator of collectNodes(decl, ["variable_declarator"])) {
+            const n = declarator.childForFieldName("name")
+            if (n) exports.push(n.text)
+          }
+        }
+      }
+      // export default
+      if (node.text.includes("export default")) {
+        const match = /export\s+default\s+(?:class|function\s*\*?)\s+(\w+)/.exec(node.text)
+        exports.push(match ? match[1] : "default")
+      }
+    }
+  } else if (grammar === "python") {
+    // All top-level functions/classes not starting with _
+    for (const node of collectNodes(tree.rootNode, ["function_definition", "class_definition"])) {
+      if (node.parent?.type === "module") {
+        const name = node.childForFieldName("name")
+        if (name && !name.text.startsWith("_")) exports.push(name.text)
+      }
+    }
+  } else if (grammar === "rust") {
+    // pub items
+    for (const node of collectNodes(tree.rootNode, ["function_item", "struct_item", "enum_item", "type_item", "impl_item"])) {
+      if (node.child(0)?.type === "visibility_modifier") {
+        const name = node.childForFieldName("name")
+        if (name) exports.push(name.text)
+      }
+    }
+  } else if (grammar === "go") {
+    // Capitalized names are exported
+    for (const node of collectNodes(tree.rootNode, ["function_declaration", "method_declaration", "type_declaration"])) {
+      const name = node.childForFieldName("name")
+      if (name && name.text[0] === name.text[0].toUpperCase()) exports.push(name.text)
+    }
+  } else if (grammar === "java") {
+    // public methods and classes
+    for (const node of collectNodes(tree.rootNode, ["method_declaration", "class_declaration"])) {
+      const modifiers = node.child(0)
+      if (modifiers?.type === "modifiers" && modifiers.text.includes("public")) {
+        const name = node.childForFieldName("name")
+        if (name) exports.push(name.text)
+      }
+    }
+  } else if (grammar === "ruby") {
+    for (const node of collectNodes(tree.rootNode, ["method", "singleton_method"])) {
+      const name = node.childForFieldName("name")
+      if (name && !name.text.startsWith("_")) exports.push(name.text)
+    }
+  }
+
+  return exports
+}
+
+function extractFunctionsFromAST(tree: any, grammar: string, content: string): FunctionInfo[] {
+  const functions: FunctionInfo[] = []
+  const funcTypes = FUNC_TYPES[grammar] || []
+
+  for (const node of collectNodes(tree.rootNode, funcTypes)) {
+    let name = node.childForFieldName("name")?.text
+    if (!name) {
+      // Arrow functions: find parent variable declarator
+      if (node.type === "arrow_function" && node.parent?.type === "variable_declarator") {
+        name = node.parent.childForFieldName("name")?.text
+      }
+      if (!name) continue
+    }
+
+    const startLine = node.startPosition.row + 1
+    const endLine = node.endPosition.row + 1
+
+    // Extract call expressions within this function
+    const callNodes = collectNodes(node, ["call_expression", "call"])
+    const calls: string[] = []
+    const seen = new Set<string>()
+    for (const call of callNodes) {
+      let callee: string | undefined
+      const fn = call.childForFieldName("function") || call.childForFieldName("method") || call.child(0)
+      if (fn) {
+        callee = fn.type === "member_expression" || fn.type === "field_expression"
+          ? fn.childForFieldName("property")?.text || fn.text
+          : fn.text
+      }
+      if (callee && callee !== name && !seen.has(callee)) {
+        seen.add(callee)
+        calls.push(callee)
+      }
+    }
+
+    // Determine if exported
+    let isExported = false
+    if (["typescript", "tsx", "javascript"].includes(grammar)) {
+      isExported = node.parent?.type === "export_statement" ||
+        (node.type === "arrow_function" && node.parent?.parent?.parent?.type === "export_statement")
+    } else if (grammar === "python") {
+      isExported = !name.startsWith("_")
+    } else if (grammar === "rust") {
+      isExported = node.child(0)?.type === "visibility_modifier"
+    } else if (grammar === "go") {
+      isExported = name[0] === name[0].toUpperCase()
+    } else if (grammar === "java") {
+      const modifiers = node.child(0)
+      isExported = modifiers?.type === "modifiers" && modifiers.text.includes("public")
+    } else if (grammar === "ruby") {
+      isExported = !name.startsWith("_")
+    }
+
     functions.push({ name, startLine, endLine, calls, isExported })
   }
 
   return functions
 }
 
-/**
- * Extract functions from Ruby (end-delimited).
- */
-function extractFunctionsRuby(content: string, cleanContent: string): FunctionInfo[] {
-  const functions: FunctionInfo[] = []
-  const lines = cleanContent.split("\n")
+// ── File Parser ──────────────────────────────────────────────────────
 
-  const rubyFuncRe = /\bdef\s+(?:self\.)?(\w+[!?]?)/
+async function parseFile(filePath: string, content: string, ext: string, scanDir: string, node: GraphNode): Promise<void> {
+  const grammar = EXT_TO_GRAMMAR[ext]
+  const parser = grammar ? await getParser(ext) : null
 
-  for (let i = 0; i < lines.length; i++) {
-    const match = rubyFuncRe.exec(lines[i])
-    if (!match) continue
+  if (parser && grammar) {
+    // ── Tree-Sitter AST parsing ──
+    const tree = parser.parse(content)
 
-    const name = match[1]
-    let endLine = i + 1
-    let depth = 1
+    // Imports
+    const rawImports = extractImportsFromAST(tree, grammar, content)
+    for (const imp of rawImports) resolveAndAdd(imp, filePath, scanDir, node)
 
-    for (let j = i + 1; j < lines.length; j++) {
-      const trimmed = lines[j].trim()
-      if (/\b(def|class|module|do|if|unless|while|until|for|case|begin)\b/.test(trimmed) && !trimmed.endsWith("end")) depth++
-      if (trimmed === "end" || trimmed.startsWith("end ") || trimmed.startsWith("end;")) { depth--; if (depth === 0) { endLine = j + 1; break } }
-    }
+    // Exports
+    node.exports = extractExportsFromAST(tree, grammar, content)
 
-    const bodyLines = lines.slice(i + 1, endLine)
-    const calls: string[] = []
-    const seen = new Set<string>()
-    for (const bodyLine of bodyLines) {
-      CALL_RE.lastIndex = 0
-      let cm: RegExpExecArray | null
-      while ((cm = CALL_RE.exec(bodyLine)) !== null) {
-        const callee = cm[1]
-        if (callee !== name && !seen.has(callee) && callee !== "puts" && callee !== "require" && callee !== "include" && callee !== "attr_accessor" && callee !== "attr_reader") {
-          seen.add(callee)
-          calls.push(callee)
-        }
-      }
-    }
+    // Functions
+    node.functions = extractFunctionsFromAST(tree, grammar, content)
 
-    functions.push({ name, startLine: i + 1, endLine, calls, isExported: !name.startsWith("_") })
-  }
-
-  return functions
-}
-
-/**
- * Parse a file using AST (Bun.Transpiler for TS/JS) or scope-aware extraction.
- * Returns { imports, exports, functions }.
- */
-function parseFile(filePath: string, content: string, ext: string, scanDir: string, node: GraphNode): void {
-  const cleanContent = stripCommentsAndStrings(content)
-
-  // --- Imports & Exports ---
-  const bunLoader = BUN_LOADER[ext]
-  if (bunLoader) {
-    // Use Bun.Transpiler for accurate TS/JS parsing
-    try {
-      const transpiler = new Bun.Transpiler({ loader: bunLoader as any })
-      const scan = transpiler.scan(content)
-
-      // Imports from Bun
-      for (const imp of scan.imports) {
-        resolveAndAdd(imp.path, filePath, scanDir, node)
-      }
-
-      // Also catch dynamic imports via regex (Bun.scan doesn't report them)
-      let m: RegExpExecArray | null
-      DYNAMIC_IMPORT_RE.lastIndex = 0
-      while ((m = DYNAMIC_IMPORT_RE.exec(cleanContent)) !== null) {
-        if (m[1]) resolveAndAdd(m[1], filePath, scanDir, node)
-      }
-
-      // Exports from Bun
-      node.exports = [...scan.exports].filter(e => e !== "default")
-      // Also add default export with a more useful name
-      if (scan.exports.includes("default")) {
-        const defaultMatch = /export\s+default\s+(?:class|function\s*\*?)\s+(\w+)/.exec(content)
-        if (defaultMatch) node.exports.push(defaultMatch[1])
-        else node.exports.push("default")
-      }
-    } catch {
-      // Fallback to regex if Bun fails
-      fallbackRegexParse(content, cleanContent, filePath, scanDir, node)
-    }
+    tree.delete()
   } else {
-    // Non-JS/TS: use regex
-    fallbackRegexParse(content, cleanContent, filePath, scanDir, node)
+    // ── Regex fallback for unsupported extensions ──
+    let m: RegExpExecArray | null
+    IMPORT_RE.lastIndex = 0
+    while ((m = IMPORT_RE.exec(content)) !== null) { const t = m[1] || m[2]; if (t) resolveAndAdd(t, filePath, scanDir, node) }
+    DYNAMIC_IMPORT_RE.lastIndex = 0
+    while ((m = DYNAMIC_IMPORT_RE.exec(content)) !== null) { if (m[1]) resolveAndAdd(m[1], filePath, scanDir, node) }
+    EXPORT_RE.lastIndex = 0
+    while ((m = EXPORT_RE.exec(content)) !== null) { node.exports.push(m[1]) }
+    node.functions = []
   }
 
-  // --- URLs (always regex) ---
+  // URLs (always regex — tree-sitter doesn't help here)
   let m: RegExpExecArray | null
   URL_RE.lastIndex = 0
   while ((m = URL_RE.exec(content)) !== null) {
@@ -357,34 +388,6 @@ function parseFile(filePath: string, content: string, ext: string, scanDir: stri
     if (!url.includes("localhost") && !url.includes("127.0.0.1") && !url.includes("example.com")) {
       node.urls.push(url.split("?")[0].substring(0, 120))
     }
-  }
-
-  // --- Function extraction ---
-  const lang = ext === ".py" ? "python" : ext === ".rs" ? "rust" : ext === ".go" ? "go" : ext === ".java" ? "java" : ext === ".rb" ? "ruby" : ext === ".php" ? "php" : "js"
-
-  if (lang === "python") {
-    node.functions = extractFunctionsPython(content, cleanContent)
-  } else if (lang === "ruby") {
-    node.functions = extractFunctionsRuby(content, cleanContent)
-  } else {
-    node.functions = extractFunctionsBrace(content, cleanContent, lang)
-  }
-}
-
-function fallbackRegexParse(content: string, cleanContent: string, filePath: string, scanDir: string, node: GraphNode): void {
-  let m: RegExpExecArray | null
-  IMPORT_RE.lastIndex = 0
-  while ((m = IMPORT_RE.exec(cleanContent)) !== null) {
-    const target = m[1] || m[2]
-    if (target) resolveAndAdd(target, filePath, scanDir, node)
-  }
-  DYNAMIC_IMPORT_RE.lastIndex = 0
-  while ((m = DYNAMIC_IMPORT_RE.exec(cleanContent)) !== null) {
-    if (m[1]) resolveAndAdd(m[1], filePath, scanDir, node)
-  }
-  EXPORT_RE.lastIndex = 0
-  while ((m = EXPORT_RE.exec(cleanContent)) !== null) {
-    node.exports.push(m[1])
   }
 }
 
@@ -489,7 +492,7 @@ function resolveAndAdd(specifier: string, fromFile: string, scanDir: string, nod
 
 // ── Scanner ───────────────────────────────────────────────────────────
 
-function scanDirectory(dir: string): Graph {
+async function scanDirectory(dir: string): Promise<Graph> {
   const nodes = new Map<string, GraphNode>()
   const allFiles: string[] = []
 
@@ -506,7 +509,7 @@ function scanDirectory(dir: string): Graph {
   }
   walk(dir)
 
-  // Parse each file using AST (TS/JS) or scope-aware extraction
+  // Parse each file using tree-sitter AST (with regex fallback)
   for (const file of allFiles) {
     let content: string
     try {
@@ -527,7 +530,7 @@ function scanDirectory(dir: string): Graph {
       functions: [],
     }
 
-    parseFile(file, content, ext, dir, node)
+    await parseFile(file, content, ext, dir, node)
     nodes.set(id, node)
   }
 
@@ -1845,7 +1848,7 @@ Examples:
 
 // Scan
 const t0 = Date.now()
-const graph = scanDirectory(dir)
+const graph = await scanDirectory(dir)
 const scanMs = Date.now() - t0
 console.error(`Scanned ${graph.nodes.size} files in ${scanMs}ms\n`)
 

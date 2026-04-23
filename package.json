@@ -1,7 +1,13 @@
 {
   "name": "codemap",
-  "version": "1.0.0",
-  "description": "Codebase dependency analysis CLI — zero dependencies",
-  "bin": { "codemap": "./codemap.ts" },
-  "type": "module"
+  "version": "3.0.0",
+  "bin": {
+    "codemap": "./codemap.ts"
+  },
+  "description": "Codebase dependency analysis CLI — 28 actions, tree-sitter AST, 9 languages",
+  "type": "module",
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.11",
+    "web-tree-sitter": "0.24.7"
+  }
 }

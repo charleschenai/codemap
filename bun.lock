@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "codemap",
+      "dependencies": {
+        "tree-sitter-wasms": "0.1.11",
+        "web-tree-sitter": "0.24.7",
+      },
+    },
+  },
+  "packages": {
+    "tree-sitter-wasms": ["tree-sitter-wasms@0.1.11", "", {}, "sha512-26sE4+qoTi1CbzHdo9sHs9pRE/jXVFVRigSG/5TNAbwhSMVjHfMAg4UjmOhAFAIx5UxgoQuaURwqhm0SRNrpWA=="],
+
+    "web-tree-sitter": ["web-tree-sitter@0.24.7", "", {}, "sha512-CdC/TqVFbXqR+C51v38hv6wOPatKEUGxa39scAeFSm98wIhZxAYonhRQPSMmfZ2w7JDI0zQDdzdmgtNk06/krQ=="],
+  }
+}
