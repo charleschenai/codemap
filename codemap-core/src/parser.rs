@@ -58,6 +58,7 @@ fn ext_to_grammar(ext: &str) -> Option<&'static str> {
         ".c" | ".h" => Some("c"),
         ".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
         ".cu" | ".cuh" => Some("cpp"), // CUDA as C++ superset
+        ".yaml" | ".yml" | ".cmake" => None, // regex-only, no tree-sitter grammar
         _ => None,
     }
 }
@@ -1242,10 +1243,49 @@ fn extract_bridges(content: &str, ext: &str, root: Option<tree_sitter::Node>, sr
             extract_cpp_bridges(content, &mut bridges);
         }
         ".rs" => extract_rust_bridges(content, root, src, &mut bridges),
+        ".yaml" | ".yml" => extract_yaml_bridges(content, &mut bridges),
+        ".cmake" => extract_cpp_bridges(content, &mut bridges), // CMake uses same build-dep patterns
         _ => {}
     }
 
     bridges
+}
+
+fn extract_yaml_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    // PyTorch native_functions.yaml pattern:
+    // - func: op_name.variant(args) -> return
+    //   dispatch:
+    //     CUDA: op_cuda_impl
+    //     CPU: op_cpu_impl
+    let func_re = Regex::new(r#"- func:\s*(\w+)"#).unwrap();
+    for caps in func_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::YamlDispatch,
+            name,
+            target: None,
+            line,
+            namespace: None,
+        });
+    }
+
+    // dispatch: \n    KEY: impl_function
+    let dispatch_re = Regex::new(r#"(?m)^\s+(CUDA|CPU|CompositeExplicitAutograd|CompositeImplicitAutograd|SparseCPU|SparseCUDA|Meta)\s*:\s*(\w+)"#).unwrap();
+    for caps in dispatch_re.captures_iter(content) {
+        let device = caps[1].to_string();
+        let func = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::YamlDispatch,
+            name: func,
+            target: None,
+            line,
+            namespace: Some(device),
+        });
+    }
 }
 
 fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
@@ -1398,6 +1438,21 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
             }
         }
     }
+
+    // setup.py: ext_modules / CMakeExtension
+    let ext_module_re = Regex::new(r#"(?:CMakeExtension|Extension)\s*\(\s*(?:name\s*=\s*)?['"]([\w.]+)['"]"#).unwrap();
+    for caps in ext_module_re.captures_iter(content) {
+        let name = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::BuildDep,
+            name,
+            target: None,
+            line,
+            namespace: None,
+        });
+    }
 }
 
 fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
@@ -1521,6 +1576,56 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
             namespace: None,
         });
     }
+
+    // CMake: target_link_libraries(target lib1 lib2)
+    let cmake_link_re = Regex::new(r#"target_link_libraries\s*\(\s*(\w+)\s+(?:PUBLIC|PRIVATE|INTERFACE)?\s*([\w\s]+)\)"#).unwrap();
+    for caps in cmake_link_re.captures_iter(content) {
+        let target = caps[1].to_string();
+        let libs = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        for lib in libs.split_whitespace() {
+            if lib != "PUBLIC" && lib != "PRIVATE" && lib != "INTERFACE" {
+                bridges.push(BridgeInfo {
+                    kind: BridgeKind::BuildDep,
+                    name: target.clone(),
+                    target: Some(lib.to_string()),
+                    line,
+                    namespace: None,
+                });
+            }
+        }
+    }
+
+    // find_package(Name REQUIRED)
+    let find_pkg_re = Regex::new(r#"find_package\s*\(\s*(\w+)"#).unwrap();
+    for caps in find_pkg_re.captures_iter(content) {
+        let pkg = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::BuildDep,
+            name: pkg.clone(),
+            target: Some(pkg),
+            line,
+            namespace: None,
+        });
+    }
+
+    // C++ DispatchKey: DispatchKeySet::CUDA, DispatchKey::CUDA
+    let dispatch_key_re = Regex::new(r#"DispatchKey(?:Set)?\s*::\s*(\w+)"#).unwrap();
+    for caps in dispatch_key_re.captures_iter(content) {
+        let key = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::DispatchKey,
+            name: format!("DispatchKey::{key}"),
+            target: None,
+            line,
+            namespace: Some(key),
+        });
+    }
 }
 
 fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], bridges: &mut Vec<BridgeInfo>) {
@@ -1597,6 +1702,42 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
                 kind: BridgeKind::PyO3Function,
                 name: name.clone(),
                 target: Some(name),
+                line,
+                namespace: None,
+            });
+        }
+    }
+
+    // #[cfg(feature = "cuda")] or #[cfg(feature = "metal")]
+    let cfg_re = Regex::new(r#"#\[cfg\s*\(\s*feature\s*=\s*"(\w+)"\s*\)\]"#).unwrap();
+    for caps in cfg_re.captures_iter(content) {
+        let feature = caps[1].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        bridges.push(BridgeInfo {
+            kind: BridgeKind::DispatchKey,
+            name: format!("cfg(feature={feature})"),
+            target: None,
+            line,
+            namespace: Some(feature),
+        });
+    }
+
+    // impl Trait for Type — detect trait implementations
+    let trait_impl_re = Regex::new(r#"impl\s+(\w+)\s+for\s+(\w+)"#).unwrap();
+    for caps in trait_impl_re.captures_iter(content) {
+        let trait_name = caps[1].to_string();
+        let type_name = caps[2].to_string();
+        let pos = caps.get(0).unwrap().start();
+        let line = content[..pos].matches('\n').count() + 1;
+        // Filter to interesting trait names (Backend, Storage, CustomOp, etc.)
+        let interesting = ["Backend", "BackendStorage", "CustomOp", "CustomOp1", "CustomOp2",
+            "Map1", "Map2", "Module", "Layer", "Forward", "Backward"];
+        if interesting.iter().any(|&t| trait_name == t) || trait_name.ends_with("Backend") || trait_name.ends_with("Storage") {
+            bridges.push(BridgeInfo {
+                kind: BridgeKind::TraitImpl,
+                name: trait_name,
+                target: Some(type_name),
                 line,
                 namespace: None,
             });

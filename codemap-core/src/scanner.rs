@@ -13,7 +13,7 @@ use std::time::Instant;
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CACHE_VERSION: u32 = 6;
+const CACHE_VERSION: u32 = 7;
 const MAX_DEPTH: usize = 50;
 
 /// Directories to skip during walk.
@@ -25,6 +25,7 @@ const SUPPORTED_EXTS: &[&str] = &[
     ".py", ".rs", ".go", ".java", ".rb", ".php",
     ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx",
     ".cu", ".cuh",
+    ".yaml", ".yml", ".cmake",
 ];
 
 // ── Cache Types ─────────────────────────────────────────────────────

@@ -37,6 +37,10 @@ pub enum BridgeKind {
     CudaLaunch,      // C++ kernel<<<grid>>>(args)
     MonkeyPatch,     // Python module.Class = Replacement
     AutogradFunc,    // Python torch.autograd.Function subclass
+    YamlDispatch,    // YAML native_functions.yaml op→kernel mapping
+    BuildDep,        // CMake target_link_libraries, setup.py ext_modules
+    DispatchKey,     // C++ DispatchKey::CUDA, Rust #[cfg(feature)]
+    TraitImpl,       // Rust trait Backend impl
 }
 
 impl BridgeKind {
@@ -54,6 +58,10 @@ impl BridgeKind {
             BridgeKind::CudaLaunch => "cuda_launch",
             BridgeKind::MonkeyPatch => "monkey_patch",
             BridgeKind::AutogradFunc => "autograd_func",
+            BridgeKind::YamlDispatch => "yaml_dispatch",
+            BridgeKind::BuildDep => "build_dep",
+            BridgeKind::DispatchKey => "dispatch_key",
+            BridgeKind::TraitImpl => "trait_impl",
         }
     }
 
