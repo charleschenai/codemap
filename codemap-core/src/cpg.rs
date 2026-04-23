@@ -162,7 +162,7 @@ fn build_cpg(graph: &Graph) -> CodePropertyGraph {
 
         // Intra-file call-param edges
         for call in &df.call_args {
-            let cn = call.callee.split('.').last().unwrap_or(&call.callee);
+            let cn = call.callee.split('.').next_back().unwrap_or(&call.callee);
             if let Some(tf) = g_node.functions.iter().find(|f| f.name == cn) {
                 if let Some(params) = &tf.parameters {
                     for arg in &call.args {
@@ -183,7 +183,7 @@ fn build_cpg(graph: &Graph) -> CodePropertyGraph {
             if let Some(ret_lines) = &func.return_lines {
                 if ret_lines.is_empty() { continue; }
                 for call in &df.call_args {
-                    let cn = call.callee.split('.').last().unwrap_or(&call.callee);
+                    let cn = call.callee.split('.').next_back().unwrap_or(&call.callee);
                     if cn == func.name {
                         for &rl in ret_lines {
                             let from_id = format!("{file_id}:{rl}:return:{}", func.name);
@@ -232,7 +232,7 @@ fn build_cpg(graph: &Graph) -> CodePropertyGraph {
             .collect();
 
         for call in &df.call_args {
-            let cn = call.callee.split('.').last().unwrap_or(&call.callee);
+            let cn = call.callee.split('.').next_back().unwrap_or(&call.callee);
             if let Some(targets) = export_map.get(cn) {
                 for (target_file, target_fn) in targets {
                     if target_file == file_id || !imp_set.contains(target_file.as_str()) {

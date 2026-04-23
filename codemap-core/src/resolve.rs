@@ -96,8 +96,7 @@ pub fn resolve_and_add(
     // don't fall through to JS/TS extension probing.
     if from_ext == ".rs" {
         // ./module imports from mod declarations
-        if specifier.starts_with("./") {
-            let mod_name = &specifier[2..];
+        if let Some(mod_name) = specifier.strip_prefix("./") {
             let from_dir = Path::new(from_file).parent().unwrap_or(Path::new(""));
 
             for ext in RUST_EXTS {
@@ -113,8 +112,8 @@ pub fn resolve_and_add(
         }
 
         // crate:: imports → resolve relative to crate root (scan_dir)
-        if specifier.starts_with("crate::") {
-            let rest = &specifier[7..]; // strip "crate::"
+        if let Some(rest) = specifier.strip_prefix("crate::") {
+            // strip "crate::"
             // Clean up tree-sitter artifacts like "{Foo, Bar}"
             let module = rest.split("::{").next().unwrap_or(rest);
             let module = module.split("::").next().unwrap_or(module);

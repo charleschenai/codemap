@@ -81,11 +81,10 @@ fn load_cache(dir: &str) -> Option<CacheData> {
 
 fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
     let cache_dir = Path::new(dir).join(".codemap");
-    if !cache_dir.exists() {
-        if fs::create_dir_all(&cache_dir).is_err() {
+    if !cache_dir.exists()
+        && fs::create_dir_all(&cache_dir).is_err() {
             return;
         }
-    }
     let mut files = HashMap::new();
     for (id, node) in nodes {
         let mtime = node.mtime.unwrap_or(0.0);
@@ -518,7 +517,7 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
                 .collect();
 
             for unres in &unresolved {
-                let base_name = unres.split('/').last().unwrap_or(unres);
+                let base_name = unres.split('/').next_back().unwrap_or(unres);
                 let mut matches: Vec<String> = Vec::new();
                 for other_id in &all_ids {
                     if other_id == id {

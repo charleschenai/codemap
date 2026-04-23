@@ -1,3 +1,6 @@
 [2026-04-23 16:06] fix: hoist 8 regexes out of loops for better performance
   source: cargo clippy -- regex_creation_in_loops
 
+[2026-04-23 16:07] fix: resolve 27 clippy warnings — idiomatic Rust patterns
+  source: cargo clippy --fix + manual sort_by_key, Reverse, to_vec, strip_prefix
+

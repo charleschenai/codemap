@@ -26,7 +26,7 @@ pub fn data_flow(graph: &mut Graph, target: &str, _tree_mode: bool) -> String {
         if filtered.is_empty() { return format!("Function not found: {name} in {node_id}"); }
         filtered
     } else {
-        node.functions.iter().cloned().collect()
+        node.functions.to_vec()
     };
 
     // Now get CPG ref immutably (ensure_cpg already built it above)

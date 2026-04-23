@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::process::Command;
@@ -400,7 +401,7 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
         }
     }
 
-    results.sort_by(|a, b| b.complexity.cmp(&a.complexity));
+    results.sort_by_key(|a| Reverse(a.complexity));
 
     let top: &[ComplexityResult] = if !target.is_empty() {
         &results
@@ -494,7 +495,7 @@ pub fn import_cost(graph: &Graph, target: &str) -> String {
         .filter(|id| **id != node.id)
         .map(|id| (*id, graph.nodes.get(*id).map(|n| n.lines).unwrap_or(0)))
         .collect();
-    deps.sort_by(|a, b| b.1.cmp(&a.1));
+    deps.sort_by_key(|a| Reverse(a.1));
 
     for d in deps.iter().take(15) {
         lines.push(format!("  {:>6} lines  {}", d.1, d.0));
@@ -563,7 +564,7 @@ pub fn churn(graph: &Graph, target: &str) -> String {
             risk: changes * coupling,
         });
     }
-    risks.sort_by(|a, b| b.risk.cmp(&a.risk));
+    risks.sort_by_key(|a| Reverse(a.risk));
 
     let mut lines = vec![
         format!("=== Churn Risk: {target}..HEAD ==="),

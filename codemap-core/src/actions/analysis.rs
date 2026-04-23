@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use regex::Regex;
@@ -165,7 +166,7 @@ pub fn phone_home(graph: &Graph) -> String {
         return "No external URLs found in codebase.".to_string();
     }
 
-    results.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    results.sort_by_key(|a| Reverse(a.1.len()));
     let mut lines = vec![
         format!("{} files with external URLs:", results.len()),
         String::new(),
@@ -359,7 +360,7 @@ pub fn callers(graph: &Graph, target: &str) -> String {
     };
 
     let mut results: Vec<(String, usize, String)> = Vec::new();
-    let export_check = format!("export ");
+    let export_check = "export ".to_string();
     let fn_check = format!("function {}", target);
 
     let mut ids: Vec<String> = graph.nodes.keys().cloned().collect();

@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use crate::types::Graph;
 
@@ -254,7 +255,7 @@ pub fn bridges(graph: &Graph) -> String {
         let node = graph.nodes.get(id).unwrap();
         (id.clone(), node.imports.len() + node.imported_by.len())
     }).collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    ranked.sort_by_key(|a| Reverse(a.1));
 
     let mut lines = vec![
         format!("=== Articulation Points ({} cut vertices) ===", ranked.len()),
@@ -347,7 +348,7 @@ pub fn clusters(graph: &Graph) -> String {
     let mut sorted: Vec<Vec<String>> = groups.into_values()
         .filter(|g| g.len() > 1)
         .collect();
-    sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+    sorted.sort_by_key(|a| Reverse(a.len()));
 
     if sorted.is_empty() {
         return "No clusters found \u{2014} all files are independent.".to_string();
@@ -427,7 +428,7 @@ pub fn islands(graph: &Graph) -> String {
         components.push(component);
     }
 
-    components.sort_by(|a, b| b.len().cmp(&a.len()));
+    components.sort_by_key(|a| Reverse(a.len()));
     let mut lines = vec![
         format!("=== Islands ({} disconnected components) ===", components.len()),
         String::new(),

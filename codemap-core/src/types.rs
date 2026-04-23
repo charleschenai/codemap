@@ -352,7 +352,7 @@ pub fn matches_pattern(callee: &str, pattern: &str) -> bool {
         }
         if pattern.ends_with(".*") && callee.starts_with(&pattern[..pattern.len()-1]) { return true; }
     } else {
-        if let Some(last) = callee.split('.').last() {
+        if let Some(last) = callee.split('.').next_back() {
             if last == pattern { return true; }
         }
     }

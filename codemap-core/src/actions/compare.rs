@@ -1,6 +1,7 @@
 use crate::scanner;
 use crate::types::Graph;
 use crate::ScanOptions;
+use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -51,7 +52,7 @@ pub fn compare(graph: &mut Graph, target: &str) -> String {
             coupling_changes.push((id.to_string(), b_coupling, a_coupling));
         }
     }
-    coupling_changes.sort_by(|a, b| (b.2 - b.1).abs().cmp(&(a.2 - a.1).abs()));
+    coupling_changes.sort_by_key(|a| Reverse((a.2 - a.1).abs()));
 
     // URLs
     let mut a_url_set: HashSet<String> = HashSet::new();
