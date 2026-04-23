@@ -13,7 +13,7 @@ use std::time::Instant;
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CACHE_VERSION: u32 = 5;
+const CACHE_VERSION: u32 = 6;
 const MAX_DEPTH: usize = 50;
 
 /// Directories to skip during walk.
@@ -38,6 +38,7 @@ struct CacheEntry {
     lines: usize,
     functions: Vec<crate::types::FunctionInfo>,
     data_flow: Option<crate::types::FileDataFlow>,
+    bridges: Vec<crate::types::BridgeInfo>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -95,6 +96,7 @@ fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
                     lines: node.lines,
                     functions: node.functions.clone(),
                     data_flow: node.data_flow.clone(),
+                    bridges: node.bridges.clone(),
                 },
             );
         }
@@ -228,6 +230,7 @@ fn scan_single_dir(
                                 lines: cached.lines,
                                 functions: cached.functions.clone(),
                                 data_flow: cached.data_flow.clone(),
+                                bridges: cached.bridges.clone(),
                                 mtime: Some(mtime),
                             },
                         );
@@ -293,6 +296,7 @@ fn scan_single_dir(
                     lines,
                     functions: result.functions,
                     data_flow: result.data_flow,
+                    bridges: result.bridges,
                     mtime: Some(mtime),
                 },
             })

@@ -12,6 +12,7 @@ pub struct ParseResult {
     pub functions: Vec<FunctionInfo>,
     pub data_flow: Option<FileDataFlow>,
     pub urls: Vec<String>,
+    pub bridges: Vec<BridgeInfo>,
 }
 
 pub fn parse_file(_path: &str, content: &str, ext: &str) -> ParseResult {
@@ -26,8 +27,9 @@ pub fn parse_file(_path: &str, content: &str, ext: &str) -> ParseResult {
             let mut functions = extract_functions_from_ast(root, grammar, src);
             let data_flow = Some(extract_data_flow_from_ast(root, grammar, src, &mut functions));
             let urls = extract_urls(content);
+            let bridges = extract_bridges(content, ext, Some(root), src);
 
-            return ParseResult { imports, exports, functions, data_flow, urls };
+            return ParseResult { imports, exports, functions, data_flow, urls, bridges };
         }
     }
 
@@ -35,8 +37,9 @@ pub fn parse_file(_path: &str, content: &str, ext: &str) -> ParseResult {
     let imports = regex_extract_imports(content);
     let exports = regex_extract_exports(content);
     let urls = extract_urls(content);
+    let bridges = extract_bridges(content, ext, None, &[]);
 
-    ParseResult { imports, exports, functions: vec![], data_flow: None, urls }
+    ParseResult { imports, exports, functions: vec![], data_flow: None, urls, bridges }
 }
 
 // ── Grammar Mapping ─────────────────────────────────────────────────
@@ -1226,6 +1229,35 @@ fn extract_urls(content: &str) -> Vec<String> {
         urls.push(sanitize_url(limited));
     }
     urls
+}
+
+// ── Bridge Detection ───────────────────────────────────────────────
+
+fn extract_bridges(content: &str, ext: &str, root: Option<tree_sitter::Node>, src: &[u8]) -> Vec<BridgeInfo> {
+    let mut bridges = Vec::new();
+
+    match ext {
+        ".py" => extract_python_bridges(content, &mut bridges),
+        ".cpp" | ".cc" | ".cxx" | ".hpp" | ".cu" | ".cuh" | ".c" | ".h" => {
+            extract_cpp_bridges(content, &mut bridges);
+        }
+        ".rs" => extract_rust_bridges(content, root, src, &mut bridges),
+        _ => {}
+    }
+
+    bridges
+}
+
+fn extract_python_bridges(_content: &str, _bridges: &mut Vec<BridgeInfo>) {
+    // Will be filled by Feature 1 (torch.ops), Feature 2 (@triton.jit)
+}
+
+fn extract_cpp_bridges(_content: &str, _bridges: &mut Vec<BridgeInfo>) {
+    // Will be filled by Feature 1 (TORCH_LIBRARY), Feature 3 (pybind11)
+}
+
+fn extract_rust_bridges(_content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], _bridges: &mut Vec<BridgeInfo>) {
+    // Will be filled by Feature 3 (PyO3)
 }
 
 // ── Regex Fallback ──────────────────────────────────────────────────

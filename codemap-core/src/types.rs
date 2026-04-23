@@ -15,6 +15,58 @@ pub struct FunctionInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeInfo {
+    pub kind: BridgeKind,
+    pub name: String,
+    pub target: Option<String>,  // C++ function name, Rust impl, etc.
+    pub line: usize,
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BridgeKind {
+    TorchLibrary,    // C++ TORCH_LIBRARY m.def/m.impl
+    TorchOps,        // Python torch.ops.ns.op call
+    Pybind11,        // C++ PYBIND11_MODULE, m.def
+    PyO3Class,       // Rust #[pyclass]
+    PyO3Function,    // Rust #[pyfunction]
+    PyO3Methods,     // Rust #[pymethods]
+    TritonKernel,    // Python @triton.jit
+    TritonLaunch,    // Python kernel[grid](args)
+    CudaKernel,      // C++ __global__ function
+    CudaLaunch,      // C++ kernel<<<grid>>>(args)
+}
+
+impl BridgeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BridgeKind::TorchLibrary => "torch_library",
+            BridgeKind::TorchOps => "torch_ops",
+            BridgeKind::Pybind11 => "pybind11",
+            BridgeKind::PyO3Class => "pyo3_class",
+            BridgeKind::PyO3Function => "pyo3_function",
+            BridgeKind::PyO3Methods => "pyo3_methods",
+            BridgeKind::TritonKernel => "triton_kernel",
+            BridgeKind::TritonLaunch => "triton_launch",
+            BridgeKind::CudaKernel => "cuda_kernel",
+            BridgeKind::CudaLaunch => "cuda_launch",
+        }
+    }
+
+    pub fn is_gpu(&self) -> bool {
+        matches!(self, BridgeKind::TritonKernel | BridgeKind::CudaKernel)
+    }
+
+    pub fn is_registration(&self) -> bool {
+        matches!(self, BridgeKind::TorchLibrary | BridgeKind::Pybind11 | BridgeKind::PyO3Class | BridgeKind::PyO3Function | BridgeKind::PyO3Methods)
+    }
+
+    pub fn is_call(&self) -> bool {
+        matches!(self, BridgeKind::TorchOps | BridgeKind::TritonLaunch | BridgeKind::CudaLaunch)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: String,
     pub imports: Vec<String>,
@@ -24,6 +76,7 @@ pub struct GraphNode {
     pub lines: usize,
     pub functions: Vec<FunctionInfo>,
     pub data_flow: Option<FileDataFlow>,
+    pub bridges: Vec<BridgeInfo>,
     #[serde(skip)]
     pub mtime: Option<f64>,
 }
