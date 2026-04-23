@@ -603,7 +603,7 @@ pub fn diff(graph: &Graph, target: &str) -> String {
     }
 
     let output = match std::process::Command::new("git")
-        .args(["diff", "--name-only", "--", git_ref])
+        .args(["diff", "--name-only", git_ref])
         .current_dir(&graph.scan_dir)
         .output()
     {

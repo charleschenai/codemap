@@ -517,7 +517,7 @@ pub fn churn(graph: &Graph, target: &str) -> String {
     }
 
     let log_output = match Command::new("git")
-        .args(["log", "--format=", "--name-only", "--", &format!("{target}..HEAD")])
+        .args(["log", "--format=", "--name-only", &format!("{target}..HEAD")])
         .current_dir(&graph.scan_dir)
         .output()
     {
@@ -697,7 +697,7 @@ enum GitDiffResult {
 /// Run `git diff --name-only -- <ref>` and return changed files.
 fn git_diff_name_only(graph: &Graph, git_ref: &str) -> GitDiffResult {
     match Command::new("git")
-        .args(["diff", "--name-only", "--", git_ref])
+        .args(["diff", "--name-only", git_ref])
         .current_dir(&graph.scan_dir)
         .output()
     {
