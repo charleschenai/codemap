@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "codemap",
+  "description": "38-action codebase analysis — native Rust tree-sitter AST across 12 languages",
+  "owner": {
+    "name": "Charles Chen"
+  },
+  "plugins": [
+    {
+      "name": "codemap",
+      "version": "4.0.0",
+      "source": "./plugin",
+      "description": "38-action codebase analysis — native Rust tree-sitter AST, function-level call graphs, PageRank, HITS, bridges, clusters, CPG data-flow, taint analysis, backward slicing, and more across 12 languages including C/C++/CUDA."
+    }
+  ]
+}
