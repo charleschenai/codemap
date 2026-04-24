@@ -54,6 +54,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "git-coupling" => Ok(functions::git_coupling(graph, target)),
         "risk" => Ok(functions::risk(graph, target)),
         "decorators" => Ok(analysis::decorators(graph, target)),
+        "rename" => Ok(analysis::rename(graph, target)),
         // Data Flow (5)
         "data-flow" => Ok(dataflow::data_flow(graph, target, tree_mode)),
         "taint" => Ok(dataflow::taint(graph, target, tree_mode)),

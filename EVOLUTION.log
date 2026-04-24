@@ -61,3 +61,6 @@
 [2026-04-23 18:28] upgrade: add decorators action — find symbols by @decorator or #[attribute] pattern
   source: code-graph-ai competitor — cross-language decorator/attribute search
 
+[2026-04-23 18:29] upgrade: add rename action — preview all files affected by renaming a symbol
+  source: code-graph-ai competitor — word-boundary regex search + diff preview
+

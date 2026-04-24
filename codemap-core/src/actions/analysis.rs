@@ -1059,3 +1059,84 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
     }
     out.join("\n")
 }
+
+// ── 18. rename ─────────────────────────────────────────────────────
+
+pub fn rename(graph: &Graph, target: &str) -> String {
+    let parts: Vec<&str> = target.split_whitespace().collect();
+    if parts.len() < 2 {
+        return "Usage: codemap rename <old_name> <new_name>".to_string();
+    }
+    let (old_name, new_name) = (parts[0], parts[1]);
+
+    let dir = &graph.scan_dir;
+    let pattern = format!(r"\b{}\b", escape_regex(old_name));
+    let re = match Regex::new(&pattern) {
+        Ok(r) => r,
+        Err(_) => return format!("Invalid symbol name: {}", old_name),
+    };
+
+    struct RenameHit {
+        file: String,
+        line: usize,
+        before: String,
+        after: String,
+    }
+
+    let mut hits: Vec<RenameHit> = Vec::new();
+    let mut file_count = 0usize;
+    let mut ids: Vec<String> = graph.nodes.keys().cloned().collect();
+    ids.sort();
+
+    for id in &ids {
+        let path = Path::new(dir).join(id);
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut file_had_hit = false;
+        for (i, line) in content.lines().enumerate() {
+            if re.is_match(line) {
+                let before = line.trim().to_string();
+                let after = re.replace_all(line.trim(), new_name).to_string();
+                if before != after {
+                    if !file_had_hit { file_count += 1; file_had_hit = true; }
+                    hits.push(RenameHit {
+                        file: id.clone(),
+                        line: i + 1,
+                        before: if before.len() > 80 { format!("{}...", &before[..77]) } else { before },
+                        after: if after.len() > 80 { format!("{}...", &after[..77]) } else { after },
+                    });
+                }
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        return format!("\"{}\" not found in any scanned file.", old_name);
+    }
+
+    let mut out = vec![
+        format!("=== Rename Preview: {} → {} ===", old_name, new_name),
+        format!("{} occurrences in {} files", hits.len(), file_count),
+        String::new(),
+    ];
+
+    let mut last_file = "";
+    for h in hits.iter().take(50) {
+        if h.file != last_file {
+            out.push(format!("  {}:", h.file));
+            last_file = &h.file;
+        }
+        out.push(format!("    L{:<4} - {}", h.line, h.before));
+        out.push(format!("    L{:<4} + {}", h.line, h.after));
+    }
+    if hits.len() > 50 {
+        out.push(format!("  ... and {} more occurrences", hits.len() - 50));
+    }
+
+    out.push(String::new());
+    out.push("This is a preview only — no files were modified.".to_string());
+    out.join("\n")
+}
