@@ -52,3 +52,6 @@
 [2026-04-23 18:23] upgrade: add clones action — structural duplicate detection via fingerprinting
   source: code-graph-ai competitor — groups functions by (lines, calls, params, exported)
 
+[2026-04-23 18:24] upgrade: add git-coupling action — find hidden dependencies via co-change analysis
+  source: Axon competitor — temporal coupling from git history, flags HIDDEN vs import-linked
+

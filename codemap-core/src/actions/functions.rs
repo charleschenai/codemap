@@ -762,6 +762,145 @@ fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
     }
 }
 
+// ── git-coupling ───────────────────────────────────────────────────
+
+pub fn git_coupling(graph: &Graph, target: &str) -> String {
+    // How many commits to look back
+    let commit_count = target.parse::<usize>().unwrap_or(200);
+
+    let log_output = match Command::new("git")
+        .args(["log", "--format=%H", "--name-only", &format!("-{}", commit_count)])
+        .current_dir(&graph.scan_dir)
+        .output()
+    {
+        Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).to_string(),
+        _ => return "Failed to run git log. Make sure you're in a git repo.".to_string(),
+    };
+
+    // Parse: group files by commit hash
+    let mut commits: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+
+    for line in log_output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            if !current.is_empty() {
+                commits.push(std::mem::take(&mut current));
+            }
+        } else if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
+            if !current.is_empty() {
+                commits.push(std::mem::take(&mut current));
+            }
+            // skip the hash line itself
+        } else if graph.nodes.contains_key(line) {
+            current.push(line.to_string());
+        }
+    }
+    if !current.is_empty() {
+        commits.push(current);
+    }
+
+    if commits.is_empty() {
+        return "No commits with source file changes found.".to_string();
+    }
+
+    // Count co-changes: for each commit, every pair of files changed together
+    let mut pair_counts: HashMap<(String, String), usize> = HashMap::new();
+    let mut file_counts: HashMap<String, usize> = HashMap::new();
+
+    for commit_files in &commits {
+        if commit_files.len() < 2 || commit_files.len() > 30 {
+            // Skip single-file commits and huge merge commits
+            continue;
+        }
+        for f in commit_files {
+            *file_counts.entry(f.clone()).or_insert(0) += 1;
+        }
+        for i in 0..commit_files.len() {
+            for j in (i + 1)..commit_files.len() {
+                let a = &commit_files[i];
+                let b = &commit_files[j];
+                let key = if a < b { (a.clone(), b.clone()) } else { (b.clone(), a.clone()) };
+                *pair_counts.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    if pair_counts.is_empty() {
+        return "No file co-changes found in recent history.".to_string();
+    }
+
+    // Calculate coupling strength: co_changes / min(changes_a, changes_b)
+    struct CouplingResult {
+        file_a: String,
+        file_b: String,
+        co_changes: usize,
+        strength: f64,
+    }
+
+    let mut results: Vec<CouplingResult> = Vec::new();
+    for ((a, b), co) in &pair_counts {
+        if *co < 2 { continue; } // Need at least 2 co-changes
+        let count_a = file_counts.get(a).copied().unwrap_or(1);
+        let count_b = file_counts.get(b).copied().unwrap_or(1);
+        let strength = *co as f64 / count_a.min(count_b) as f64;
+        results.push(CouplingResult {
+            file_a: a.clone(),
+            file_b: b.clone(),
+            co_changes: *co,
+            strength,
+        });
+    }
+
+    results.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
+
+    if results.is_empty() {
+        return "No significant co-change patterns found.".to_string();
+    }
+
+    // Check which pairs are NOT connected by imports (hidden dependencies)
+    let mut lines = vec![
+        format!("=== Git Coupling: last {} commits ===", commit_count),
+        format!("Commits analyzed: {}", commits.len()),
+        String::new(),
+        "  Strength  Co-changes  Link     Files".to_string(),
+    ];
+
+    for r in results.iter().take(25) {
+        let short_a = r.file_a.rsplit('/').next().unwrap_or(&r.file_a);
+        let short_b = r.file_b.rsplit('/').next().unwrap_or(&r.file_b);
+
+        // Check if there's an import link between them
+        let has_import = graph.nodes.get(&r.file_a)
+            .map(|n| n.imports.contains(&r.file_b) || n.imported_by.contains(&r.file_b))
+            .unwrap_or(false);
+        let link = if has_import { "import" } else { "HIDDEN" };
+
+        lines.push(format!(
+            "    {:>4.0}%  {:>10}  {:>6}   {} <-> {}",
+            r.strength * 100.0, r.co_changes, link, short_a, short_b,
+        ));
+    }
+
+    if results.len() > 25 {
+        lines.push(format!("  ... and {} more pairs", results.len() - 25));
+    }
+
+    let hidden_count = results.iter().take(25).filter(|r| {
+        !graph.nodes.get(&r.file_a)
+            .map(|n| n.imports.contains(&r.file_b) || n.imported_by.contains(&r.file_b))
+            .unwrap_or(false)
+    }).count();
+
+    if hidden_count > 0 {
+        lines.push(String::new());
+        lines.push(format!("  {} HIDDEN dependencies — files co-change but have no import link.", hidden_count));
+        lines.push("  These are the most dangerous: changes in one silently require changes in the other.".to_string());
+    }
+
+    lines.join("\n")
+}
+
 // ── clones ─────────────────────────────────────────────────────────
 
 pub fn clones(graph: &Graph, _target: &str) -> String {
