@@ -811,8 +811,6 @@ pub fn health(graph: &Graph) -> String {
 
     // --- Metric 2: Coupling balance (0-25 points) ---
     // What fraction of the codebase does the most-connected file touch?
-    let total_imports: usize = graph.nodes.values().map(|n| n.imports.len()).sum();
-    let avg_imports = if file_count > 0 { total_imports as f64 / file_count as f64 } else { 0.0 };
     let max_coupling = graph.nodes.values().map(|n| n.imports.len() + n.imported_by.len()).max().unwrap_or(0);
     let coupling_pct = if file_count > 1 { max_coupling as f64 / (file_count - 1) as f64 } else { 0.0 };
     let coupling_score = if coupling_pct <= 0.4 { 25 }

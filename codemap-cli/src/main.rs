@@ -37,6 +37,10 @@ struct Cli {
     #[arg(long = "no-cache")]
     no_cache: bool,
 
+    /// Watch mode: re-run every N seconds (default 2)
+    #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+    watch: Option<u64>,
+
     /// The analysis action to perform
     action: String,
 
@@ -44,39 +48,31 @@ struct Cli {
     target: Vec<String>,
 }
 
-fn main() {
-    let cli = Cli::parse();
-    let target = cli.target.join(" ");
-    let dirs = if cli.dirs.is_empty() {
-        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
-    } else {
-        cli.dirs
-    };
-
+fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, action: &str, target: &str, tree: bool, json: bool) -> bool {
     let options = ScanOptions {
-        dirs,
-        include_paths: cli.include_paths,
-        no_cache: cli.no_cache,
+        dirs: dirs.to_vec(),
+        include_paths: include_paths.to_vec(),
+        no_cache,
     };
 
     let mut graph = match scan(options) {
         Ok(g) => g,
-        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+        Err(e) => { eprintln!("Error: {e}"); return false; }
     };
 
-    let result = match execute(&mut graph, &cli.action, &target, cli.tree) {
+    let result = match execute(&mut graph, action, target, tree) {
         Ok(r) => r,
         Err(CodemapError::UnknownAction(a)) => {
             eprintln!("Unknown action: {a}. Run 'codemap --help' for usage.");
-            process::exit(1);
+            return false;
         }
-        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+        Err(e) => { eprintln!("Error: {e}"); return false; }
     };
 
-    if cli.json {
+    if json {
         let json_data = serde_json::json!({
-            "action": cli.action,
-            "target": if target.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(target) },
+            "action": action,
+            "target": if target.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(target.to_string()) },
             "files": graph.nodes.len(),
             "result": result,
         });
@@ -89,5 +85,35 @@ fn main() {
         || result.starts_with("No files")
         || result.starts_with("Usage:")
         || result.starts_with("Invalid git ref:");
-    if is_error { process::exit(1); }
+    !is_error
+}
+
+fn main() {
+    let cli = Cli::parse();
+    let target = cli.target.join(" ");
+    let dirs = if cli.dirs.is_empty() {
+        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
+    } else {
+        cli.dirs
+    };
+
+    if let Some(interval) = cli.watch {
+        let secs = if interval == 0 { 2 } else { interval };
+        loop {
+            // Clear screen
+            print!("\x1b[2J\x1b[H");
+            // Get current time without chrono dependency
+            let now = {
+                let output = std::process::Command::new("date").arg("+%H:%M:%S").output();
+                output.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+            };
+            eprintln!("Every {}s: codemap {} {}  ({})\n", secs, cli.action, target, now);
+            run_once(&dirs, &cli.include_paths, true, &cli.action, &target, cli.tree, cli.json);
+            std::thread::sleep(std::time::Duration::from_secs(secs));
+        }
+    } else {
+        if !run_once(&dirs, &cli.include_paths, cli.no_cache, &cli.action, &target, cli.tree, cli.json) {
+            process::exit(1);
+        }
+    }
 }
