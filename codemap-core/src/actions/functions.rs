@@ -786,6 +786,7 @@ pub fn entry_points(graph: &Graph, _target: &str) -> String {
     }
 
     let mut entries: Vec<EntryPoint> = Vec::new();
+    let route_fn_re = Regex::new(r"(?:def|function|fn|func|pub fn|async fn)\s+(\w+)").unwrap();
 
     // Pattern-based entry point detection
     let test_patterns = ["test_", "Test", "spec_", "Spec", "it(", "describe(", "should"];
@@ -824,10 +825,8 @@ pub fn entry_points(graph: &Graph, _target: &str) -> String {
             for (i, line) in content.lines().enumerate() {
                 let trimmed = line.trim();
                 if route_decorators.iter().any(|d| trimmed.starts_with(d)) {
-                    // Find next function name
-                    let re = regex::Regex::new(r"(?:def|function|fn|func|pub fn|async fn)\s+(\w+)").unwrap();
                     for next in content.lines().skip(i + 1).take(3) {
-                        if let Some(caps) = re.captures(next) {
+                        if let Some(caps) = route_fn_re.captures(next) {
                             entries.push(EntryPoint {
                                 file: file_id.clone(), name: caps[1].to_string(),
                                 kind: "route", line: i + 1,
