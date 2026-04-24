@@ -46,3 +46,6 @@
 [2026-04-23 17:20] upgrade: add -q/--quiet flag — suppress scan/cache status noise
   source: scripting + AI agent usage — stderr noise pollutes output
 
+[2026-04-23 17:21] upgrade: bump version to 4.3.0
+  source: 6 evolution iterations (mermaid, health, watch, summary, quiet, version bump)
+
