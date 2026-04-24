@@ -517,3 +517,89 @@ pub fn dot(graph: &Graph, target: &str) -> String {
     lines.push("}".to_string());
     lines.join("\n")
 }
+
+/// Mermaid flowchart: renders dependency graph in Mermaid syntax for GitHub/docs embedding.
+pub fn mermaid(graph: &Graph, target: &str) -> String {
+    let nodes: HashMap<&String, &crate::types::GraphNode>;
+
+    if !target.is_empty() && target != "." {
+        let mut seeds: Vec<String> = Vec::new();
+        if let Some(node) = graph.find_node(target) {
+            seeds.push(node.id.clone());
+        } else {
+            for id in graph.nodes.keys() {
+                if id.contains(target) {
+                    seeds.push(id.clone());
+                }
+            }
+        }
+        if seeds.is_empty() {
+            return format!("No files matching \"{target}\".");
+        }
+
+        // BFS 2 hops out
+        let mut component: HashSet<String> = seeds.iter().cloned().collect();
+        let mut frontier: Vec<String> = seeds;
+        for _ in 0..2 {
+            let mut next: Vec<String> = Vec::new();
+            for id in &frontier {
+                if let Some(n) = graph.nodes.get(id) {
+                    for imp in &n.imports {
+                        if graph.nodes.contains_key(imp) && !component.contains(imp) {
+                            component.insert(imp.clone());
+                            next.push(imp.clone());
+                        }
+                    }
+                    for imp in &n.imported_by {
+                        if !component.contains(imp) {
+                            component.insert(imp.clone());
+                            next.push(imp.clone());
+                        }
+                    }
+                }
+            }
+            frontier = next;
+        }
+        nodes = graph.nodes.iter()
+            .filter(|(id, _)| component.contains(*id))
+            .collect();
+    } else {
+        nodes = graph.nodes.iter().collect();
+    }
+
+    // Mermaid node ID: replace non-alphanumeric with underscores
+    let mermaid_id = |s: &str| -> String {
+        s.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect()
+    };
+
+    // Short label: just filename without directory prefix
+    let short_label = |s: &str| -> String {
+        s.rsplit('/').next().unwrap_or(s).to_string()
+    };
+
+    let mut lines = vec![
+        "graph LR".to_string(),
+    ];
+
+    // Emit node declarations with labels
+    let mut sorted_ids: Vec<&&String> = nodes.keys().collect();
+    sorted_ids.sort();
+    for id in &sorted_ids {
+        let label = short_label(id);
+        lines.push(format!("    {}[{}]", mermaid_id(id), label));
+    }
+    lines.push(String::new());
+
+    // Emit edges
+    for id in &sorted_ids {
+        if let Some(node) = nodes.get(*id) {
+            for imp in &node.imports {
+                if nodes.contains_key(imp) {
+                    lines.push(format!("    {} --> {}", mermaid_id(id), mermaid_id(imp)));
+                }
+            }
+        }
+    }
+
+    lines.join("\n")
+}

@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (42 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (43 actions, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
                 orphan-exports
   Navigation:   why, paths, subgraph, similar
-  Graph Theory: pagerank, hubs, bridges, clusters, islands, dot
+  Graph Theory: pagerank, hubs, bridges, clusters, islands, dot, mermaid
   Functions:    call-graph, dead-functions, fn-info, diff-functions, complexity,
                 import-cost, churn, api-diff
   Data Flow:    data-flow, taint, slice, trace-value, sinks

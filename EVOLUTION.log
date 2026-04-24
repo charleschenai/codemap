@@ -31,3 +31,6 @@
 [2026-04-23 16:22] upgrade: bump version to 4.2.0
   source: 10 evolution iterations applied
 
+[2026-04-23 17:11] upgrade: add mermaid action — GitHub-native dependency diagrams
+  source: web research — Mermaid is standard for embeddable code diagrams
+

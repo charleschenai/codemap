@@ -38,6 +38,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "clusters" => Ok(graph_theory::clusters(graph)),
         "islands" => Ok(graph_theory::islands(graph)),
         "dot" => Ok(graph_theory::dot(graph, target)),
+        "mermaid" => Ok(graph_theory::mermaid(graph, target)),
         // Function-Level (8)
         "call-graph" => Ok(functions::call_graph(graph, target)),
         "dead-functions" => Ok(functions::dead_functions(graph)),
