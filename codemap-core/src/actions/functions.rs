@@ -762,6 +762,133 @@ fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
     }
 }
 
+// ── diff-impact ────────────────────────────────────────────────────
+
+pub fn diff_impact(graph: &Graph, target: &str) -> String {
+    if target.is_empty() {
+        return "Usage: codemap diff-impact <git-ref>  (e.g. codemap diff-impact HEAD~3)".to_string();
+    }
+    if target.starts_with('-') {
+        return format!("Invalid git ref: \"{target}\"");
+    }
+
+    let changed_files = match git_diff_name_only(graph, target) {
+        GitDiffResult::Ok(files) => files,
+        GitDiffResult::Error(e) => return e,
+        GitDiffResult::Empty => return format!("No files changed since {target}."),
+    };
+
+    let relevant: Vec<String> = changed_files.iter()
+        .filter(|f| graph.nodes.contains_key(f.as_str()))
+        .cloned()
+        .collect();
+
+    if relevant.is_empty() {
+        return format!("{} files changed but none in scanned source.", changed_files.len());
+    }
+
+    // BFS blast radius per file
+    let mut all_affected: HashMap<String, Vec<String>> = HashMap::new(); // affected -> vec of sources
+    for file in &relevant {
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut queue = VecDeque::new();
+        visited.insert(file.clone());
+        queue.push_back(file.clone());
+        while let Some(current) = queue.pop_front() {
+            if let Some(n) = graph.nodes.get(&current) {
+                for dep in &n.imported_by {
+                    if !visited.contains(dep) && !relevant.contains(dep) {
+                        visited.insert(dep.clone());
+                        queue.push_back(dep.clone());
+                        all_affected.entry(dep.clone()).or_default().push(file.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Function-level changes
+    let func_re = Regex::new(concat!(
+        r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()",
+        r"|(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)",
+        r"|def\s+(\w+)",
+        r"|func\s+(\w+)",
+    )).unwrap();
+
+    let mut changed_fns: Vec<(String, String)> = Vec::new();
+    for file in &relevant {
+        if let Some(node) = graph.nodes.get(file) {
+            let old_content = match git_show(graph, target, file) {
+                GitShowResult::Ok(c) => c,
+                _ => { // New file — all functions are new
+                    for f in &node.functions {
+                        changed_fns.push((file.clone(), format!("+ {}()", f.name)));
+                    }
+                    continue;
+                }
+            };
+            let mut old_fns: HashSet<String> = HashSet::new();
+            for caps in func_re.captures_iter(&old_content) {
+                let name = caps.get(1).or(caps.get(2)).or(caps.get(3)).or(caps.get(4)).or(caps.get(5));
+                if let Some(m) = name { old_fns.insert(m.as_str().to_string()); }
+            }
+            let cur_fns: HashSet<String> = node.functions.iter().map(|f| f.name.clone()).collect();
+            for name in cur_fns.difference(&old_fns) {
+                changed_fns.push((file.clone(), format!("+ {}()", name)));
+            }
+            for name in old_fns.difference(&cur_fns) {
+                changed_fns.push((file.clone(), format!("- {}()", name)));
+            }
+            for name in cur_fns.intersection(&old_fns) {
+                changed_fns.push((file.clone(), format!("~ {}()", name)));
+            }
+        }
+    }
+
+    let mut lines = vec![
+        format!("=== Diff Impact: {} ===", target),
+        format!("{} files changed, {} functions affected, {} files in blast radius",
+            relevant.len(), changed_fns.len(), all_affected.len()),
+        String::new(),
+        "Changed files:".to_string(),
+    ];
+
+    let mut sorted = relevant.clone();
+    sorted.sort();
+    for f in &sorted {
+        let fn_changes: Vec<&str> = changed_fns.iter()
+            .filter(|(file, _)| file == f)
+            .map(|(_, change)| change.as_str())
+            .collect();
+        let coupling = graph.nodes.get(f).map(|n| n.imports.len() + n.imported_by.len()).unwrap_or(0);
+        lines.push(format!("  * {} (coupling: {})", f, coupling));
+        for fc in fn_changes.iter().take(10) {
+            lines.push(format!("      {}", fc));
+        }
+        if fn_changes.len() > 10 {
+            lines.push(format!("      ... and {} more", fn_changes.len() - 10));
+        }
+    }
+
+    if !all_affected.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("Blast radius ({} files):", all_affected.len()));
+        let mut affected_sorted: Vec<(&String, &Vec<String>)> = all_affected.iter().collect();
+        affected_sorted.sort_by_key(|(id, _)| *id);
+        for (id, sources) in affected_sorted.iter().take(20) {
+            let short_sources: Vec<&str> = sources.iter()
+                .map(|s| s.rsplit('/').next().unwrap_or(s))
+                .collect();
+            lines.push(format!("    {} (via {})", id, short_sources.join(", ")));
+        }
+        if all_affected.len() > 20 {
+            lines.push(format!("    ... and {} more", all_affected.len() - 20));
+        }
+    }
+
+    lines.join("\n")
+}
+
 // ── risk ───────────────────────────────────────────────────────────
 
 pub fn risk(graph: &Graph, target: &str) -> String {

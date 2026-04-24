@@ -73,3 +73,6 @@
 [2026-04-23 18:49] upgrade: add structure action — file tree with function outlines
   source: code-graph-ai competitor — shows files with per-function signatures and line numbers
 
+[2026-04-23 18:51] upgrade: add diff-impact action — git diff + function changes + blast radius in one view
+  source: code-graph-ai/Axon — combines file-level and function-level diff with dependency tracing
+
