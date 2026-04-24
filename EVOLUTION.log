@@ -82,3 +82,6 @@
 [2026-04-23 19:14] upgrade: add context action — PageRank-ranked token-budgeted repo map for LLM context
   source: wiki research (Aider, Klaus, Sephera) — every AI coding tool has this, codemap didn't
 
+[2026-04-23 19:15] upgrade: add nesting depth metric to complexity action
+  source: wiki research (AST metrics page) — nesting depth is more actionable than cyclomatic alone
+

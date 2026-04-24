@@ -368,6 +368,7 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
         file: String,
         name: String,
         complexity: usize,
+        max_depth: usize,
         line: usize,
     }
 
@@ -402,17 +403,28 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
 
         for f in &node.functions {
             let mut cc: usize = 1;
+            let mut depth: isize = 0;
+            let mut max_depth: isize = 0;
             let start = if f.start_line > 0 { f.start_line - 1 } else { 0 };
             let end = f.end_line.min(file_lines.len());
             for line in &file_lines[start..end] {
                 for _ in keyword_re.find_iter(line).chain(operator_re.find_iter(line)).chain(ternary_re.find_iter(line)) {
                     cc += 1;
                 }
+                // Track nesting depth via braces/indentation
+                for ch in line.chars() {
+                    match ch {
+                        '{' => { depth += 1; if depth > max_depth { max_depth = depth; } }
+                        '}' => { depth -= 1; }
+                        _ => {}
+                    }
+                }
             }
             results.push(ComplexityResult {
                 file: file_id.to_string(),
                 name: f.name.clone(),
                 complexity: cc,
+                max_depth: max_depth.max(0) as usize,
                 line: f.start_line,
             });
         }
@@ -449,8 +461,9 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
         } else {
             ""
         };
+        let depth_str = if r.max_depth > 0 { format!(" depth:{}", r.max_depth) } else { String::new() };
         lines.push(format!(
-            "  {:>3} complexity  {}:{}() L{}{label}",
+            "  {:>3} complexity  {}:{}() L{}{depth_str}{label}",
             r.complexity, r.file, r.name, r.line
         ));
     }
