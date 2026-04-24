@@ -88,3 +88,6 @@
 [2026-04-23 19:17] upgrade: add entry-points action — detect main/test/route entry points
   source: wiki research (dead code audit) + Axon competitor — entry point awareness improves dead code detection
 
+[2026-04-23 19:17] upgrade: bump version to 4.6.0
+  source: 3 wiki-informed features + nesting depth improvement
+
