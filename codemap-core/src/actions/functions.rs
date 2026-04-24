@@ -761,3 +761,84 @@ fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
         Err(_) => GitShowResult::Error,
     }
 }
+
+// ── clones ─────────────────────────────────────────────────────────
+
+pub fn clones(graph: &Graph, _target: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // Fingerprint: (line_count, call_count, param_count, is_exported)
+    // Group functions with identical fingerprints as structural clones
+    let mut groups: HashMap<u64, Vec<(String, String, usize, usize)>> = HashMap::new();
+
+    for (file_id, node) in &graph.nodes {
+        for f in &node.functions {
+            let line_count = if f.end_line > f.start_line { f.end_line - f.start_line + 1 } else { 1 };
+            // Skip trivial functions (< 3 lines)
+            if line_count < 3 { continue; }
+
+            let param_count = f.parameters.as_ref().map(|p| p.len()).unwrap_or(0);
+            let call_count = f.calls.len();
+
+            let mut hasher = DefaultHasher::new();
+            line_count.hash(&mut hasher);
+            call_count.hash(&mut hasher);
+            param_count.hash(&mut hasher);
+            f.is_exported.hash(&mut hasher);
+            let fingerprint = hasher.finish();
+
+            groups.entry(fingerprint).or_default().push((
+                file_id.clone(),
+                f.name.clone(),
+                f.start_line,
+                line_count,
+            ));
+        }
+    }
+
+    // Filter to groups with 2+ members (actual clones)
+    let mut clone_groups: Vec<Vec<(String, String, usize, usize)>> = groups
+        .into_values()
+        .filter(|g| g.len() >= 2)
+        .collect();
+
+    if clone_groups.is_empty() {
+        return "No structural clones found.".to_string();
+    }
+
+    // Sort groups by size (largest clone groups first), then by line count
+    clone_groups.sort_by(|a, b| {
+        b.len().cmp(&a.len())
+            .then_with(|| b[0].3.cmp(&a[0].3))
+    });
+
+    let total_clones: usize = clone_groups.iter().map(|g| g.len()).sum();
+    let mut lines = vec![
+        format!("=== Structural Clones: {} functions in {} groups ===", total_clones, clone_groups.len()),
+        String::new(),
+    ];
+
+    for (i, group) in clone_groups.iter().take(20).enumerate() {
+        let sample = &group[0];
+        lines.push(format!(
+            "  Group {} ({} clones, ~{} lines each):",
+            i + 1, group.len(), sample.3,
+        ));
+        let mut sorted = group.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+        for (file, name, line, _) in sorted.iter().take(8) {
+            let short = file.rsplit('/').next().unwrap_or(file);
+            lines.push(format!("    {}:{}() L{}", short, name, line));
+        }
+        if group.len() > 8 {
+            lines.push(format!("    ... and {} more", group.len() - 8));
+        }
+        lines.push(String::new());
+    }
+    if clone_groups.len() > 20 {
+        lines.push(format!("  ... and {} more groups", clone_groups.len() - 20));
+    }
+
+    lines.join("\n")
+}

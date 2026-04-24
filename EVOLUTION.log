@@ -49,3 +49,6 @@
 [2026-04-23 17:21] upgrade: bump version to 4.3.0
   source: 6 evolution iterations (mermaid, health, watch, summary, quiet, version bump)
 
+[2026-04-23 18:23] upgrade: add clones action — structural duplicate detection via fingerprinting
+  source: code-graph-ai competitor — groups functions by (lines, calls, params, exported)
+

@@ -50,6 +50,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "import-cost" => Ok(functions::import_cost(graph, target)),
         "churn" => Ok(functions::churn(graph, target)),
         "api-diff" => Ok(functions::api_diff(graph, target)),
+        "clones" => Ok(functions::clones(graph, target)),
         // Data Flow (5)
         "data-flow" => Ok(dataflow::data_flow(graph, target, tree_mode)),
         "taint" => Ok(dataflow::taint(graph, target, tree_mode)),
