@@ -784,7 +784,7 @@ pub fn summary(graph: &mut Graph) -> String {
         *exts.entry(ext).or_insert(0) += 1;
     }
     let mut ext_vec: Vec<(String, usize)> = exts.into_iter().collect();
-    ext_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    ext_vec.sort_by_key(|a| Reverse(a.1));
     let lang_summary: String = ext_vec.iter().take(5)
         .map(|(e, c)| format!("{} {}", c, e))
         .collect::<Vec<_>>()
@@ -801,7 +801,7 @@ pub fn summary(graph: &mut Graph) -> String {
             complex.push((node.id.clone(), f.name.clone(), f.calls.len()));
         }
     }
-    complex.sort_by(|a, b| b.2.cmp(&a.2));
+    complex.sort_by_key(|a| Reverse(a.2));
 
     // Circular deps count
     let circ_text = circular(graph);
@@ -812,7 +812,7 @@ pub fn summary(graph: &mut Graph) -> String {
     let mut coupling: Vec<(&String, usize)> = graph.nodes.iter()
         .map(|(id, n)| (id, n.imports.len() + n.imported_by.len()))
         .collect();
-    coupling.sort_by(|a, b| b.1.cmp(&a.1));
+    coupling.sort_by_key(|a| Reverse(a.1));
 
     let mut lines = vec![
         format!("\u{250c}\u{2500}\u{2500} {} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", score_line.replace("=== ", "").replace(" ===", "")),
@@ -824,21 +824,21 @@ pub fn summary(graph: &mut Graph) -> String {
     ];
 
     // Top 5 hottest files
-    lines.push(format!("\u{2502}  \u{2500}\u{2500} Hottest files (most coupled) \u{2500}\u{2500}"));
+    lines.push("\u{2502}  \u{2500}\u{2500} Hottest files (most coupled) \u{2500}\u{2500}".to_string());
     for (id, c) in coupling.iter().take(5) {
         lines.push(format!("\u{2502}    {:>3} connections  {}", c, id));
     }
-    lines.push(format!("\u{2502}"));
+    lines.push("\u{2502}".to_string());
 
     // Top 5 most complex functions
-    lines.push(format!("\u{2502}  \u{2500}\u{2500} Most complex functions \u{2500}\u{2500}"));
+    lines.push("\u{2502}  \u{2500}\u{2500} Most complex functions \u{2500}\u{2500}".to_string());
     for (file, name, calls) in complex.iter().take(5) {
         let short = file.rsplit('/').next().unwrap_or(file);
         lines.push(format!("\u{2502}    {:>3} calls  {}:{}", calls, short, name));
     }
 
-    lines.push(format!("\u{2502}"));
-    lines.push(format!("\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
+    lines.push("\u{2502}".to_string());
+    lines.push("\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}".to_string());
 
     lines.join("\n")
 }
@@ -1011,8 +1011,8 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
                     let dec = caps[1].to_string();
                     if !dec.to_lowercase().contains(&pattern) { continue; }
                     let mut sym = String::new();
-                    for j in (i + 1)..lines_vec.len().min(i + 5) {
-                        if let Some(sc) = next_def_re.captures(lines_vec[j]) {
+                    for next_line in lines_vec.iter().skip(i + 1).take(4) {
+                        if let Some(sc) = next_def_re.captures(next_line) {
                             sym = sc[1].to_string();
                             break;
                         }
@@ -1028,8 +1028,8 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
                     let attr = caps[1].to_string();
                     if !attr.to_lowercase().contains(&pattern) { continue; }
                     let mut sym = String::new();
-                    for j in (i + 1)..lines_vec.len().min(i + 5) {
-                        if let Some(sc) = next_def_re.captures(lines_vec[j]) {
+                    for next_line in lines_vec.iter().skip(i + 1).take(4) {
+                        if let Some(sc) = next_def_re.captures(next_line) {
                             sym = sc[1].to_string();
                             break;
                         }

@@ -67,3 +67,6 @@
 [2026-04-23 18:30] upgrade: bump version to 4.4.0
   source: 5 competitor-inspired features added
 
+[2026-04-23 18:48] fix: resolve 12 clippy warnings from new features — zero warnings restored
+  source: cargo clippy — sort_by_key, loop variable, identical blocks, too_many_arguments
+

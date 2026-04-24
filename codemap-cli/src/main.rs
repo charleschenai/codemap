@@ -52,6 +52,7 @@ struct Cli {
     target: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, quiet: bool, action: &str, target: &str, tree: bool, json: bool) -> bool {
     let options = ScanOptions {
         dirs: dirs.to_vec(),

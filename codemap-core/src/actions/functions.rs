@@ -914,15 +914,11 @@ pub fn git_coupling(graph: &Graph, target: &str) -> String {
 
     for line in log_output.lines() {
         let line = line.trim();
-        if line.is_empty() {
+        let is_separator = line.is_empty() || (line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()));
+        if is_separator {
             if !current.is_empty() {
                 commits.push(std::mem::take(&mut current));
             }
-        } else if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
-            if !current.is_empty() {
-                commits.push(std::mem::take(&mut current));
-            }
-            // skip the hash line itself
         } else if graph.nodes.contains_key(line) {
             current.push(line.to_string());
         }
