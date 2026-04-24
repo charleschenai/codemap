@@ -52,6 +52,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "api-diff" => Ok(functions::api_diff(graph, target)),
         "clones" => Ok(functions::clones(graph, target)),
         "git-coupling" => Ok(functions::git_coupling(graph, target)),
+        "risk" => Ok(functions::risk(graph, target)),
         // Data Flow (5)
         "data-flow" => Ok(dataflow::data_flow(graph, target, tree_mode)),
         "taint" => Ok(dataflow::taint(graph, target, tree_mode)),

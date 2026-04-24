@@ -55,3 +55,6 @@
 [2026-04-23 18:24] upgrade: add git-coupling action — find hidden dependencies via co-change analysis
   source: Axon competitor — temporal coupling from git history, flags HIDDEN vs import-linked
 
+[2026-04-23 18:26] upgrade: add risk action — PR/diff risk score (blast radius + coupling + complexity + scope)
+  source: Axon competitor — composite 0-100 risk with LOW/MEDIUM/HIGH/CRITICAL levels
+

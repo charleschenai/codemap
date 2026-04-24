@@ -762,6 +762,137 @@ fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
     }
 }
 
+// ── risk ───────────────────────────────────────────────────────────
+
+pub fn risk(graph: &Graph, target: &str) -> String {
+    if target.is_empty() {
+        return "Usage: codemap risk <git-ref>  (e.g. codemap risk HEAD~1, codemap risk main)".to_string();
+    }
+    if target.starts_with('-') {
+        return format!("Invalid git ref: \"{target}\"");
+    }
+
+    let changed_files = match git_diff_name_only(graph, target) {
+        GitDiffResult::Ok(files) => files,
+        GitDiffResult::Error(e) => return e,
+        GitDiffResult::Empty => return format!("No files changed since {target}."),
+    };
+
+    let relevant: Vec<String> = changed_files.iter()
+        .filter(|f| graph.nodes.contains_key(f.as_str()))
+        .cloned()
+        .collect();
+
+    if relevant.is_empty() {
+        return format!("{} files changed but none in scanned source.", changed_files.len());
+    }
+
+    // --- Factor 1: Blast radius (0-30) ---
+    let mut all_affected: HashSet<String> = HashSet::new();
+    for file in &relevant {
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut queue = VecDeque::new();
+        visited.insert(file.clone());
+        queue.push_back(file.clone());
+        while let Some(current) = queue.pop_front() {
+            if let Some(n) = graph.nodes.get(&current) {
+                for dep in &n.imported_by {
+                    if !visited.contains(dep) {
+                        visited.insert(dep.clone());
+                        queue.push_back(dep.clone());
+                    }
+                }
+            }
+        }
+        visited.remove(file);
+        for v in visited { all_affected.insert(v); }
+    }
+    let blast_pct = if graph.nodes.len() > 1 {
+        all_affected.len() as f64 / (graph.nodes.len() - relevant.len()).max(1) as f64
+    } else { 0.0 };
+    let blast_score = if blast_pct <= 0.05 { 0 }
+        else if blast_pct <= 0.15 { 5 }
+        else if blast_pct <= 0.30 { 10 }
+        else if blast_pct <= 0.50 { 20 }
+        else { 30 };
+
+    // --- Factor 2: Coupling (0-30) ---
+    let total_coupling: usize = relevant.iter()
+        .filter_map(|f| graph.nodes.get(f))
+        .map(|n| n.imports.len() + n.imported_by.len())
+        .sum();
+    let avg_coupling = total_coupling as f64 / relevant.len().max(1) as f64;
+    let coupling_score = if avg_coupling <= 1.0 { 0 }
+        else if avg_coupling <= 3.0 { 5 }
+        else if avg_coupling <= 5.0 { 10 }
+        else if avg_coupling <= 8.0 { 20 }
+        else { 30 };
+
+    // --- Factor 3: Complexity of changed code (0-20) ---
+    let mut high_complexity = 0usize;
+    let mut total_fns = 0usize;
+    for file in &relevant {
+        if let Some(node) = graph.nodes.get(file) {
+            for f in &node.functions {
+                total_fns += 1;
+                if f.calls.len() > 15 { high_complexity += 1; }
+            }
+        }
+    }
+    let complexity_ratio = if total_fns > 0 { high_complexity as f64 / total_fns as f64 } else { 0.0 };
+    let complexity_score = if complexity_ratio <= 0.05 { 0 }
+        else if complexity_ratio <= 0.15 { 5 }
+        else if complexity_ratio <= 0.30 { 10 }
+        else { 20 };
+
+    // --- Factor 4: File count (0-20) ---
+    let file_score = match relevant.len() {
+        0..=2 => 0,
+        3..=5 => 5,
+        6..=10 => 10,
+        11..=20 => 15,
+        _ => 20,
+    };
+
+    let total_risk = blast_score + coupling_score + complexity_score + file_score;
+    let level = match total_risk {
+        0..=15 => "LOW",
+        16..=35 => "MEDIUM",
+        36..=60 => "HIGH",
+        _ => "CRITICAL",
+    };
+
+    let bar = |score: usize, max: usize| -> String {
+        let filled = (score * 15) / max;
+        let empty = 15 - filled;
+        format!("[{}{}] {}/{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty), score, max)
+    };
+
+    let mut lines = vec![
+        format!("=== Risk Assessment: {} — {}/100 ({}) ===", target, total_risk, level),
+        String::new(),
+        format!("  Blast radius    {}  {:.0}% of codebase affected", bar(blast_score, 30), blast_pct * 100.0),
+        format!("  Coupling        {}  avg {:.1} connections/file", bar(coupling_score, 30), avg_coupling),
+        format!("  Complexity      {}  {:.0}% high-complexity fns", bar(complexity_score, 20), complexity_ratio * 100.0),
+        format!("  Scope           {}  {} files changed", bar(file_score, 20), relevant.len()),
+        String::new(),
+        "Changed files:".to_string(),
+    ];
+    let mut sorted = relevant.clone();
+    sorted.sort();
+    for f in &sorted {
+        let coupling = graph.nodes.get(f).map(|n| n.imports.len() + n.imported_by.len()).unwrap_or(0);
+        lines.push(format!("  {} (coupling: {})", f, coupling));
+    }
+
+    if !all_affected.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("Blast radius: {} additional files affected", all_affected.len()));
+    }
+
+    lines.join("\n")
+}
+
 // ── git-coupling ───────────────────────────────────────────────────
 
 pub fn git_coupling(graph: &Graph, target: &str) -> String {
