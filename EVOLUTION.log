@@ -64,3 +64,6 @@
 [2026-04-23 18:29] upgrade: add rename action — preview all files affected by renaming a symbol
   source: code-graph-ai competitor — word-boundary regex search + diff preview
 
+[2026-04-23 18:30] upgrade: bump version to 4.4.0
+  source: 5 competitor-inspired features added
+
