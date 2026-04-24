@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (52 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (53 actions, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
-                orphan-exports, health, summary, decorators, rename
+                orphan-exports, health, summary, decorators, rename, context
   Navigation:   why, paths, subgraph, similar, structure
   Graph Theory: pagerank, hubs, bridges, clusters, islands, dot, mermaid
   Functions:    call-graph, dead-functions, fn-info, diff-functions, complexity,

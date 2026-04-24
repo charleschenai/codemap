@@ -1140,3 +1140,109 @@ pub fn rename(graph: &Graph, target: &str) -> String {
     out.push("This is a preview only — no files were modified.".to_string());
     out.join("\n")
 }
+
+// ── 19. context ────────────────────────────────────────────────────
+
+pub fn context(graph: &Graph, target: &str) -> String {
+    // Parse token budget from target (e.g. "8000" or "32k")
+    let budget: usize = if target.is_empty() {
+        8000
+    } else if let Some(k) = target.strip_suffix('k') {
+        k.parse::<usize>().unwrap_or(8) * 1000
+    } else {
+        target.parse().unwrap_or(8000)
+    };
+
+    if graph.nodes.is_empty() {
+        return "No files to map.".to_string();
+    }
+
+    // Run PageRank to rank files by importance
+    let d: f64 = 0.85;
+    let n = graph.nodes.len();
+    let ids: Vec<String> = graph.nodes.keys().cloned().collect();
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    let init = 1.0 / n as f64;
+    for id in &ids { scores.insert(id.clone(), init); }
+
+    for _ in 0..20 {
+        let mut new_scores: HashMap<String, f64> = HashMap::new();
+        let mut dangling_sum: f64 = 0.0;
+        for (id, node) in &graph.nodes {
+            if node.imports.iter().all(|i| !graph.nodes.contains_key(i)) {
+                dangling_sum += scores.get(id).copied().unwrap_or(0.0);
+            }
+        }
+        let base = (1.0 - d) / n as f64 + d * dangling_sum / n as f64;
+        for id in &ids { new_scores.insert(id.clone(), base); }
+        for (id, node) in &graph.nodes {
+            let local: Vec<&String> = node.imports.iter().filter(|i| graph.nodes.contains_key(*i)).collect();
+            if local.is_empty() { continue; }
+            let share = scores.get(id).copied().unwrap_or(0.0) / local.len() as f64;
+            for imp in local { *new_scores.entry(imp.clone()).or_insert(0.0) += d * share; }
+        }
+        scores = new_scores;
+    }
+
+    // Sort files by PageRank score (most important first)
+    let mut ranked: Vec<(String, f64)> = ids.iter()
+        .map(|id| (id.clone(), scores.get(id).copied().unwrap_or(0.0)))
+        .collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Build context lines, fitting within token budget
+    // Rough estimate: 1 token ≈ 4 chars
+    let mut out = Vec::new();
+    let mut chars_used: usize = 0;
+    let char_budget = budget * 4;
+    let mut files_included = 0usize;
+    let mut fns_included = 0usize;
+
+    for (file_id, _score) in &ranked {
+        let node = match graph.nodes.get(file_id) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // File header line
+        let imports_str = if node.imports.is_empty() {
+            String::new()
+        } else {
+            let short_imports: Vec<&str> = node.imports.iter()
+                .filter(|i| graph.nodes.contains_key(*i))
+                .map(|i| i.rsplit('/').next().unwrap_or(i))
+                .collect();
+            if short_imports.is_empty() { String::new() }
+            else { format!(" → {}", short_imports.join(", ")) }
+        };
+
+        let header = format!("{}  ({} lines{})", file_id, node.lines, imports_str);
+        if chars_used + header.len() + 1 > char_budget { break; }
+        out.push(header.clone());
+        chars_used += header.len() + 1;
+        files_included += 1;
+
+        // Function signatures sorted by line number
+        let mut fns = node.functions.clone();
+        fns.sort_by_key(|f| f.start_line);
+        for f in &fns {
+            let params = f.parameters.as_ref()
+                .map(|p| p.join(", "))
+                .unwrap_or_default();
+            let vis = if f.is_exported { "pub " } else { "" };
+            let sig = format!("  L{} {}{}({})", f.start_line, vis, f.name, params);
+            if chars_used + sig.len() + 1 > char_budget { break; }
+            out.push(sig.clone());
+            chars_used += sig.len() + 1;
+            fns_included += 1;
+        }
+    }
+
+    let tokens_est = chars_used / 4;
+    let mut result = vec![
+        format!("// codemap context: {} files, {} functions, ~{} tokens (budget: {})",
+            files_included, fns_included, tokens_est, budget),
+    ];
+    result.extend(out);
+    result.join("\n")
+}

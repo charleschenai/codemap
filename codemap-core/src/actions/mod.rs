@@ -57,6 +57,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "diff-impact" => Ok(functions::diff_impact(graph, target)),
         "decorators" => Ok(analysis::decorators(graph, target)),
         "rename" => Ok(analysis::rename(graph, target)),
+        "context" => Ok(analysis::context(graph, target)),
         // Data Flow (5)
         "data-flow" => Ok(dataflow::data_flow(graph, target, tree_mode)),
         "taint" => Ok(dataflow::taint(graph, target, tree_mode)),
