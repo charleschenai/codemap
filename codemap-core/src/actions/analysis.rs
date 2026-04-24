@@ -973,3 +973,89 @@ pub fn health(graph: &Graph) -> String {
 
     lines.join("\n")
 }
+
+// ── 17. decorators ─────────────────────────────────────────────────
+
+pub fn decorators(graph: &Graph, target: &str) -> String {
+    if target.is_empty() {
+        return "Usage: codemap decorators <pattern>  (e.g. codemap decorators test, codemap decorators route)".to_string();
+    }
+
+    let dir = &graph.scan_dir;
+    let pattern = target.to_lowercase();
+
+    let py_ts_re = Regex::new(r"@(\w[\w.]*(?:\([^)]*\))?)").unwrap();
+    let rust_re = Regex::new(r"#\[(\w[\w:]*(?:\([^)]*\))?)\]").unwrap();
+    let next_def_re = Regex::new(r"(?:pub\s+)?(?:async\s+)?(?:fn|def|function|class|struct|enum|interface|const)\s+(\w+)").unwrap();
+
+    struct Hit { file: String, line: usize, decorator: String, symbol: String }
+
+    let mut hits: Vec<Hit> = Vec::new();
+    let mut ids: Vec<String> = graph.nodes.keys().cloned().collect();
+    ids.sort();
+
+    for id in &ids {
+        let path = Path::new(dir).join(id);
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let lines_vec: Vec<&str> = content.lines().collect();
+
+        for (i, line) in lines_vec.iter().enumerate() {
+            let trimmed = line.trim();
+
+            // @decorator (Python/TS/Java)
+            if trimmed.starts_with('@') {
+                if let Some(caps) = py_ts_re.captures(trimmed) {
+                    let dec = caps[1].to_string();
+                    if !dec.to_lowercase().contains(&pattern) { continue; }
+                    let mut sym = String::new();
+                    for j in (i + 1)..lines_vec.len().min(i + 5) {
+                        if let Some(sc) = next_def_re.captures(lines_vec[j]) {
+                            sym = sc[1].to_string();
+                            break;
+                        }
+                    }
+                    hits.push(Hit { file: id.clone(), line: i + 1, decorator: format!("@{}", dec),
+                        symbol: if sym.is_empty() { "?".into() } else { sym } });
+                }
+            }
+
+            // #[attribute] (Rust)
+            if trimmed.starts_with("#[") {
+                if let Some(caps) = rust_re.captures(trimmed) {
+                    let attr = caps[1].to_string();
+                    if !attr.to_lowercase().contains(&pattern) { continue; }
+                    let mut sym = String::new();
+                    for j in (i + 1)..lines_vec.len().min(i + 5) {
+                        if let Some(sc) = next_def_re.captures(lines_vec[j]) {
+                            sym = sc[1].to_string();
+                            break;
+                        }
+                    }
+                    hits.push(Hit { file: id.clone(), line: i + 1, decorator: format!("#[{}]", attr),
+                        symbol: if sym.is_empty() { "?".into() } else { sym } });
+                }
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        return format!("No decorators matching \"{}\" found.", target);
+    }
+
+    let mut out = vec![
+        format!("=== Decorators matching \"{}\" ({} found) ===", target, hits.len()),
+        String::new(),
+    ];
+    let mut last_file = "";
+    for h in &hits {
+        if h.file != last_file {
+            out.push(format!("  {}:", h.file));
+            last_file = &h.file;
+        }
+        out.push(format!("    L{}  {} on {}()", h.line, h.decorator, h.symbol));
+    }
+    out.join("\n")
+}

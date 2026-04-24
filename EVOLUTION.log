@@ -58,3 +58,6 @@
 [2026-04-23 18:26] upgrade: add risk action — PR/diff risk score (blast radius + coupling + complexity + scope)
   source: Axon competitor — composite 0-100 risk with LOW/MEDIUM/HIGH/CRITICAL levels
 
+[2026-04-23 18:28] upgrade: add decorators action — find symbols by @decorator or #[attribute] pattern
+  source: code-graph-ai competitor — cross-language decorator/attribute search
+
