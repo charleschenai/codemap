@@ -91,3 +91,6 @@
 [2026-04-23 19:17] upgrade: bump version to 4.6.0
   source: 3 wiki-informed features + nesting depth improvement
 
+[2026-04-23 19:38] clean: split analysis.rs — extract summary/decorators/rename/context into insights.rs
+  source: codemap health — complexity score dropping from oversized files
+

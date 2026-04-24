@@ -5,6 +5,7 @@ pub mod functions;
 pub mod dataflow;
 pub mod bridges;
 pub mod compare;
+pub mod insights;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -26,15 +27,19 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "layers" => Ok(analysis::layers(graph)),
         "diff" => Ok(analysis::diff(graph, target)),
         "orphan-exports" => Ok(analysis::orphan_exports(graph)),
+        // Insights (5)
         "health" => Ok(analysis::health(graph)),
-        "summary" => Ok(analysis::summary(graph)),
-        // Navigation (4)
+        "summary" => Ok(insights::summary(graph)),
+        "decorators" => Ok(insights::decorators(graph, target)),
+        "rename" => Ok(insights::rename(graph, target)),
+        "context" => Ok(insights::context(graph, target)),
+        // Navigation (5)
         "why" => Ok(navigation::why(graph, target)),
         "paths" => Ok(navigation::paths(graph, target)),
         "subgraph" => Ok(navigation::subgraph(graph, target)),
         "similar" => Ok(navigation::similar(graph, target)),
         "structure" => Ok(navigation::structure(graph, target)),
-        // Graph Theory (6)
+        // Graph Theory (7)
         "pagerank" => Ok(graph_theory::pagerank(graph)),
         "hubs" => Ok(graph_theory::hubs(graph)),
         "bridges" => Ok(graph_theory::bridges(graph)),
@@ -42,7 +47,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "islands" => Ok(graph_theory::islands(graph)),
         "dot" => Ok(graph_theory::dot(graph, target)),
         "mermaid" => Ok(graph_theory::mermaid(graph, target)),
-        // Function-Level (8)
+        // Function-Level (13)
         "call-graph" => Ok(functions::call_graph(graph, target)),
         "dead-functions" => Ok(functions::dead_functions(graph)),
         "fn-info" => Ok(functions::fn_info(graph, target)),
@@ -56,9 +61,6 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "risk" => Ok(functions::risk(graph, target)),
         "diff-impact" => Ok(functions::diff_impact(graph, target)),
         "entry-points" => Ok(functions::entry_points(graph, target)),
-        "decorators" => Ok(analysis::decorators(graph, target)),
-        "rename" => Ok(analysis::rename(graph, target)),
-        "context" => Ok(analysis::context(graph, target)),
         // Data Flow (5)
         "data-flow" => Ok(dataflow::data_flow(graph, target, tree_mode)),
         "taint" => Ok(dataflow::taint(graph, target, tree_mode)),
