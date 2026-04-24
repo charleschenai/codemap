@@ -764,7 +764,86 @@ pub fn orphan_exports(graph: &Graph) -> String {
     lines.join("\n")
 }
 
-// ── 15. health ─────────────────────────────────────────────────────
+// ── 15. summary ────────────────────────────────────────────────────
+
+pub fn summary(graph: &mut Graph) -> String {
+    let file_count = graph.nodes.len();
+    if file_count == 0 {
+        return "No files to analyze.".to_string();
+    }
+
+    let mut total_lines: usize = 0;
+    let mut total_functions: usize = 0;
+    let mut total_exports: usize = 0;
+    let mut exts: HashMap<String, usize> = HashMap::new();
+    for (id, node) in &graph.nodes {
+        total_lines += node.lines;
+        total_functions += node.functions.len();
+        total_exports += node.exports.len();
+        let ext = ext_of(id);
+        *exts.entry(ext).or_insert(0) += 1;
+    }
+    let mut ext_vec: Vec<(String, usize)> = exts.into_iter().collect();
+    ext_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    let lang_summary: String = ext_vec.iter().take(5)
+        .map(|(e, c)| format!("{} {}", c, e))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Health score (inline, not calling health() to avoid duplication)
+    let health_text = health(graph);
+    let score_line = health_text.lines().next().unwrap_or("");
+
+    // Top 5 complexity hotspots
+    let mut complex: Vec<(String, String, usize)> = Vec::new();
+    for node in graph.nodes.values() {
+        for f in &node.functions {
+            complex.push((node.id.clone(), f.name.clone(), f.calls.len()));
+        }
+    }
+    complex.sort_by(|a, b| b.2.cmp(&a.2));
+
+    // Circular deps count
+    let circ_text = circular(graph);
+    let circ_count = if circ_text.starts_with("No circular") { 0usize }
+        else { circ_text.lines().next().and_then(|l| l.split_whitespace().next()).and_then(|n| n.parse().ok()).unwrap_or(0) };
+
+    // Hottest files (most coupled)
+    let mut coupling: Vec<(&String, usize)> = graph.nodes.iter()
+        .map(|(id, n)| (id, n.imports.len() + n.imported_by.len()))
+        .collect();
+    coupling.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut lines = vec![
+        format!("\u{250c}\u{2500}\u{2500} {} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", score_line.replace("=== ", "").replace(" ===", "")),
+        format!("\u{2502}"),
+        format!("\u{2502}  {} files, {} lines, {} functions, {} exports", format_number(file_count), format_number(total_lines), format_number(total_functions), total_exports),
+        format!("\u{2502}  Languages: {}", lang_summary),
+        format!("\u{2502}  Circular deps: {}", circ_count),
+        format!("\u{2502}"),
+    ];
+
+    // Top 5 hottest files
+    lines.push(format!("\u{2502}  \u{2500}\u{2500} Hottest files (most coupled) \u{2500}\u{2500}"));
+    for (id, c) in coupling.iter().take(5) {
+        lines.push(format!("\u{2502}    {:>3} connections  {}", c, id));
+    }
+    lines.push(format!("\u{2502}"));
+
+    // Top 5 most complex functions
+    lines.push(format!("\u{2502}  \u{2500}\u{2500} Most complex functions \u{2500}\u{2500}"));
+    for (file, name, calls) in complex.iter().take(5) {
+        let short = file.rsplit('/').next().unwrap_or(file);
+        lines.push(format!("\u{2502}    {:>3} calls  {}:{}", calls, short, name));
+    }
+
+    lines.push(format!("\u{2502}"));
+    lines.push(format!("\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
+
+    lines.join("\n")
+}
+
+// ── 16. health ─────────────────────────────────────────────────────
 
 pub fn health(graph: &Graph) -> String {
     let file_count = graph.nodes.len();

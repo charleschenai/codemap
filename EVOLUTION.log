@@ -40,3 +40,6 @@
 [2026-04-23 17:16] upgrade: add --watch flag — auto-refresh any action on file changes
   source: developer workflow — watch health/stats as you code
 
+[2026-04-23 17:17] upgrade: add summary action — one-screen project dashboard with box drawing
+  source: developer workflow — instant project overview
+
