@@ -163,3 +163,81 @@ fn test_sinks() {
     let result = execute(&mut graph, "sinks", ".", false).unwrap();
     assert!(!result.is_empty());
 }
+
+#[test]
+fn test_health() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "health", "", false).unwrap();
+    assert!(result.contains("Project Health:"));
+    assert!(result.contains("/100"));
+}
+
+#[test]
+fn test_summary() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "summary", "", false).unwrap();
+    assert!(result.contains("files,"));
+    assert!(result.contains("functions"));
+}
+
+#[test]
+fn test_mermaid() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "mermaid", "", false).unwrap();
+    assert!(result.contains("graph LR"));
+    assert!(result.contains("-->"));
+}
+
+#[test]
+fn test_clones() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "clones", "", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_context() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "context", "4k", false).unwrap();
+    assert!(result.contains("codemap context:"));
+    assert!(result.contains("tokens"));
+}
+
+#[test]
+fn test_entry_points() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "entry-points", "", false).unwrap();
+    // src/ has no main or test files, so "No entry points" is valid
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_structure() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "structure", ".", false).unwrap();
+    assert!(result.contains("Structure"));
+    assert!(result.contains("lines"));
+}
+
+#[test]
+fn test_decorators() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "decorators", "test", false).unwrap();
+    // src/ may not have decorators, but result should not error
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_rename() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "rename", "dispatch run_action", false).unwrap();
+    assert!(result.contains("Rename Preview"));
+}
+
+#[test]
+fn test_risk() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "risk", "HEAD~1", false).unwrap();
+    // May return "No files changed" if HEAD~1 doesn't exist, which is OK
+    assert!(!result.is_empty());
+}

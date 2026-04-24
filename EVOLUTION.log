@@ -94,3 +94,6 @@
 [2026-04-23 19:38] clean: split analysis.rs — extract summary/decorators/rename/context into insights.rs
   source: codemap health — complexity score dropping from oversized files
 
+[2026-04-23 19:39] upgrade: add 10 more integration tests — coverage for new actions (31 total)
+  source: test gap — 21 tests for 54 actions was too thin
+
