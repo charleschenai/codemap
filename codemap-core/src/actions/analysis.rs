@@ -763,3 +763,136 @@ pub fn orphan_exports(graph: &Graph) -> String {
 
     lines.join("\n")
 }
+
+// ── 15. health ─────────────────────────────────────────────────────
+
+pub fn health(graph: &Graph) -> String {
+    let file_count = graph.nodes.len();
+    if file_count == 0 {
+        return "No files to analyze.".to_string();
+    }
+
+    // --- Metric 1: Circular dependencies (0-25 points) ---
+    let mut cycle_count = 0usize;
+    {
+        let mut fully_processed: HashSet<String> = HashSet::new();
+        let mut on_stack: HashSet<String> = HashSet::new();
+        fn count_cycles(
+            id: &str, path: &mut Vec<String>, graph: &Graph,
+            count: &mut usize, done: &mut HashSet<String>, stack: &mut HashSet<String>,
+        ) {
+            if done.contains(id) { return; }
+            if stack.contains(id) {
+                if path.iter().any(|x| x == id) { *count += 1; }
+                return;
+            }
+            stack.insert(id.to_string());
+            path.push(id.to_string());
+            if let Some(node) = graph.nodes.get(id) {
+                for imp in &node.imports {
+                    if graph.nodes.contains_key(imp) {
+                        count_cycles(imp, path, graph, count, done, stack);
+                    }
+                }
+            }
+            path.pop();
+            stack.remove(id);
+            done.insert(id.to_string());
+        }
+        let mut ids: Vec<String> = graph.nodes.keys().cloned().collect();
+        ids.sort();
+        for id in &ids {
+            if !fully_processed.contains(id) {
+                count_cycles(id, &mut Vec::new(), graph, &mut cycle_count, &mut fully_processed, &mut on_stack);
+            }
+        }
+    }
+    let cycle_score = if cycle_count == 0 { 25 } else if cycle_count <= 2 { 15 } else if cycle_count <= 5 { 8 } else { 0 };
+
+    // --- Metric 2: Coupling balance (0-25 points) ---
+    // What fraction of the codebase does the most-connected file touch?
+    let total_imports: usize = graph.nodes.values().map(|n| n.imports.len()).sum();
+    let avg_imports = if file_count > 0 { total_imports as f64 / file_count as f64 } else { 0.0 };
+    let max_coupling = graph.nodes.values().map(|n| n.imports.len() + n.imported_by.len()).max().unwrap_or(0);
+    let coupling_pct = if file_count > 1 { max_coupling as f64 / (file_count - 1) as f64 } else { 0.0 };
+    let coupling_score = if coupling_pct <= 0.4 { 25 }
+        else if coupling_pct <= 0.6 { 20 }
+        else if coupling_pct <= 0.8 { 15 }
+        else if coupling_pct <= 0.95 { 8 }
+        else { 0 };
+
+    // --- Metric 3: Dead code ratio (0-25 points) ---
+    let total_exports: usize = graph.nodes.values().map(|n| n.exports.len()).sum();
+    let total_functions: usize = graph.nodes.values().map(|n| n.functions.len()).sum();
+    let dead_files: usize = graph.nodes.values()
+        .filter(|n| n.imported_by.is_empty() && !n.imports.is_empty())
+        .count();
+    let dead_file_ratio = if file_count > 1 { dead_files as f64 / file_count as f64 } else { 0.0 };
+    let dead_score = if dead_file_ratio <= 0.05 { 25 }
+        else if dead_file_ratio <= 0.10 { 20 }
+        else if dead_file_ratio <= 0.20 { 15 }
+        else if dead_file_ratio <= 0.35 { 8 }
+        else { 0 };
+
+    // --- Metric 4: Complexity distribution (0-25 points) ---
+    let mut high_complexity_count = 0usize;
+    for node in graph.nodes.values() {
+        for f in &node.functions {
+            if f.calls.len() > 15 {
+                high_complexity_count += 1;
+            }
+        }
+    }
+    let complex_ratio = if total_functions > 0 { high_complexity_count as f64 / total_functions as f64 } else { 0.0 };
+    let complexity_score = if complex_ratio <= 0.05 { 25 }
+        else if complex_ratio <= 0.10 { 20 }
+        else if complex_ratio <= 0.20 { 15 }
+        else if complex_ratio <= 0.35 { 8 }
+        else { 0 };
+
+    let total_score = cycle_score + coupling_score + dead_score + complexity_score;
+
+    let grade = match total_score {
+        90..=100 => "A",
+        80..=89 => "B",
+        65..=79 => "C",
+        50..=64 => "D",
+        _ => "F",
+    };
+
+    let bar = |score: usize, max: usize| -> String {
+        let filled = (score * 20) / max;
+        let empty = 20 - filled;
+        format!("[{}{}] {}/{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty), score, max)
+    };
+
+    let mut lines = vec![
+        format!("=== Project Health: {}/100 ({}) ===", total_score, grade),
+        String::new(),
+        format!("  Circular deps   {}  {} cycles", bar(cycle_score, 25), cycle_count),
+        format!("  Coupling        {}  hottest file touches {:.0}% of codebase", bar(coupling_score, 25), coupling_pct * 100.0),
+        format!("  Dead code       {}  {:.0}% dead files", bar(dead_score, 25), dead_file_ratio * 100.0),
+        format!("  Complexity      {}  {:.0}% high-complexity fns", bar(complexity_score, 25), complex_ratio * 100.0),
+        String::new(),
+        format!("  Files: {}  Functions: {}  Exports: {}", file_count, total_functions, total_exports),
+    ];
+
+    if total_score < 80 {
+        lines.push(String::new());
+        lines.push("Recommendations:".to_string());
+        if cycle_score < 20 {
+            lines.push(format!("  - Break {} circular dependencies (codemap circular)", cycle_count));
+        }
+        if coupling_score < 20 {
+            lines.push("  - Reduce coupling in god files (codemap hotspots)".to_string());
+        }
+        if dead_score < 20 {
+            lines.push("  - Remove dead files (codemap dead-files)".to_string());
+        }
+        if complexity_score < 20 {
+            lines.push("  - Simplify complex functions (codemap complexity .)".to_string());
+        }
+    }
+
+    lines.join("\n")
+}

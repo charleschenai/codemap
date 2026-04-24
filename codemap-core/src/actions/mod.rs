@@ -26,6 +26,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "layers" => Ok(analysis::layers(graph)),
         "diff" => Ok(analysis::diff(graph, target)),
         "orphan-exports" => Ok(analysis::orphan_exports(graph)),
+        "health" => Ok(analysis::health(graph)),
         // Navigation (4)
         "why" => Ok(navigation::why(graph, target)),
         "paths" => Ok(navigation::paths(graph, target)),

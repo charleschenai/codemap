@@ -34,3 +34,6 @@
 [2026-04-23 17:11] upgrade: add mermaid action — GitHub-native dependency diagrams
   source: web research — Mermaid is standard for embeddable code diagrams
 
+[2026-04-23 17:14] upgrade: add health action — 0-100 project health score with visual bars
+  source: web research — Axon has health scores, no CLI tool does this well
+
