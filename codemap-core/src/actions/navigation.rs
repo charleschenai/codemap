@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashSet, VecDeque};
 use crate::types::Graph;
 
@@ -305,5 +306,48 @@ pub fn similar(graph: &Graph, target: &str) -> String {
         let pct = format!("{:.1}", s.score * 100.0);
         lines.push(format!("  {:>5}% similar  {}  ({} shared deps)", pct, s.id, s.shared));
     }
+    lines.join("\n")
+}
+
+/// Show project structure as a tree with function outlines per file.
+pub fn structure(graph: &Graph, target: &str) -> String {
+    let mut ids: Vec<&String> = if !target.is_empty() && target != "." {
+        graph.nodes.keys().filter(|id| id.contains(target)).collect()
+    } else {
+        graph.nodes.keys().collect()
+    };
+    ids.sort();
+
+    if ids.is_empty() {
+        return if target.is_empty() || target == "." {
+            "No files found.".to_string()
+        } else {
+            format!("No files matching \"{}\".", target)
+        };
+    }
+
+    let mut lines = vec![
+        format!("=== Structure ({} files) ===", ids.len()),
+        String::new(),
+    ];
+
+    for id in &ids {
+        let node = &graph.nodes[*id];
+        let short = id.rsplit('/').next().unwrap_or(id);
+        lines.push(format!("  {} ({} lines, {} imports, {} exports)",
+            short, node.lines, node.imports.len(), node.exports.len()));
+
+        let mut fns = node.functions.clone();
+        fns.sort_by_key(|f| f.start_line);
+        for f in &fns {
+            let params = f.parameters.as_ref()
+                .map(|p| p.join(", "))
+                .unwrap_or_default();
+            let exported = if f.is_exported { " [pub]" } else { "" };
+            lines.push(format!("    L{:<4} {}({}){}", f.start_line, f.name, params, exported));
+        }
+        if !fns.is_empty() { lines.push(String::new()); }
+    }
+
     lines.join("\n")
 }

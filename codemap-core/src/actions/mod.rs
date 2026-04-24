@@ -33,6 +33,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "paths" => Ok(navigation::paths(graph, target)),
         "subgraph" => Ok(navigation::subgraph(graph, target)),
         "similar" => Ok(navigation::similar(graph, target)),
+        "structure" => Ok(navigation::structure(graph, target)),
         // Graph Theory (6)
         "pagerank" => Ok(graph_theory::pagerank(graph)),
         "hubs" => Ok(graph_theory::hubs(graph)),
