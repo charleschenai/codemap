@@ -43,3 +43,6 @@
 [2026-04-23 17:17] upgrade: add summary action — one-screen project dashboard with box drawing
   source: developer workflow — instant project overview
 
+[2026-04-23 17:20] upgrade: add -q/--quiet flag — suppress scan/cache status noise
+  source: scripting + AI agent usage — stderr noise pollutes output
+

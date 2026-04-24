@@ -14,6 +14,7 @@ pub fn scan(dirs: Vec<String>, include_paths: Option<Vec<String>>, no_cache: Opt
         dirs: dirs.iter().map(PathBuf::from).collect(),
         include_paths: include_paths.unwrap_or_default().iter().map(PathBuf::from).collect(),
         no_cache: no_cache.unwrap_or(false),
+        quiet: true,
     };
     let graph = codemap_core::scan(options)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;

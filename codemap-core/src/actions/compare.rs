@@ -18,6 +18,7 @@ pub fn compare(graph: &mut Graph, target: &str) -> String {
         dirs: vec![resolved_dir.clone()],
         include_paths: vec![],
         no_cache: false,
+        quiet: true,
     }) {
         Ok(g) => g,
         Err(_) => return format!("Failed to scan directory: {resolved_str}"),

@@ -30,6 +30,7 @@ pub struct ScanOptions {
     pub dirs: Vec<PathBuf>,
     pub include_paths: Vec<PathBuf>,
     pub no_cache: bool,
+    pub quiet: bool,
 }
 
 pub fn scan(options: ScanOptions) -> Result<Graph, CodemapError> {

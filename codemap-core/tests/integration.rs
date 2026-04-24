@@ -7,6 +7,7 @@ fn scan_self() -> codemap_core::types::Graph {
         dirs: vec![dir],
         include_paths: vec![],
         no_cache: true,
+        quiet: true,
     }).expect("scan should succeed")
 }
 

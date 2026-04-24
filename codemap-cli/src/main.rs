@@ -41,6 +41,10 @@ struct Cli {
     #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
     watch: Option<u64>,
 
+    /// Suppress scan/cache status messages
+    #[arg(short, long)]
+    quiet: bool,
+
     /// The analysis action to perform
     action: String,
 
@@ -48,11 +52,12 @@ struct Cli {
     target: Vec<String>,
 }
 
-fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, action: &str, target: &str, tree: bool, json: bool) -> bool {
+fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, quiet: bool, action: &str, target: &str, tree: bool, json: bool) -> bool {
     let options = ScanOptions {
         dirs: dirs.to_vec(),
         include_paths: include_paths.to_vec(),
         no_cache,
+        quiet,
     };
 
     let mut graph = match scan(options) {
@@ -108,11 +113,11 @@ fn main() {
                 output.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
             };
             eprintln!("Every {}s: codemap {} {}  ({})\n", secs, cli.action, target, now);
-            run_once(&dirs, &cli.include_paths, true, &cli.action, &target, cli.tree, cli.json);
+            run_once(&dirs, &cli.include_paths, true, true, &cli.action, &target, cli.tree, cli.json);
             std::thread::sleep(std::time::Duration::from_secs(secs));
         }
     } else {
-        if !run_once(&dirs, &cli.include_paths, cli.no_cache, &cli.action, &target, cli.tree, cli.json) {
+        if !run_once(&dirs, &cli.include_paths, cli.no_cache, cli.quiet, &cli.action, &target, cli.tree, cli.json) {
             process::exit(1);
         }
     }

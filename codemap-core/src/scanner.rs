@@ -273,6 +273,7 @@ fn scan_single_dir(
     dir: &Path,
     include_paths: &[PathBuf],
     no_cache: bool,
+    quiet: bool,
 ) -> Result<(HashMap<String, GraphNode>, String), CodemapError> {
     let dir_str = dir.to_string_lossy().to_string();
     let ext_set: HashSet<&str> = SUPPORTED_EXTS.iter().copied().collect();
@@ -422,7 +423,7 @@ fn scan_single_dir(
     save_cache(&dir_str, &nodes);
 
     // Print cache stats
-    if cache_hits > 0 {
+    if cache_hits > 0 && !quiet {
         eprintln!("Cache: {}/{} files unchanged", cache_hits, all_files.len());
     }
 
@@ -440,13 +441,14 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
         options.dirs
     };
 
+    let quiet = options.quiet;
     let graph = if dirs.len() == 1 {
         // Single directory scan
         let dir = &dirs[0];
         let (nodes, scan_dir) =
-            scan_single_dir(dir, &options.include_paths, options.no_cache)?;
+            scan_single_dir(dir, &options.include_paths, options.no_cache, quiet)?;
         let elapsed = t0.elapsed().as_millis();
-        eprintln!("Scanned {} files in {}ms\n", nodes.len(), elapsed);
+        if !quiet { eprintln!("Scanned {} files in {}ms\n", nodes.len(), elapsed); }
         Graph {
             nodes,
             scan_dir,
@@ -459,7 +461,7 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
 
         for dir in &dirs {
             let (sub_nodes, _scan_dir) =
-                scan_single_dir(dir, &options.include_paths, options.no_cache)?;
+                scan_single_dir(dir, &options.include_paths, options.no_cache, quiet)?;
 
             let repo_name = dir
                 .file_name()
@@ -551,7 +553,7 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
         resolve_bridge_edges(&mut merged_nodes);
 
         let elapsed = t0.elapsed().as_millis();
-        eprintln!("Scanned {} files in {}ms\n", merged_nodes.len(), elapsed);
+        if !quiet { eprintln!("Scanned {} files in {}ms\n", merged_nodes.len(), elapsed); }
 
         Graph {
             nodes: merged_nodes,
