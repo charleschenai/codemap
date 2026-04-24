@@ -55,6 +55,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "git-coupling" => Ok(functions::git_coupling(graph, target)),
         "risk" => Ok(functions::risk(graph, target)),
         "diff-impact" => Ok(functions::diff_impact(graph, target)),
+        "entry-points" => Ok(functions::entry_points(graph, target)),
         "decorators" => Ok(analysis::decorators(graph, target)),
         "rename" => Ok(analysis::rename(graph, target)),
         "context" => Ok(analysis::context(graph, target)),

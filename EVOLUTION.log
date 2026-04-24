@@ -85,3 +85,6 @@
 [2026-04-23 19:15] upgrade: add nesting depth metric to complexity action
   source: wiki research (AST metrics page) — nesting depth is more actionable than cyclomatic alone
 
+[2026-04-23 19:17] upgrade: add entry-points action — detect main/test/route entry points
+  source: wiki research (dead code audit) + Axon competitor — entry point awareness improves dead code detection
+

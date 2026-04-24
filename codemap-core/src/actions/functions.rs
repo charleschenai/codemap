@@ -775,6 +775,100 @@ fn git_show(graph: &Graph, git_ref: &str, file_id: &str) -> GitShowResult {
     }
 }
 
+// ── entry-points ───────────────────────────────────────────────────
+
+pub fn entry_points(graph: &Graph, _target: &str) -> String {
+    struct EntryPoint {
+        file: String,
+        name: String,
+        kind: &'static str,
+        line: usize,
+    }
+
+    let mut entries: Vec<EntryPoint> = Vec::new();
+
+    // Pattern-based entry point detection
+    let test_patterns = ["test_", "Test", "spec_", "Spec", "it(", "describe(", "should"];
+    let main_patterns = ["main", "__main__", "cli", "run", "start", "serve"];
+    let route_decorators = ["@app.", "@router.", "@route", "@get", "@post", "@put", "@delete",
+        "@api_view", "@action", "@endpoint"];
+
+    for (file_id, node) in &graph.nodes {
+        let is_test_file = file_id.contains("test") || file_id.contains("spec")
+            || file_id.contains("__tests__") || file_id.ends_with("_test.rs")
+            || file_id.ends_with("_test.go") || file_id.ends_with("_test.py");
+
+        for f in &node.functions {
+            // Main entry points
+            if main_patterns.contains(&f.name.as_str()) {
+                entries.push(EntryPoint {
+                    file: file_id.clone(), name: f.name.clone(),
+                    kind: "main", line: f.start_line,
+                });
+                continue;
+            }
+
+            // Test functions
+            if is_test_file || test_patterns.iter().any(|p| f.name.starts_with(p) || f.name.contains(p)) {
+                entries.push(EntryPoint {
+                    file: file_id.clone(), name: f.name.clone(),
+                    kind: "test", line: f.start_line,
+                });
+                continue;
+            }
+        }
+
+        // Check source for route decorators
+        let path = std::path::Path::new(&graph.scan_dir).join(file_id);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for (i, line) in content.lines().enumerate() {
+                let trimmed = line.trim();
+                if route_decorators.iter().any(|d| trimmed.starts_with(d)) {
+                    // Find next function name
+                    let re = regex::Regex::new(r"(?:def|function|fn|func|pub fn|async fn)\s+(\w+)").unwrap();
+                    for next in content.lines().skip(i + 1).take(3) {
+                        if let Some(caps) = re.captures(next) {
+                            entries.push(EntryPoint {
+                                file: file_id.clone(), name: caps[1].to_string(),
+                                kind: "route", line: i + 1,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return "No entry points detected.".to_string();
+    }
+
+    entries.sort_by(|a, b| a.kind.cmp(b.kind).then_with(|| a.file.cmp(&b.file)));
+
+    let main_count = entries.iter().filter(|e| e.kind == "main").count();
+    let test_count = entries.iter().filter(|e| e.kind == "test").count();
+    let route_count = entries.iter().filter(|e| e.kind == "route").count();
+
+    let mut lines = vec![
+        format!("=== Entry Points ({} found) ===", entries.len()),
+        format!("  main: {}  test: {}  route: {}", main_count, test_count, route_count),
+        String::new(),
+    ];
+
+    let mut last_kind = "";
+    for e in &entries {
+        if e.kind != last_kind {
+            lines.push(format!("  [{}]", e.kind.to_uppercase()));
+            last_kind = e.kind;
+        }
+        let short = e.file.rsplit('/').next().unwrap_or(&e.file);
+        lines.push(format!("    {}:{}() L{}", short, e.name, e.line));
+    }
+
+    lines.join("\n")
+}
+
 // ── diff-impact ────────────────────────────────────────────────────
 
 pub fn diff_impact(graph: &Graph, target: &str) -> String {
