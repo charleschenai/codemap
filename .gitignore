@@ -5,3 +5,4 @@ node_modules/
 codemap-napi/index.js
 codemap-napi/index.d.ts
 .audit/
+target/

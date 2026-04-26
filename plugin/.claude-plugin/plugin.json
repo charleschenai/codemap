@@ -1,6 +1,6 @@
 {
   "name": "codemap",
-  "description": "38-action codebase analysis — native Rust tree-sitter AST, function-level call graphs, PageRank, HITS, bridges, clusters, CPG data-flow, taint analysis, backward slicing, and more across 12 languages including C/C++/CUDA.",
-  "version": "4.0.0",
+  "description": "54-action codebase analysis — native Rust tree-sitter AST, function-level call graphs, PageRank, HITS, bridges, clusters, CPG data-flow, taint analysis, backward slicing, and more across 12 languages including C/C++/CUDA.",
+  "version": "5.0.0",
   "keywords": ["codemap", "dependencies", "imports", "analysis", "codebase", "ast", "tree-sitter", "rust", "cpg", "data-flow"]
 }
