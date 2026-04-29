@@ -88,6 +88,10 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "dotnet-meta" => Ok(reverse::dotnet_meta(graph, target)),
         "sql-extract" => Ok(reverse::sql_extract(graph, target)),
         "binary-diff" => Ok(reverse::binary_diff(graph, target)),
+        // Web (3)
+        "web-api" => Ok(reverse::web_api(graph, target)),
+        "web-dom" => Ok(reverse::web_dom(graph, target)),
+        "web-sitemap" => Ok(reverse::web_sitemap(graph, target)),
         // LSP (5)
         "lsp-symbols" => Ok(lsp::lsp_symbols(graph, target)),
         "lsp-references" => Ok(lsp::lsp_references(graph, target)),

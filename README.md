@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 54 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 70 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, PE binary analysis, .NET metadata extraction, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.0.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.1.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -34,7 +34,11 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **54 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **70 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+
+- **Binary reverse engineering.** 11 actions for cracking compiled binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
+
+- **LSP integration.** 5 actions that connect to any Language Server Protocol server to extract symbols, references, call hierarchies, diagnostics, and type information. Works with rust-analyzer, pylsp, typescript-language-server, clangd, or any LSP-compliant server.
 
 - **Cross-language bridge detection.** PyO3, pybind11, TORCH_LIBRARY, Triton, CUDA kernels, monkey-patches, and YAML native-function dispatch tables are all first-class edges. A Python function calling into a C++ op registered via TORCH_LIBRARY shows up in the call graph. Most tools quietly drop these edges.
 
@@ -122,7 +126,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 54 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 70 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -147,7 +151,7 @@ All 54 actions grouped by category. Every action runs against the full graph unl
 
 | Action | What it does |
 |--------|-------------|
-| `health` | 0-100 score across 4 dimensions (cycles, coupling, dead files, complexity), each 0-25. Letter grade A–F. Emits recommendations below 80. |
+| `health` | 0-100 score across 4 dimensions (cycles, coupling, dead files, complexity), each 0-25. Letter grade A-F. Emits recommendations below 80. |
 | `summary` | One-screen dashboard — file/line/fn/export counts, language mix, cycle count, top 5 coupled files, top 5 most-complex functions. Box-drawn. |
 | `decorators <pattern>` | Find Python/TS `@decorator` and Rust `#[attribute]` usages matching the (case-insensitive) pattern, resolved to the symbol they annotate. |
 | `rename <old> <new>` | Preview a word-boundary rename across all scanned files. Unified diff output. No files are modified. |
@@ -157,8 +161,8 @@ All 54 actions grouped by category. Every action runs against the full graph unl
 
 | Action | What it does |
 |--------|-------------|
-| `why <A> <B>` | BFS shortest path A→B via imports. Falls back to reverse edges (`imported_by`) if no forward path. |
-| `paths <A> <B>` | DFS all paths A→B, depth ≤ 10, cap 20 paths. If none forward, tries B→A. |
+| `why <A> <B>` | BFS shortest path A->B via imports. Falls back to reverse edges (`imported_by`) if no forward path. |
+| `paths <A> <B>` | DFS all paths A->B, depth <= 10, cap 20 paths. If none forward, tries B->A. |
 | `subgraph <pattern>` | BFS (both directions) from every file matching the substring — full connected component around a keyword. |
 | `similar <file>` | Top 20 files ranked by Jaccard similarity over local imports + importers. |
 | `structure [pattern]` | File tree with per-function outlines (line, name, params, `[pub]` marker). |
@@ -167,10 +171,10 @@ All 54 actions grouped by category. Every action runs against the full graph unl
 
 | Action | What it does |
 |--------|-------------|
-| `pagerank` | 20 iterations, damping 0.85, with dangling-node redistribution. Top 30, scores × 1000. |
+| `pagerank` | 20 iterations, damping 0.85, with dangling-node redistribution. Top 30, scores x 1000. |
 | `hubs` | HITS — 20 iterations, Jacobi update, L2 normalize. Top 20 hubs (orchestrators) + top 20 authorities (core). |
 | `bridges` | Iterative Tarjan articulation-point detection on the undirected projection. Ranked by connections. |
-| `clusters` | Label propagation, seeded LCG PRNG, Fisher-Yates shuffle, 15 iterations. Groups ≥ 2 members with internal-coupling %. |
+| `clusters` | Label propagation, seeded LCG PRNG, Fisher-Yates shuffle, 15 iterations. Groups >= 2 members with internal-coupling %. |
 | `islands` | BFS connected components, sorted by size. |
 | `dot [target]` | Graphviz DOT. Full graph, or 2-hop BFS neighborhood when a target is given. |
 | `mermaid [target]` | Mermaid `graph LR`, suitable for pasting into GitHub docs. 2-hop BFS when targeted. |
@@ -185,13 +189,13 @@ All 54 actions grouped by category. Every action runs against the full graph unl
 | `diff-functions <git-ref>` | Added / removed / modified functions between working tree and `<ref>` via regex over `git show <ref>:<file>`. Covers JS/TS, Rust, Python, Go, Ruby, Java/PHP signatures. |
 | `complexity [file]` | Cyclomatic complexity + max brace nesting depth per function. Top 30 or full listing for a target file. Flags `[moderate]` (>5) and `[HIGH]` (>10). |
 | `import-cost <file>` | Transitive import weight — total files and lines pulled in, plus heaviest 15 dependencies. |
-| `churn <git-ref>` | Files changed since `<ref>..HEAD` × coupling = churn risk score. Top 30. |
+| `churn <git-ref>` | Files changed since `<ref>..HEAD` x coupling = churn risk score. Top 30. |
 | `api-diff <git-ref>` | Added / removed exports vs `<ref>`. JS/TS export-declaration regex. |
 | `clones` | Structural clone groups — functions fingerprinted by `(line_count, call_count, param_count, is_exported)`. Skips < 3-line functions. |
 | `git-coupling [N]` | Co-change analysis over last N commits (default 200). Flags pairs as `import` (expected) or `HIDDEN` (co-change without an import link — the dangerous kind). |
 | `risk <git-ref>` | Composite PR risk score 0-100 across blast radius (30), coupling (30), complexity (20), scope (20). Levels: LOW / MEDIUM / HIGH / CRITICAL. |
 | `diff-impact <git-ref>` | `diff` + function-level changes + per-file blast radius with source attribution. |
-| `entry-points` | Detects `main` / test / route entries — main patterns (`main`, `cli`, `run`, `serve`, …), test file heuristics, Flask/FastAPI/Django-style `@route`/`@app.*`/`@router.*` decorators. |
+| `entry-points` | Detects `main` / test / route entries — main patterns (`main`, `cli`, `run`, `serve`, ...), test file heuristics, Flask/FastAPI/Django-style `@route`/`@app.*`/`@router.*` decorators. |
 
 ### Data flow (5)
 
@@ -199,10 +203,10 @@ Backed by the CPG (code property graph). Built lazily on first data-flow action 
 
 | Action | What it does |
 |--------|-------------|
-| `data-flow <file> [fn]` | Def/use edges per function. Params → uses, local defs → uses, return lines. |
-| `taint <source> <sink>` | Forward trace from source nodes ∩ backward slice from sink nodes. If no path, falls back to the backward slice alone. Source/sink patterns configurable via `.codemap/dataflow.json`. |
+| `data-flow <file> [fn]` | Def/use edges per function. Params -> uses, local defs -> uses, return lines. |
+| `taint <source> <sink>` | Forward trace from source nodes intersected with backward slice from sink nodes. If no path, falls back to the backward slice alone. Source/sink patterns configurable via `.codemap/dataflow.json`. |
 | `slice <file>:<line>` | Backward slice — every CPG node that contributes to the target. Up to 20 hops. |
-| `trace-value <file>:<line>:<name>` | Forward reachability from a def. Marks reached nodes that match sink patterns with `  SINK`. |
+| `trace-value <file>:<line>:<name>` | Forward reachability from a def. Marks reached nodes that match sink patterns with `SINK`. |
 | `sinks [file]` | All sink nodes grouped by category (`filesystem`, `database`, `xss`, etc.). Categories come from defaults + `.codemap/dataflow.json` overrides. |
 
 Pass `--tree` to `taint` / `slice` / `trace-value` for ASCII-tree rendering instead of a flat list.
@@ -214,13 +218,43 @@ Pass `--tree` to `taint` / `slice` / `trace-value` for ASCII-tree rendering inst
 | `lang-bridges [file]` | Every bridge edge detected — `torch_library`, `torch_ops`, `pybind11`, `pyo3_class`, `pyo3_function`, `pyo3_methods`, `triton_kernel`, `triton_launch`, `cuda_kernel`, `cuda_launch`, `monkey_patch`, `autograd_func`, `yaml_dispatch`, `build_dep`, `dispatch_key`, `trait_impl`. |
 | `gpu-functions` | Bridges tagged as GPU kernels — Triton JIT and CUDA `__global__`. |
 | `monkey-patches` | Python `module.Class = Replacement` reassignments detected across files. |
-| `dispatch-map` | Op name → per-device implementations (TORCH_LIBRARY `m.impl` + YAML `native_functions.yaml`). |
+| `dispatch-map` | Op name -> per-device implementations (TORCH_LIBRARY `m.impl` + YAML `native_functions.yaml`). |
 
 ### Comparison (1)
 
 | Action | What it does |
 |--------|-------------|
 | `compare <other-dir>` | Re-scans `<other-dir>` as a second graph and diffs the two — file add/remove, line delta, coupling changes per common file, new / removed external URLs. |
+
+### Reverse engineering (11)
+
+For analyzing compiled binaries, legacy databases, and applications without source code. Built from studying [goblin](https://github.com/m4b/goblin), [Ghidra](https://github.com/NationalSecurityAgency/ghidra), [Falcon](https://github.com/falconre/falcon), and [pe-parse](https://github.com/trailofbits/pe-parse) source code.
+
+| Action | What it does |
+|--------|-------------|
+| `clarion-schema <file>` | Parse Clarion `.CLW` DDL files into tables, keys, fields, and inferred FK relationships. Handles ISO-8859-1 encoding from Windows servers. |
+| `pe-strings <file>` | Extract and categorize ASCII strings from PE binaries — SQL statements, `dbo.*` table references, URLs, file paths, identifiers. |
+| `pe-exports <file>` | Parse the PE export directory table. Falls back to heuristic name extraction if no export table. |
+| `pe-imports <file>` | Parse the PE import table — every DLL dependency and every API function called. Categorizes imports by type: Database/SQL, Network, Registry, File I/O, Crypto, COM/OLE. |
+| `pe-resources <file>` | Parse the PE resource directory — version info (company, description, file/product version), embedded manifests, string tables, and resource type counts (dialogs, menus, icons, bitmaps). |
+| `pe-debug <file>` | Parse the PE debug directory — PDB file paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, VC Feature counters, POGO data. |
+| `pe-sections <file>` | Dump the PE section table with Shannon entropy analysis per section. Flags high-entropy sections (>7.0) as potentially packed or encrypted. Shows section characteristics (CODE, EXEC, READ, WRITE, etc.). |
+| `dbf-schema <file>` | Parse dBASE III/IV/FoxPro `.DBF` file headers — version, last update date, record count, and full field descriptors (name, type, size, decimal count). |
+| `dotnet-meta <file>` | Parse .NET CLR metadata from PE binaries — runtime version, CLR flags, metadata streams (#~, #Strings, #US, #GUID, #Blob), TypeDef/MethodDef/TypeRef/AssemblyRef tables, and user string literals. |
+| `sql-extract <file\|dir>` | Smart SQL extraction from binaries. Parses operation types (SELECT/INSERT/UPDATE/DELETE/CREATE/ALTER/EXEC), builds a table-to-operation access matrix, extracts JOIN relationships. In directory mode, produces per-binary table usage maps. |
+| `binary-diff <file1> <file2>` | Compare two PE binaries — diff imports (added/removed DLLs and functions), diff strings (new/removed SQL statements and table references), compare version info. |
+
+### LSP (5)
+
+Connect to any Language Server Protocol server to extract semantic analysis data. Each action takes a server command and a target.
+
+| Action | What it does |
+|--------|-------------|
+| `lsp-symbols <server> <file>` | Extract document symbols (functions, classes, methods, variables) via `textDocument/documentSymbol`. |
+| `lsp-references <server> <file:line:col>` | Find all references to a symbol via `textDocument/references`. |
+| `lsp-calls <server> <file:line:col>` | Get incoming and outgoing call hierarchy via `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls`. |
+| `lsp-diagnostics <server> <file>` | Collect all diagnostics (errors, warnings) from `textDocument/publishDiagnostics` notifications. |
+| `lsp-types <server> <file>` | Extract type signatures for each symbol via `textDocument/hover`. |
 
 ---
 
@@ -267,7 +301,7 @@ codemap --dir src taint req.body db.query
 codemap --dir src taint req.body db.query --tree
 ```
 
-CPG forward-from-source ∩ backward-from-sink. The tree form is usually what you want when showing this to someone.
+CPG forward-from-source intersected with backward-from-sink. The tree form is usually what you want when showing this to someone.
 
 ### Is this PR risky?
 
@@ -277,6 +311,50 @@ codemap --dir src diff-impact main
 ```
 
 `risk` returns a composite score and severity. `diff-impact` adds function-level change detail and per-file blast-radius attribution.
+
+### Reverse engineer a compiled Windows application
+
+```bash
+# Extract the full database schema from a Clarion DDL file
+codemap --dir . clarion-schema /path/to/sql_var.clw
+
+# Extract SQL queries and table references from a compiled EXE
+codemap --dir . pe-strings /path/to/app.exe
+
+# See what DLLs and APIs the binary calls
+codemap --dir . pe-imports /path/to/app.exe
+
+# Get version info, string tables, and UI structure
+codemap --dir . pe-resources /path/to/app.exe
+
+# Mine SQL queries across all EXEs in a directory, build table access map
+codemap --dir . sql-extract /path/to/app-directory/
+
+# Compare two versions of a binary
+codemap --dir . binary-diff old_version.exe new_version.exe
+
+# Parse a dBASE/FoxPro database file
+codemap --dir . dbf-schema /path/to/data.dbf
+
+# Crack a .NET assembly
+codemap --dir . dotnet-meta /path/to/app.dll
+```
+
+### Use LSP for semantic analysis
+
+```bash
+# Extract all symbols from a Rust file via rust-analyzer
+codemap --dir . lsp-symbols rust-analyzer src/main.rs
+
+# Find all references to a symbol at a specific location
+codemap --dir . lsp-references rust-analyzer src/main.rs:42:10
+
+# Get call hierarchy
+codemap --dir . lsp-calls rust-analyzer src/main.rs:42:10
+
+# Get diagnostics
+codemap --dir . lsp-diagnostics pylsp src/
+```
 
 ### Build an LLM-ready repo map
 
@@ -386,14 +464,14 @@ codemap/
 ├── codemap-core/                  # Library (all analysis lives here)
 │   └── src/
 │       ├── lib.rs                 # scan() + execute() public API
-│       ├── scanner.rs             # Walk → cache → parallel parse → resolve → bridge edges
+│       ├── scanner.rs             # Walk -> cache -> parallel parse -> resolve -> bridge edges
 │       ├── parser.rs              # ext_to_grammar + AST extractors + regex fallback
-│       ├── resolve.rs             # Import specifier → file path resolution
+│       ├── resolve.rs             # Import specifier -> file path resolution
 │       ├── types.rs               # Graph, GraphNode, FunctionInfo, Bridge*, DataFlowConfig
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) → String
+│           ├── mod.rs             # dispatch(action, target) -> String
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure
@@ -401,7 +479,9 @@ codemap/
 │           ├── functions.rs       # 13 function-level actions
 │           ├── dataflow.rs        # data-flow, taint, slice, trace-value, sinks
 │           ├── bridges.rs         # lang-bridges, gpu-functions, monkey-patches, dispatch-map
-│           └── compare.rs         # compare two repos
+│           ├── compare.rs         # compare two repos
+│           ├── reverse.rs         # 11 reverse engineering actions (PE, Clarion, DBF, .NET, SQL)
+│           └── lsp.rs             # 5 LSP client actions
 ├── codemap-napi/                  # Node.js bindings (same core, napi-rs wrapper)
 ├── plugin/skills/codemap/SKILL.md # The /codemap Claude Code skill
 ├── .claude-plugin/marketplace.json
@@ -411,18 +491,18 @@ codemap/
 ### Scan pipeline
 
 1. **Walk.** `walk_dir` recursively enumerates supported extensions, skipping common build/junk dirs and symlinks. Depth cap 50.
-2. **Cache lookup.** Load `.codemap/cache.bincode` (bincode-encoded `CacheData`). Entries with matching mtime (±1 ms) reuse cached imports, exports, functions, data-flow, bridges. Cache version stamp forces invalidation on schema changes (currently `CACHE_VERSION = 8`).
-3. **Parallel parse.** Misses are parsed with rayon across all cores. `parse_file` dispatches on extension → tree-sitter grammar → AST extractors (`extract_imports_from_ast`, `extract_exports_from_ast`, `extract_functions_from_ast`, `extract_data_flow_from_ast`). Parser instances are thread-local and cached per grammar to amortize setup.
+2. **Cache lookup.** Load `.codemap/cache.bincode` (bincode-encoded `CacheData`). Entries with matching mtime (+/-1 ms) reuse cached imports, exports, functions, data-flow, bridges. Cache version stamp forces invalidation on schema changes (currently `CACHE_VERSION = 8`).
+3. **Parallel parse.** Misses are parsed with rayon across all cores. `parse_file` dispatches on extension -> tree-sitter grammar -> AST extractors (`extract_imports_from_ast`, `extract_exports_from_ast`, `extract_functions_from_ast`, `extract_data_flow_from_ast`). Parser instances are thread-local and cached per grammar to amortize setup.
 4. **Import resolution.** Each import specifier is resolved against the scan directory, `--include-path` list, and sibling files via `resolve::resolve_import`. Unresolved specifiers stay as strings (still visible via `trace` and `phone-home`).
 5. **Reverse edges.** `imported_by` is populated after all nodes are built.
 6. **Bridge resolution.** Cross-language bridge registrations (TORCH_LIBRARY ops, pybind11 defs, PyO3 `#[pymodule]`, YAML dispatch rows, Triton/CUDA kernel launches, monkey-patches) are matched across files and added as extra import edges so graph-theory actions see them too.
-7. **Save cache.** Atomic write via `.bincode.tmp` → rename.
+7. **Save cache.** Atomic write via `.bincode.tmp` -> rename.
 
 ### CPG (code property graph)
 
-Built lazily the first time a data-flow action runs (`cpg::ensure_cpg`). Nodes are typed (`Def`, `Use`, `Call`, `Return`, `Param`, …) with file/line/name/expr. Edges are def→use chains plus param→use. Backward slicing and forward tracing are BFS on those edges, capped at 20 hops by default. `build_tree` + `render_tree` give the `--tree` output.
+Built lazily the first time a data-flow action runs (`cpg::ensure_cpg`). Nodes are typed (`Def`, `Use`, `Call`, `Return`, `Param`, ...) with file/line/name/expr. Edges are def->use chains plus param->use. Backward slicing and forward tracing are BFS on those edges, capped at 20 hops by default. `build_tree` + `render_tree` give the `--tree` output.
 
-Source/sink/sanitizer patterns for `taint` and `sinks` come from a sensible default list in `types.rs` (`process.env`, `req.body`, `exec`, `eval`, `fs.writeFile`, `db.query`, …) and can be extended per-repo via `.codemap/dataflow.json`:
+Source/sink/sanitizer patterns for `taint` and `sinks` come from a sensible default list in `types.rs` (`process.env`, `req.body`, `exec`, `eval`, `fs.writeFile`, `db.query`, ...) and can be extended per-repo via `.codemap/dataflow.json`:
 
 ```json
 {
@@ -448,7 +528,7 @@ Measurable from the code and `EVOLUTION.log`:
 - **Incremental cache.** Warm runs reparse only modified files. On codemap's own source (~8k lines of Rust) a warm `stats` runs in well under a second.
 - **Thread-local parser pool.** `tree_sitter::Parser` instances are created once per grammar per thread and reused (`PARSER_CACHE` thread-local).
 - **Regex hoisting.** All analysis regexes are compiled once per action, not per file or per line.
-- **Zero clippy warnings** at v5.0.0. **31 integration tests** (self-referential — codemap scans its own `codemap-core/src/`).
+- **Zero clippy warnings** at v5.1.0. **31 integration tests** (self-referential — codemap scans its own `codemap-core/src/`).
 - **Cache sanity.** Load caps bincode file at 256 MB and rejects entries with path traversal (`..`, leading `/`). Files > 10 MB are skipped at parse time.
 
 If you want real numbers on your codebase, `codemap --dir <path> stats` prints file and line counts; time it with `time` for baseline throughput.
@@ -481,8 +561,9 @@ Add `.codemap/` to `.gitignore`.
 | C/C++ imports resolve to nothing | Missing include paths | `--include-path /path/to/include`, repeat for each. |
 | Slow first scan, large repo | First pass parses everything | Subsequent scans use the cache. If you expect to run many actions in a row, the first is the cost; the rest are cheap. |
 | `git diff` / `churn` / `risk` fail | Not a git repo, or ref doesn't exist | codemap shells out to `git` in the scan dir. Make sure the ref resolves: `git rev-parse HEAD~3`. |
-| PHP files analyzed as regex-only (pre-v4.2) | Old install | v4.2+ uses `tree-sitter-php`. Update. |
 | `/codemap` not appearing in Claude Code | Plugin not enabled | `bash install.sh --check` — verifies plugin files, settings.json entries, binary on PATH. |
+| PE actions return "Not a PE file" | Target is not a Windows binary | PE actions only work on Windows EXE/DLL files (MZ header). |
+| `lsp-*` hangs or times out | LSP server not installed or not responding | Ensure the server command works standalone (e.g. `rust-analyzer --version`). Timeout is 5 seconds per request. |
 
 ---
 

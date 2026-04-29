@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (70 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (73 actions, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
@@ -19,6 +19,7 @@ Actions:
   Reverse:      clarion-schema, pe-strings, pe-exports, pe-imports, pe-resources,
                 pe-debug, dbf-schema, pe-sections, dotnet-meta, sql-extract,
                 binary-diff
+  Web:          web-api, web-dom, web-sitemap
   Comparison:   compare
   LSP:          lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types")]
 struct Cli {
