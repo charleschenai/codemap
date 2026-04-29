@@ -7,6 +7,7 @@ pub mod bridges;
 pub mod compare;
 pub mod insights;
 pub mod reverse;
+pub mod lsp;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -75,10 +76,20 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "gpu-functions" => Ok(bridges::gpu_functions(graph)),
         "monkey-patches" => Ok(bridges::monkey_patches(graph)),
         "dispatch-map" => Ok(bridges::dispatch_map(graph)),
-        // Reverse Engineering (3)
+        // Reverse Engineering (7)
         "clarion-schema" => Ok(reverse::clarion_schema(graph, target)),
         "pe-strings" => Ok(reverse::pe_strings(graph, target)),
         "pe-exports" => Ok(reverse::pe_exports(graph, target)),
+        "pe-imports" => Ok(reverse::pe_imports(graph, target)),
+        "pe-resources" => Ok(reverse::pe_resources(graph, target)),
+        "pe-debug" => Ok(reverse::pe_debug(graph, target)),
+        "dbf-schema" => Ok(reverse::dbf_schema(graph, target)),
+        // LSP (5)
+        "lsp-symbols" => Ok(lsp::lsp_symbols(graph, target)),
+        "lsp-references" => Ok(lsp::lsp_references(graph, target)),
+        "lsp-calls" => Ok(lsp::lsp_calls(graph, target)),
+        "lsp-diagnostics" => Ok(lsp::lsp_diagnostics(graph, target)),
+        "lsp-types" => Ok(lsp::lsp_types(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
