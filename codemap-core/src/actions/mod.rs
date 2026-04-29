@@ -7,7 +7,10 @@ pub mod bridges;
 pub mod compare;
 pub mod insights;
 pub mod reverse;
+pub mod binary;
+pub mod security;
 pub mod lsp;
+pub mod schemas;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -76,6 +79,11 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "gpu-functions" => Ok(bridges::gpu_functions(graph)),
         "monkey-patches" => Ok(bridges::monkey_patches(graph)),
         "dispatch-map" => Ok(bridges::dispatch_map(graph)),
+        // Security & Deps (4)
+        "secret-scan" => Ok(security::secret_scan(graph, target)),
+        "dep-tree" => Ok(security::dep_tree(graph, target)),
+        "dead-deps" => Ok(security::dead_deps(graph, target)),
+        "api-surface" => Ok(security::api_surface(graph, target)),
         // Reverse Engineering (11)
         "clarion-schema" => Ok(reverse::clarion_schema(graph, target)),
         "pe-strings" => Ok(reverse::pe_strings(graph, target)),
@@ -88,6 +96,11 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "dotnet-meta" => Ok(reverse::dotnet_meta(graph, target)),
         "sql-extract" => Ok(reverse::sql_extract(graph, target)),
         "binary-diff" => Ok(reverse::binary_diff(graph, target)),
+        // Binary Formats (4)
+        "elf-info" => Ok(binary::elf_info(graph, target)),
+        "macho-info" => Ok(binary::macho_info(graph, target)),
+        "java-class" => Ok(binary::java_class(graph, target)),
+        "wasm-info" => Ok(binary::wasm_info(graph, target)),
         // Web (3)
         "web-api" => Ok(reverse::web_api(graph, target)),
         "web-dom" => Ok(reverse::web_dom(graph, target)),
@@ -98,6 +111,12 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "lsp-calls" => Ok(lsp::lsp_calls(graph, target)),
         "lsp-diagnostics" => Ok(lsp::lsp_diagnostics(graph, target)),
         "lsp-types" => Ok(lsp::lsp_types(graph, target)),
+        // Schemas (5)
+        "proto-schema" => Ok(schemas::proto_schema(graph, target)),
+        "openapi-schema" => Ok(schemas::openapi_schema(graph, target)),
+        "graphql-schema" => Ok(schemas::graphql_schema(graph, target)),
+        "docker-map" => Ok(schemas::docker_map(graph, target)),
+        "terraform-map" => Ok(schemas::terraform_map(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

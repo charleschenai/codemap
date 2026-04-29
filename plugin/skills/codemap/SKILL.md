@@ -48,7 +48,7 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `summary` | High-level codebase summary |
 | `decorators` | List decorators/attributes usage |
 | `rename <old> <new>` | Preview rename impact |
-| `context <file>` | Full context for a file |
+| `context [budget]` | PageRank-ranked repo map fitted to a token budget (e.g. `8k`, `16000`) |
 
 ### Navigation
 | Action | What |

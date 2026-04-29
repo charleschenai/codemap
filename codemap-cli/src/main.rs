@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (73 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (86 actions, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
@@ -15,13 +15,16 @@ Actions:
                 import-cost, churn, api-diff, clones, git-coupling, risk,
                 diff-impact, entry-points
   Data Flow:    data-flow, taint, slice, trace-value, sinks
+  Security:     secret-scan, dep-tree, dead-deps, api-surface
   Cross-Lang:   lang-bridges, gpu-functions, monkey-patches, dispatch-map
   Reverse:      clarion-schema, pe-strings, pe-exports, pe-imports, pe-resources,
                 pe-debug, dbf-schema, pe-sections, dotnet-meta, sql-extract,
                 binary-diff
+  Binary:       elf-info, macho-info, java-class, wasm-info
   Web:          web-api, web-dom, web-sitemap
   Comparison:   compare
-  LSP:          lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types")]
+  LSP:          lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types
+  Schemas:      proto-schema, openapi-schema, graphql-schema, docker-map, terraform-map")]
 struct Cli {
     /// Directory to scan (repeatable for multi-repo)
     #[arg(long = "dir", value_name = "PATH")]
@@ -81,22 +84,27 @@ fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, quiet: 
         Err(e) => { eprintln!("Error: {e}"); return false; }
     };
 
-    if json {
-        let json_data = serde_json::json!({
-            "action": action,
-            "target": if target.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(target.to_string()) },
-            "files": graph.nodes.len(),
-            "result": result,
-        });
-        println!("{}", serde_json::to_string_pretty(&json_data).unwrap());
-    } else {
-        println!("{result}");
-    }
-
     let is_error = result.starts_with("File not found:")
         || result.starts_with("No files")
         || result.starts_with("Usage:")
         || result.starts_with("Invalid git ref:");
+
+    if json {
+        let mut json_data = serde_json::json!({
+            "ok": !is_error,
+            "action": action,
+            "target": if target.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(target.to_string()) },
+            "files": graph.nodes.len(),
+        });
+        if is_error {
+            json_data["error"] = serde_json::Value::String(result.clone());
+        }
+        json_data["result"] = serde_json::Value::String(result);
+        println!("{}", serde_json::to_string_pretty(&json_data).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")));
+    } else {
+        println!("{result}");
+    }
+
     !is_error
 }
 
@@ -114,13 +122,19 @@ fn main() {
         loop {
             // Clear screen
             print!("\x1b[2J\x1b[H");
-            // Get current time without chrono dependency
+            // Get current time using SystemTime
             let now = {
-                let output = std::process::Command::new("date").arg("+%H:%M:%S").output();
-                output.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+                let dur = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let total_secs = dur.as_secs();
+                let h = (total_secs / 3600) % 24;
+                let m = (total_secs / 60) % 60;
+                let s = total_secs % 60;
+                format!("{:02}:{:02}:{:02}", h, m, s)
             };
             eprintln!("Every {}s: codemap {} {}  ({})\n", secs, cli.action, target, now);
-            run_once(&dirs, &cli.include_paths, true, true, &cli.action, &target, cli.tree, cli.json);
+            run_once(&dirs, &cli.include_paths, cli.no_cache, cli.quiet, &cli.action, &target, cli.tree, cli.json);
             std::thread::sleep(std::time::Duration::from_secs(secs));
         }
     } else {

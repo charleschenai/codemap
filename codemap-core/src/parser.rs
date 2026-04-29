@@ -3,7 +3,16 @@ use crate::utils::truncate;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tree_sitter::{Language, Node, Parser, Tree};
+
+/// Global quiet flag to suppress parser warnings.
+static QUIET: AtomicBool = AtomicBool::new(false);
+
+/// Set the global quiet flag for parser warnings.
+pub fn set_quiet(quiet: bool) {
+    QUIET.store(quiet, Ordering::Relaxed);
+}
 
 // ── Public Interface ────────────────────────────────────────────────
 
@@ -94,7 +103,9 @@ fn parse_with_treesitter(content: &str, grammar: &'static str) -> Option<Tree> {
             let mut p = Parser::new();
             if let Some(lang) = grammar_to_language(grammar) {
                 if let Err(e) = p.set_language(&lang) {
-                    eprintln!("Warning: failed to load {grammar} grammar: {e}");
+                    if !QUIET.load(Ordering::Relaxed) {
+                        eprintln!("Warning: failed to load {grammar} grammar: {e}");
+                    }
                 }
             }
             p

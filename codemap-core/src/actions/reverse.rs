@@ -2,6 +2,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 use crate::types::Graph;
+use crate::utils;
+
+const MAX_BINARY_SIZE: u64 = 256 * 1024 * 1024; // 256 MB
 
 // ── Clarion Schema Types ────────────────────────────────────────────
 
@@ -30,7 +33,7 @@ struct ClarionField {
 
 // ── 1. clarion_schema ───────────────────────────────────────────────
 
-pub fn clarion_schema(_graph: &mut Graph, target: &str) -> String {
+pub fn clarion_schema(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -404,10 +407,18 @@ fn infer_relationships(tables: &[ClarionTable]) -> Vec<String> {
 
 // ── 2. pe_strings ───────────────────────────────────────────────────
 
-pub fn pe_strings(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_strings(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -518,6 +529,7 @@ pub fn pe_strings(_graph: &mut Graph, target: &str) -> String {
 }
 
 fn extract_ascii_strings(data: &[u8], min_len: usize) -> Vec<String> {
+    const MAX_STRINGS: usize = 50_000;
     let mut strings = Vec::new();
     let mut current = String::new();
 
@@ -527,13 +539,16 @@ fn extract_ascii_strings(data: &[u8], min_len: usize) -> Vec<String> {
         } else {
             if current.len() >= min_len {
                 strings.push(current.clone());
+                if strings.len() >= MAX_STRINGS {
+                    return strings;
+                }
             }
             current.clear();
         }
     }
 
     // Don't forget the last string
-    if current.len() >= min_len {
+    if current.len() >= min_len && strings.len() < MAX_STRINGS {
         strings.push(current);
     }
 
@@ -553,18 +568,28 @@ fn is_identifier(s: &str) -> bool {
 
 fn truncate_str(s: &str, max: usize) -> &str {
     if s.len() <= max {
-        s
-    } else {
-        &s[..max]
+        return s;
+    }
+    match s.char_indices().nth(max) {
+        Some((i, _)) => &s[..i],
+        None => s,
     }
 }
 
 // ── 3. pe_exports ───────────────────────────────────────────────────
 
-pub fn pe_exports(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_exports(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -791,10 +816,18 @@ fn read_cstring(data: &[u8], offset: usize) -> String {
 
 // ── 4. pe_imports ──────────────────────────────────────────────────
 
-pub fn pe_imports(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_imports(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -802,8 +835,8 @@ pub fn pe_imports(_graph: &mut Graph, target: &str) -> String {
         Err(e) => return format!("Error reading file: {e}"),
     };
 
-    match parse_pe_imports(&data) {
-        Ok(result) => result,
+    match parse_pe_imports_structured(&data) {
+        Ok(dlls) => format_pe_imports_result(&dlls),
         Err(e) => format!("PE import parse error: {e}"),
     }
 }
@@ -830,200 +863,13 @@ fn read_u64(data: &[u8], offset: usize) -> Result<u64, String> {
     ]))
 }
 
-fn parse_pe_imports(data: &[u8]) -> Result<String, String> {
-    if data.len() < 64 {
-        return Err("File too small for PE".to_string());
-    }
-
-    // Check DOS header magic "MZ"
-    if data[0] != b'M' || data[1] != b'Z' {
-        return Err("Not a PE file (missing MZ magic)".to_string());
-    }
-
-    // e_lfanew at offset 0x3C
-    let e_lfanew = read_u32(data, 0x3C)? as usize;
-
-    if e_lfanew + 4 > data.len() {
-        return Err("Invalid e_lfanew offset".to_string());
-    }
-
-    // Check PE signature "PE\0\0"
-    if data[e_lfanew] != b'P' || data[e_lfanew + 1] != b'E'
-        || data[e_lfanew + 2] != 0 || data[e_lfanew + 3] != 0
-    {
-        return Err("Invalid PE signature".to_string());
-    }
-
-    // COFF header at e_lfanew + 4
-    let coff_start = e_lfanew + 4;
-    if coff_start + 20 > data.len() {
-        return Err("Truncated COFF header".to_string());
-    }
-
-    let num_sections = read_u16(data, coff_start + 2)? as usize;
-    let optional_header_size = read_u16(data, coff_start + 16)? as usize;
-
-    // Optional header
-    let opt_start = coff_start + 20;
-    if opt_start + optional_header_size > data.len() {
-        return Err("Truncated optional header".to_string());
-    }
-
-    // Determine PE32 vs PE32+
-    let opt_magic = read_u16(data, opt_start)?;
-    let is_pe64 = match opt_magic {
-        0x10B => false, // PE32
-        0x20B => true,  // PE32+ (PE64)
-        _ => return Err(format!("Unknown optional header magic: 0x{:X}", opt_magic)),
-    };
-
-    // Import table is data directory entry 1 (second entry)
-    // PE32: data directories start at optional_header + 96, import = entry 1 => +104
-    // PE64: data directories start at optional_header + 112, import = entry 1 => +120
-    let import_dir_offset = if is_pe64 {
-        opt_start + 120
-    } else {
-        opt_start + 104
-    };
-
-    if import_dir_offset + 8 > data.len() {
-        return Err("No import data directory entry".to_string());
-    }
-
-    let import_rva = read_u32(data, import_dir_offset)? as usize;
-    let import_size = read_u32(data, import_dir_offset + 4)? as usize;
-
-    if import_rva == 0 || import_size == 0 {
-        return Err("No import directory".to_string());
-    }
-
-    // Parse section headers
-    let sections_start = opt_start + optional_header_size;
-    let sections = parse_sections(data, sections_start, num_sections)?;
-
-    let import_offset = rva_to_offset(import_rva, &sections)
-        .ok_or_else(|| "Cannot resolve import table RVA to file offset".to_string())?;
-
-    // Read Import Directory Table: array of 20-byte entries until all-zero
-    let mut dlls: Vec<ImportedDll> = Vec::new();
-    let mut entry_offset = import_offset;
-
-    loop {
-        if entry_offset + 20 > data.len() {
-            break;
-        }
-
-        let original_first_thunk = read_u32(data, entry_offset)? as usize;
-        let name_rva = read_u32(data, entry_offset + 12)? as usize;
-        let first_thunk = read_u32(data, entry_offset + 16)? as usize;
-
-        // All-zero entry marks the end
-        if original_first_thunk == 0 && name_rva == 0 && first_thunk == 0 {
-            break;
-        }
-
-        // Read DLL name
-        let dll_name = if name_rva != 0 {
-            match rva_to_offset(name_rva, &sections) {
-                Some(off) => read_cstring(data, off),
-                None => String::from("<unknown>"),
-            }
-        } else {
-            String::from("<unknown>")
-        };
-
-        // Read imported functions from ILT (OriginalFirstThunk) or IAT (FirstThunk) as fallback
-        let ilt_rva = if original_first_thunk != 0 {
-            original_first_thunk
-        } else {
-            first_thunk
-        };
-
-        let mut functions: Vec<String> = Vec::new();
-
-        if ilt_rva != 0 {
-            if let Some(ilt_offset) = rva_to_offset(ilt_rva, &sections) {
-                let entry_size = if is_pe64 { 8usize } else { 4usize };
-                let mut i = 0usize;
-
-                loop {
-                    let pos = ilt_offset + i * entry_size;
-                    if pos + entry_size > data.len() {
-                        break;
-                    }
-
-                    if is_pe64 {
-                        let val = read_u64(data, pos)?;
-                        if val == 0 {
-                            break;
-                        }
-                        if val & (1u64 << 63) != 0 {
-                            // Import by ordinal
-                            let ordinal = val & 0xFFFF;
-                            functions.push(format!("Ordinal({})", ordinal));
-                        } else {
-                            // Import by name: bits 0-30 = Hint/Name RVA
-                            let hint_name_rva = (val & 0x7FFFFFFF) as usize;
-                            if let Some(hn_offset) = rva_to_offset(hint_name_rva, &sections) {
-                                // Skip 2-byte hint, read null-terminated name
-                                if hn_offset + 2 < data.len() {
-                                    let name = read_cstring(data, hn_offset + 2);
-                                    if !name.is_empty() {
-                                        functions.push(name);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        let val = read_u32(data, pos)? as u32;
-                        if val == 0 {
-                            break;
-                        }
-                        if val & (1u32 << 31) != 0 {
-                            // Import by ordinal
-                            let ordinal = val & 0xFFFF;
-                            functions.push(format!("Ordinal({})", ordinal));
-                        } else {
-                            // Import by name
-                            let hint_name_rva = (val & 0x7FFFFFFF) as usize;
-                            if let Some(hn_offset) = rva_to_offset(hint_name_rva, &sections) {
-                                if hn_offset + 2 < data.len() {
-                                    let name = read_cstring(data, hn_offset + 2);
-                                    if !name.is_empty() {
-                                        functions.push(name);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    i += 1;
-                    // Safety: cap at 10000 imports per DLL
-                    if i > 10_000 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        dlls.push(ImportedDll {
-            name: dll_name,
-            functions,
-        });
-
-        entry_offset += 20;
-
-        // Safety: cap at 500 DLLs
-        if dlls.len() > 500 {
-            break;
-        }
-    }
-
+/// Format parsed PE imports into a human-readable report.
+/// Used by both `pe_imports` (public action) and `binary_diff`.
+fn format_pe_imports_result(dlls: &[ImportedDll]) -> String {
     if dlls.is_empty() {
-        return Ok("No imports found in PE binary.".to_string());
+        return "No imports found in PE binary.".to_string();
     }
 
-    // Format output
     let total_functions: usize = dlls.iter().map(|d| d.functions.len()).sum();
 
     let mut out = String::new();
@@ -1031,7 +877,7 @@ fn parse_pe_imports(data: &[u8]) -> Result<String, String> {
     out.push_str(&format!("DLLs: {}\n", dlls.len()));
     out.push_str(&format!("Total imported functions: {total_functions}\n\n"));
 
-    for dll in &dlls {
+    for dll in dlls {
         out.push_str(&format!("── {} ({} functions) ──\n", dll.name, dll.functions.len()));
         for func in &dll.functions {
             out.push_str(&format!("  {func}\n"));
@@ -1047,7 +893,7 @@ fn parse_pe_imports(data: &[u8]) -> Result<String, String> {
     let mut crypto_imports: Vec<(String, Vec<String>)> = Vec::new();
     let mut com_imports: Vec<(String, Vec<String>)> = Vec::new();
 
-    for dll in &dlls {
+    for dll in dlls {
         let dll_lower = dll.name.to_lowercase();
 
         // Database/SQL
@@ -1141,15 +987,23 @@ fn parse_pe_imports(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    out
 }
 
 // ── 5. pe_resources ────────────────────────────────────────────────
 
-pub fn pe_resources(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_resources(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -1436,7 +1290,7 @@ fn parse_rsrc_directory_top(
         let mut entries = Vec::new();
         if offset_val & 0x8000_0000 != 0 {
             let subdir_offset = rsrc_base + (offset_val & 0x7FFF_FFFF) as usize;
-            collect_rsrc_data_entries(data, subdir_offset, rsrc_base, sections, &mut entries);
+            collect_rsrc_data_entries(data, subdir_offset, rsrc_base, sections, &mut entries, 0);
         } else {
             let data_entry_offset = rsrc_base + offset_val as usize;
             if let Some(entry) = read_rsrc_data_entry(data, data_entry_offset) {
@@ -1461,7 +1315,11 @@ fn collect_rsrc_data_entries(
     rsrc_base: usize,
     sections: &[Section],
     out: &mut Vec<ResourceDataEntry>,
+    depth: usize,
 ) {
+    if depth > 16 {
+        return;
+    }
     if dir_offset + 16 > data.len() {
         return;
     }
@@ -1491,7 +1349,7 @@ fn collect_rsrc_data_entries(
         if offset_val & 0x8000_0000 != 0 {
             let sub_offset = rsrc_base + (offset_val & 0x7FFF_FFFF) as usize;
             if sub_offset != dir_offset && sub_offset < data.len() {
-                collect_rsrc_data_entries(data, sub_offset, rsrc_base, sections, out);
+                collect_rsrc_data_entries(data, sub_offset, rsrc_base, sections, out, depth + 1);
             }
         } else {
             let data_entry_offset = rsrc_base + offset_val as usize;
@@ -1637,7 +1495,7 @@ fn parse_version_info(data: &[u8], offset: usize, size: usize) -> String {
     }
 
     // Parse children (StringFileInfo / VarFileInfo)
-    let string_values = parse_version_children(data, pos, end);
+    let string_values = parse_version_children(data, pos, end, 0);
     for (k, v) in &string_values {
         out.push_str(&format!("  {}: {}\n", k, v));
     }
@@ -1646,7 +1504,10 @@ fn parse_version_info(data: &[u8], offset: usize, size: usize) -> String {
 }
 
 /// Parse StringFileInfo children to extract key-value pairs
-fn parse_version_children(data: &[u8], start: usize, end: usize) -> Vec<(String, String)> {
+fn parse_version_children(data: &[u8], start: usize, end: usize, depth: usize) -> Vec<(String, String)> {
+    if depth > 16 {
+        return Vec::new();
+    }
     let mut results = Vec::new();
     let mut pos = start;
 
@@ -1685,7 +1546,7 @@ fn parse_version_children(data: &[u8], start: usize, end: usize) -> Vec<(String,
         let val_pos = align4(key_pos);
 
         if child_key == "StringFileInfo" || child_key == "VarFileInfo" {
-            let sub_results = parse_version_children(data, val_pos, child_end);
+            let sub_results = parse_version_children(data, val_pos, child_end, depth + 1);
             results.extend(sub_results);
         } else if value_length > 0 && child_type == 1 {
             // Text value (UTF-16LE)
@@ -1699,7 +1560,7 @@ fn parse_version_children(data: &[u8], start: usize, end: usize) -> Vec<(String,
             }
         } else if child_key.len() == 8 && child_key.chars().all(|c| c.is_ascii_hexdigit()) {
             // StringTable entry (codepage+language ID like "040904B0")
-            let sub_results = parse_version_children(data, val_pos, child_end);
+            let sub_results = parse_version_children(data, val_pos, child_end, depth + 1);
             results.extend(sub_results);
         }
 
@@ -1718,10 +1579,18 @@ fn align4(pos: usize) -> usize {
 
 // ── 6. pe_debug ───────────────────────────────────────────────────
 
-pub fn pe_debug(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_debug(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -2007,10 +1876,18 @@ fn is_leap_year(y: i64) -> bool {
 
 // ── 7. dbf_schema ─────────────────────────────────────────────────
 
-pub fn dbf_schema(_graph: &mut Graph, target: &str) -> String {
+pub fn dbf_schema(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -2204,10 +2081,18 @@ fn extract_export_names_heuristic(data: &[u8]) -> Vec<String> {
 
 // ── 8. pe_sections ──────────────────────────────────────────────────
 
-pub fn pe_sections(_graph: &mut Graph, target: &str) -> String {
+pub fn pe_sections(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -2324,8 +2209,8 @@ fn parse_pe_sections_info(data: &[u8]) -> Result<String, String> {
 
         out.push_str(&format!(
             "  {:<10}VA:0x{:<8X} Size:{:<10} Raw:{:<10} Entropy:{:<6.2} [{}]\n",
-            name, virtual_address, format_number(virtual_size),
-            format_number(raw_size), entropy, flags_str
+            name, virtual_address, utils::format_number(virtual_size as usize),
+            utils::format_number(raw_size as usize), entropy, flags_str
         ));
     }
 
@@ -2358,24 +2243,20 @@ fn shannon_entropy(data: &[u8]) -> f64 {
     entropy
 }
 
-fn format_number(n: u32) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
-
 // ── 9. dotnet_meta ──────────────────────────────────────────────────
 
-pub fn dotnet_meta(_graph: &mut Graph, target: &str) -> String {
+pub fn dotnet_meta(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -2946,7 +2827,7 @@ fn read_compressed_uint(data: &[u8], offset: usize) -> (usize, usize) {
 
 // ── 10. sql_extract ─────────────────────────────────────────────────
 
-pub fn sql_extract(_graph: &mut Graph, target: &str) -> String {
+pub fn sql_extract(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
 
     if path.is_dir() {
@@ -2956,6 +2837,14 @@ pub fn sql_extract(_graph: &mut Graph, target: &str) -> String {
 
     if !path.exists() {
         return format!("File not found: {target}");
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => return format!("Error: {e}"),
+    };
+    if meta.len() > MAX_BINARY_SIZE {
+        return format!("File too large ({} bytes, max 256 MB)", meta.len());
     }
 
     let data = match fs::read(path) {
@@ -2974,8 +2863,6 @@ struct SqlExtraction {
 }
 
 struct SqlStatement {
-    #[allow(dead_code)]
-    text: String,
     op_type: SqlOp,
     tables: Vec<String>,
 }
@@ -3077,7 +2964,6 @@ fn extract_sql_from_binary(data: &[u8]) -> SqlExtraction {
         }
 
         statements.push(SqlStatement {
-            text: s.clone(),
             op_type,
             tables,
         });
@@ -3115,12 +3001,11 @@ fn extract_tables_after_keyword(upper: &str, keyword: &str, tables: &mut BTreeSe
 
         let remaining = &upper[abs_idx..];
         // Extract table names (comma-separated, possibly with aliases)
+        let stop_keywords = ["WHERE", "SET", "VALUES", "ORDER", "GROUP", "HAVING",
+            "UNION", "ON", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS",
+            "JOIN", "SELECT", "INSERT", "UPDATE", "DELETE", "("];
         for part in remaining.split(',') {
             let part = part.trim();
-            // Stop at SQL keywords
-            let stop_keywords = ["WHERE", "SET", "VALUES", "ORDER", "GROUP", "HAVING",
-                "UNION", "ON", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS",
-                "JOIN", "SELECT", "INSERT", "UPDATE", "DELETE", "("];
             let end_pos = stop_keywords.iter()
                 .filter_map(|kw| part.find(kw))
                 .min()
@@ -3150,7 +3035,11 @@ fn extract_tables_after_keyword(upper: &str, keyword: &str, tables: &mut BTreeSe
                     tables.insert(clean.to_lowercase());
                 }
             }
-            break; // Only take first table per comma group after this keyword occurrence
+
+            // If we hit a stop keyword, don't continue to the next comma-separated part
+            if end_pos < part.len() {
+                break;
+            }
         }
 
         search_pos = abs_idx;
@@ -3309,6 +3198,12 @@ fn sql_extract_directory(dir: &Path) -> String {
             continue;
         }
 
+        if let Ok(m) = fs::metadata(&path) {
+            if m.len() > MAX_BINARY_SIZE {
+                continue;
+            }
+        }
+
         let data = match fs::read(&path) {
             Ok(d) => d,
             Err(_) => continue,
@@ -3385,7 +3280,7 @@ fn sql_extract_directory(dir: &Path) -> String {
 
 // ── 11. binary_diff ─────────────────────────────────────────────────
 
-pub fn binary_diff(_graph: &mut Graph, target: &str) -> String {
+pub fn binary_diff(_graph: &Graph, target: &str) -> String {
     let parts: Vec<&str> = target.splitn(2, ' ').collect();
     if parts.len() != 2 {
         return "Usage: binary-diff <file1> <file2>\nCompare two PE binaries.".to_string();
@@ -3399,6 +3294,17 @@ pub fn binary_diff(_graph: &mut Graph, target: &str) -> String {
     }
     if !path2.exists() {
         return format!("File not found: {}", parts[1]);
+    }
+
+    if let Ok(m) = fs::metadata(path1) {
+        if m.len() > MAX_BINARY_SIZE {
+            return format!("File too large ({} bytes, max 256 MB): {}", m.len(), parts[0]);
+        }
+    }
+    if let Ok(m) = fs::metadata(path2) {
+        if m.len() > MAX_BINARY_SIZE {
+            return format!("File too large ({} bytes, max 256 MB): {}", m.len(), parts[1]);
+        }
     }
 
     let data1 = match fs::read(path1) {
@@ -3729,7 +3635,7 @@ fn format_file_size(bytes: usize) -> String {
 
 // ── 12. web_api ────────────────────────────────────────────────────
 
-pub fn web_api(_graph: &mut Graph, target: &str) -> String {
+pub fn web_api(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -4020,7 +3926,7 @@ pub fn web_api(_graph: &mut Graph, target: &str) -> String {
                 }
             }
             if count > 0 {
-                out.push_str(&format!("  {label}: {count} files ({})\n", har_format_size(total_size)));
+                out.push_str(&format!("  {label}: {count} files ({})\n", format_file_size(total_size)));
             }
         }
 
@@ -4035,7 +3941,7 @@ pub fn web_api(_graph: &mut Graph, target: &str) -> String {
             }
         }
         if other_count > 0 {
-            out.push_str(&format!("  Other: {other_count} files ({})\n", har_format_size(other_size)));
+            out.push_str(&format!("  Other: {other_count} files ({})\n", format_file_size(other_size)));
         }
     }
 
@@ -4113,19 +4019,9 @@ fn is_id_segment(seg: &str) -> bool {
     false
 }
 
-fn har_format_size(bytes: usize) -> String {
-    if bytes >= 1_048_576 {
-        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} bytes", bytes)
-    }
-}
-
 // ── 13. web_dom ────────────────────────────────────────────────────
 
-pub fn web_dom(_graph: &mut Graph, target: &str) -> String {
+pub fn web_dom(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -4810,7 +4706,7 @@ fn extract_links(content: &str) -> Vec<(String, String)> {
 
 // ── 14. web_sitemap ────────────────────────────────────────────────
 
-pub fn web_sitemap(_graph: &mut Graph, target: &str) -> String {
+pub fn web_sitemap(_graph: &Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("Path not found: {target}");

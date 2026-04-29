@@ -26,6 +26,8 @@ impl std::fmt::Display for CodemapError {
     }
 }
 
+impl std::error::Error for CodemapError {}
+
 pub struct ScanOptions {
     pub dirs: Vec<PathBuf>,
     pub include_paths: Vec<PathBuf>,

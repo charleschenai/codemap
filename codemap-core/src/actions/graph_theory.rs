@@ -251,9 +251,12 @@ pub fn bridges(graph: &Graph) -> String {
         return "No articulation points found \u{2014} the graph stays connected if any single file is removed.".to_string();
     }
 
-    let mut ranked: Vec<(String, usize)> = articulation_points.iter().map(|id| {
-        let node = graph.nodes.get(id).unwrap();
-        (id.clone(), node.imports.len() + node.imported_by.len())
+    let mut ranked: Vec<(String, usize)> = articulation_points.iter().filter_map(|id| {
+        if let Some(node) = graph.nodes.get(id) {
+            Some((id.clone(), node.imports.len() + node.imported_by.len()))
+        } else {
+            None
+        }
     }).collect();
     ranked.sort_by_key(|a| Reverse(a.1));
 
@@ -317,11 +320,16 @@ pub fn clusters(graph: &Graph) -> String {
 
             let mut counts: HashMap<&String, usize> = HashMap::new();
             for n in neighbors {
-                let l = labels.get(n).unwrap();
-                *counts.entry(l).or_insert(0) += 1;
+                if let Some(l) = labels.get(n) {
+                    *counts.entry(l).or_insert(0) += 1;
+                }
             }
 
-            let mut best_label = labels.get(id).unwrap().clone();
+            let current_label = match labels.get(id) {
+                Some(l) => l.clone(),
+                None => continue,
+            };
+            let mut best_label = current_label.clone();
             let mut best_count = 0usize;
             for (l, c) in &counts {
                 if *c > best_count {
@@ -330,7 +338,7 @@ pub fn clusters(graph: &Graph) -> String {
                 }
             }
 
-            if best_label != *labels.get(id).unwrap() {
+            if best_label != current_label {
                 labels.insert(id.clone(), best_label);
                 changed = true;
             }
@@ -366,7 +374,7 @@ pub fn clusters(graph: &Graph) -> String {
         let mut internal = 0usize;
         let mut external = 0usize;
         for id in cluster.iter() {
-            let node = graph.nodes.get(id).unwrap();
+            let Some(node) = graph.nodes.get(id) else { continue };
             for imp in &node.imports {
                 if cluster_set.contains(imp) {
                     internal += 1;

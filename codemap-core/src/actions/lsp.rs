@@ -618,7 +618,7 @@ fn strip_code_fences(s: &str) -> String {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Examples: `rust-analyzer src/main.rs`, `pylsp .`
-pub fn lsp_symbols(_graph: &mut Graph, target: &str) -> String {
+pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -683,7 +683,7 @@ pub fn lsp_symbols(_graph: &mut Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file>:<line>:<col>`
 /// Example: `rust-analyzer src/main.rs:42:10`
-pub fn lsp_references(_graph: &mut Graph, target: &str) -> String {
+pub fn lsp_references(_graph: &Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -785,7 +785,7 @@ pub fn lsp_references(_graph: &mut Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file>:<line>:<col>`
 /// Example: `rust-analyzer src/main.rs:42:10`
-pub fn lsp_calls(_graph: &mut Graph, target: &str) -> String {
+pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -931,7 +931,7 @@ fn format_call_item(output: &mut String, call: &Value, key: &str, root: &Path) {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Example: `rust-analyzer src/`, `pylsp .`
-pub fn lsp_diagnostics(_graph: &mut Graph, target: &str) -> String {
+pub fn lsp_diagnostics(_graph: &Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -1045,7 +1045,7 @@ pub fn lsp_diagnostics(_graph: &mut Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Example: `rust-analyzer src/main.rs`, `pylsp utils.py`
-pub fn lsp_types(_graph: &mut Graph, target: &str) -> String {
+pub fn lsp_types(_graph: &Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,

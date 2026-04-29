@@ -334,6 +334,9 @@ fn scan_single_dir(
         miss_files.push(file.clone());
     }
 
+    // Propagate quiet flag to parser
+    parser::set_quiet(quiet);
+
     // Parse cache misses in parallel with rayon
     let ctx = ResolveContext::new(&dir_str, include_paths);
     let parsed: Vec<ParsedFile> = miss_files
@@ -347,10 +350,12 @@ fn scan_single_dir(
                 .replace('\\', "/");
 
             // Skip files larger than 10MB
-            if let Ok(meta) = fs::metadata(file) {
-                if meta.len() > 10_000_000 {
-                    return None;
-                }
+            let meta = match fs::metadata(file) {
+                Ok(m) => m,
+                Err(_) => return None,
+            };
+            if meta.len() > 10_000_000 {
+                return None;
             }
 
             let content = match fs::read_to_string(file) {
@@ -358,9 +363,9 @@ fn scan_single_dir(
                 Err(_) => return None,
             };
 
-            let mtime = fs::metadata(file)
+            let mtime = meta
+                .modified()
                 .ok()
-                .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs_f64() * 1000.0)
                 .unwrap_or(0.0);

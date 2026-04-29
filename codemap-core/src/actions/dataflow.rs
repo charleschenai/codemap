@@ -30,7 +30,10 @@ pub fn data_flow(graph: &mut Graph, target: &str, _tree_mode: bool) -> String {
     };
 
     // Now get CPG ref immutably (ensure_cpg already built it above)
-    let cpg = graph.cpg.as_ref().unwrap();
+    let cpg = match graph.cpg.as_ref() {
+        Some(c) => c,
+        None => return "Error: CPG could not be built.".to_string(),
+    };
 
     let mut lines = vec![
         format!("=== Data Flow: {}{} ===", node_id, fn_name.map(|n| format!(":{n}")).unwrap_or_default()),
@@ -83,7 +86,10 @@ pub fn data_flow(graph: &mut Graph, target: &str, _tree_mode: bool) -> String {
 pub fn taint(graph: &mut Graph, args: &str, tree_mode: bool) -> String {
     let scan_dir = graph.scan_dir.clone();
     cpg::ensure_cpg(graph);
-    let cpg_ref = graph.cpg.as_ref().unwrap();
+    let cpg_ref = match graph.cpg.as_ref() {
+        Some(c) => c,
+        None => return "Error: CPG could not be built.".to_string(),
+    };
     let _config = load_dataflow_config(&scan_dir);
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.len() < 2 { return "Usage: codemap taint <source> <sink>".to_string(); }
@@ -141,7 +147,10 @@ pub fn taint(graph: &mut Graph, args: &str, tree_mode: bool) -> String {
 pub fn slice(graph: &mut Graph, target: &str, tree_mode: bool) -> String {
     if target.is_empty() { return "Usage: codemap slice <file>:<line>".to_string(); }
     cpg::ensure_cpg(graph);
-    let cpg_ref = graph.cpg.as_ref().unwrap();
+    let cpg_ref = match graph.cpg.as_ref() {
+        Some(c) => c,
+        None => return "Error: CPG could not be built.".to_string(),
+    };
 
     let mut target_nodes = cpg::find_target_nodes(cpg_ref, target);
     if target_nodes.is_empty() {
@@ -186,7 +195,10 @@ pub fn trace_value(graph: &mut Graph, target: &str, tree_mode: bool) -> String {
     if target.is_empty() { return "Usage: codemap trace-value <file>:<line>:<name>".to_string(); }
     let scan_dir = graph.scan_dir.clone();
     cpg::ensure_cpg(graph);
-    let cpg_ref = graph.cpg.as_ref().unwrap();
+    let cpg_ref = match graph.cpg.as_ref() {
+        Some(c) => c,
+        None => return "Error: CPG could not be built.".to_string(),
+    };
     let config = load_dataflow_config(&scan_dir);
 
     let target_nodes = cpg::find_target_nodes(cpg_ref, target);
@@ -240,7 +252,10 @@ pub fn sinks(graph: &mut Graph, target: &str) -> String {
         }
     };
     cpg::ensure_cpg(graph);
-    let cpg_ref = graph.cpg.as_ref().unwrap();
+    let cpg_ref = match graph.cpg.as_ref() {
+        Some(c) => c,
+        None => return "Error: CPG could not be built.".to_string(),
+    };
     let config = load_dataflow_config(&scan_dir);
 
     let sink_nodes = cpg::find_sink_nodes(cpg_ref, &config, file_filter.as_deref());
