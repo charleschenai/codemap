@@ -117,6 +117,10 @@ impl LspClient {
     }
 
     fn read_message(&mut self) -> Result<Value, String> {
+        // Maximum Content-Length we'll accept (50 MB). Reject anything larger
+        // to prevent unbounded memory allocation from a misbehaving server.
+        const MAX_CONTENT_LENGTH: usize = 50 * 1024 * 1024;
+
         // Read headers until empty line
         let mut content_length: usize = 0;
         loop {
@@ -138,6 +142,12 @@ impl LspClient {
         if content_length == 0 {
             return Err("No Content-Length in response".into());
         }
+        if content_length > MAX_CONTENT_LENGTH {
+            return Err(format!(
+                "Content-Length {} exceeds maximum ({} bytes) — rejecting oversized LSP message",
+                content_length, MAX_CONTENT_LENGTH
+            ));
+        }
         let mut buf = vec![0u8; content_length];
         self.reader
             .read_exact(&mut buf)
@@ -146,6 +156,14 @@ impl LspClient {
         serde_json::from_str(&text).map_err(|e| format!("JSON parse: {}", e))
     }
 
+    /// Wait for a response matching the given request id.
+    ///
+    /// **Timeout note:** The deadline check runs between messages, but each
+    /// individual `read_message()` call blocks on I/O. This means the timeout
+    /// is best-effort — if the server sends nothing the read will block
+    /// indefinitely. For a CLI tool this is acceptable; the user can Ctrl-C.
+    /// The Content-Length cap in `read_message` prevents memory exhaustion
+    /// from oversized payloads.
     fn wait_for_response(&mut self, id: i64) -> Result<Value, String> {
         // Check if we already have it from a prior read
         if let Some(resp) = self.pending.remove(&id) {
@@ -163,9 +181,6 @@ impl LspClient {
                 ));
             }
 
-            // Blocking read — the LSP server should respond quickly.
-            // If it hangs, we'll hit the deadline on the next iteration
-            // (but this read itself will block). For a CLI tool this is acceptable.
             let msg = self.read_message()?;
 
             if let Some(resp_id) = msg.get("id").and_then(|v| v.as_i64()) {

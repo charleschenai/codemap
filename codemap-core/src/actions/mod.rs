@@ -101,10 +101,12 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "macho-info" => Ok(binary::macho_info(graph, target)),
         "java-class" => Ok(binary::java_class(graph, target)),
         "wasm-info" => Ok(binary::wasm_info(graph, target)),
-        // Web (3)
+        // Web (5)
         "web-api" => Ok(reverse::web_api(graph, target)),
         "web-dom" => Ok(reverse::web_dom(graph, target)),
         "web-sitemap" => Ok(reverse::web_sitemap(graph, target)),
+        "web-blueprint" => Ok(reverse::web_blueprint(graph, target)),
+        "js-api-extract" => Ok(reverse::js_api_extract(graph, target)),
         // LSP (5)
         "lsp-symbols" => Ok(lsp::lsp_symbols(graph, target)),
         "lsp-references" => Ok(lsp::lsp_references(graph, target)),

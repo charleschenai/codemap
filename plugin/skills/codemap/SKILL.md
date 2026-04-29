@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 70 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (PE sections/imports/resources/debug/strings/exports, .NET metadata, SQL extraction, binary diff, Clarion/DBF schema), LSP integration, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase structure with 86 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (PE sections/imports/resources/debug/strings/exports, .NET metadata, SQL extraction, binary diff, Clarion/DBF schema), binary formats (ELF/Mach-O/Java class/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dep-tree, dead deps, API surface), LSP integration, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -12,7 +12,7 @@ allowed-tools:
 
 # /codemap — Codebase Dependency Analysis
 
-70 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
+86 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
 
 ## Usage
 
@@ -102,12 +102,37 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `lang-bridges [file]` | Show cross-language bridge edges (pybind11, PyO3, TORCH_LIBRARY, Triton, CUDA) |
 | `gpu-functions` | List all GPU-tagged functions (CUDA __global__, @triton.jit) |
 | `monkey-patches` | Show Python module-level class/function replacements |
-| `dispatch-map` | Show op→implementation mappings per device |
+| `dispatch-map` | Show op->implementation mappings per device |
 
 ### Comparison
 | Action | What |
 |--------|------|
 | `compare <dir>` | Structural A/B diff |
+
+### Binary Formats
+| Action | What |
+|--------|------|
+| `elf-info <file>` | ELF binary analysis — sections, symbols, dynamic linking |
+| `macho-info <file>` | Mach-O binary analysis — load commands, segments, symbols |
+| `java-class <file>` | Java .class file — constant pool, methods, fields, version |
+| `wasm-info <file>` | WebAssembly module — imports, exports, sections, memory |
+
+### Schemas
+| Action | What |
+|--------|------|
+| `proto-schema <file>` | Parse Protobuf .proto definitions — messages, services, fields |
+| `openapi-schema <file>` | Parse OpenAPI/Swagger specs — endpoints, schemas, auth |
+| `graphql-schema <file>` | Parse GraphQL schemas — types, queries, mutations, subscriptions |
+| `docker-map <file>` | Parse Dockerfiles — stages, base images, exposed ports, volumes |
+| `terraform-map <file>` | Parse Terraform HCL — resources, variables, outputs, modules |
+
+### Security
+| Action | What |
+|--------|------|
+| `secret-scan [file]` | Scan for hardcoded secrets, API keys, tokens, passwords |
+| `dep-tree [file]` | Dependency tree with version info from lockfiles |
+| `dead-deps [file]` | Declared dependencies not imported by any source file |
+| `api-surface [file]` | Public API surface — all exported functions/types/constants |
 
 ### Reverse Engineering
 | Action | What |
@@ -123,6 +148,13 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `dotnet-meta <file>` | .NET CLR metadata — types, methods, assembly refs, user strings |
 | `sql-extract <file\|dir>` | Smart SQL extraction — table access map, JOINs, per-binary usage |
 | `binary-diff <file1> <file2>` | Compare two binaries — import/string/version changes |
+
+### Web
+| Action | What |
+|--------|------|
+| `web-api <file>` | Extract REST API routes and handlers |
+| `web-dom <file>` | DOM structure and component tree |
+| `web-sitemap <file>` | Site map from routes and links |
 
 ### LSP
 | Action | What |
@@ -158,10 +190,10 @@ codemap --dir ~/project-a --dir ~/project-b stats
 
 - Understanding architecture — `stats`, `hotspots`, `layers`, `pagerank`, `hubs`
 - Finding critical code — `bridges`, `call-graph`, `fn-info`, `complexity`
-- Cleaning up — `dead-files`, `dead-functions`, `orphan-exports`
+- Cleaning up — `dead-files`, `dead-functions`, `orphan-exports`, `dead-deps`
 - Before refactoring — `blast-radius`, `bridges`, `similar`, `import-cost`
 - Debugging breakage — `why`, `paths`, `call-graph`
-- Security audit — `phone-home`, `sinks`, `taint`
+- Security audit — `phone-home`, `sinks`, `taint`, `secret-scan`, `api-surface`
 - Data flow analysis — `data-flow`, `slice`, `trace-value`
 - Comparing versions — `compare`, `api-diff`, `diff-functions`
 - Risk assessment — `churn`, `complexity`, `risk`
@@ -169,5 +201,8 @@ codemap --dir ~/project-a --dir ~/project-b stats
 - Clone detection — `clones`, `git-coupling`
 - Cross-language GPU analysis — `--dir cuda-project stats`, multi-repo merge
 - Visualizing — `dot [target] | dot -Tpng -o graph.png`, `mermaid [target]`
+- Binary analysis — `elf-info`, `macho-info`, `java-class`, `wasm-info`
+- Schema inspection — `proto-schema`, `openapi-schema`, `graphql-schema`, `docker-map`, `terraform-map`
+- Dependency management — `dep-tree`, `dead-deps`, `import-cost`
 - Reverse engineering — `clarion-schema`, `pe-strings`, `pe-exports`, `pe-imports`, `pe-resources`, `pe-debug`, `pe-sections`, `dbf-schema`, `dotnet-meta`, `sql-extract`, `binary-diff`
 - LSP integration — `lsp-symbols`, `lsp-references`, `lsp-calls`, `lsp-diagnostics`, `lsp-types`

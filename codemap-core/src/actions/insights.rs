@@ -1,10 +1,23 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 use regex::Regex;
 use crate::types::{Graph, escape_regex};
 use crate::utils::format_number;
 use super::analysis::{circular, health};
+
+// ── Static Regex Compilation ───────────────────────────────────────
+
+static PY_TS_DECORATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@(\w[\w.]*(?:\([^)]*\))?)").unwrap()
+});
+static RUST_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"#\[(\w[\w:]*(?:\([^)]*\))?)\]").unwrap()
+});
+static NEXT_DEF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:pub\s+)?(?:async\s+)?(?:fn|def|function|class|struct|enum|interface|const)\s+(\w+)").unwrap()
+});
 
 // ── summary ────────────────────────────────────────────────────────
 
@@ -92,9 +105,6 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
     let dir = &graph.scan_dir;
     let pattern = target.to_lowercase();
 
-    let py_ts_re = Regex::new(r"@(\w[\w.]*(?:\([^)]*\))?)").unwrap();
-    let rust_re = Regex::new(r"#\[(\w[\w:]*(?:\([^)]*\))?)\]").unwrap();
-    let next_def_re = Regex::new(r"(?:pub\s+)?(?:async\s+)?(?:fn|def|function|class|struct|enum|interface|const)\s+(\w+)").unwrap();
 
     struct Hit { file: String, line: usize, decorator: String, symbol: String }
 
@@ -114,12 +124,12 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
             let trimmed = line.trim();
 
             if trimmed.starts_with('@') {
-                if let Some(caps) = py_ts_re.captures(trimmed) {
+                if let Some(caps) = PY_TS_DECORATOR_RE.captures(trimmed) {
                     let dec = caps[1].to_string();
                     if !dec.to_lowercase().contains(&pattern) { continue; }
                     let mut sym = String::new();
                     for next_line in lines_vec.iter().skip(i + 1).take(4) {
-                        if let Some(sc) = next_def_re.captures(next_line) {
+                        if let Some(sc) = NEXT_DEF_RE.captures(next_line) {
                             sym = sc[1].to_string();
                             break;
                         }
@@ -130,12 +140,12 @@ pub fn decorators(graph: &Graph, target: &str) -> String {
             }
 
             if trimmed.starts_with("#[") {
-                if let Some(caps) = rust_re.captures(trimmed) {
+                if let Some(caps) = RUST_ATTR_RE.captures(trimmed) {
                     let attr = caps[1].to_string();
                     if !attr.to_lowercase().contains(&pattern) { continue; }
                     let mut sym = String::new();
                     for next_line in lines_vec.iter().skip(i + 1).take(4) {
-                        if let Some(sc) = next_def_re.captures(next_line) {
+                        if let Some(sc) = NEXT_DEF_RE.captures(next_line) {
                             sym = sc[1].to_string();
                             break;
                         }

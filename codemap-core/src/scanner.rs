@@ -25,6 +25,7 @@ const SUPPORTED_EXTS: &[&str] = &[
     ".py", ".rs", ".go", ".java", ".rb", ".php",
     ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx",
     ".cu", ".cuh",
+    ".sh", ".bash",
     ".yaml", ".yml", ".cmake",
 ];
 
@@ -511,7 +512,16 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
         }
 
         // Cross-repo linking: match unresolved imports by filename
+        // Build stem map for O(1) lookups instead of O(n) linear scans
         let all_ids: Vec<String> = merged_nodes.keys().cloned().collect();
+        let mut stem_map: HashMap<String, Vec<String>> = HashMap::new();
+        for id in &all_ids {
+            // Index by filename stem (last path component)
+            if let Some(stem) = id.rsplit('/').next() {
+                stem_map.entry(stem.to_string()).or_default().push(id.clone());
+            }
+        }
+
         for id in &all_ids {
             let imports = merged_nodes
                 .get(id)
@@ -526,16 +536,19 @@ pub fn scan_directories(options: ScanOptions) -> Result<Graph, CodemapError> {
             for unres in &unresolved {
                 let base_name = unres.split('/').next_back().unwrap_or(unres);
                 let mut matches: Vec<String> = Vec::new();
-                for other_id in &all_ids {
-                    if other_id == id {
-                        continue;
-                    }
-                    if other_id.ends_with(&format!("/{base_name}"))
-                        || other_id.ends_with(&format!("/{unres}"))
-                    {
-                        matches.push(other_id.clone());
+
+                // Look up candidates by stem (O(1) instead of O(n))
+                if let Some(candidates) = stem_map.get(base_name) {
+                    for cand in candidates {
+                        if cand == id { continue; }
+                        if cand.ends_with(&format!("/{base_name}"))
+                            || cand.ends_with(&format!("/{unres}"))
+                        {
+                            matches.push(cand.clone());
+                        }
                     }
                 }
+
                 // Only link if exactly one match (skip ambiguous)
                 if matches.len() != 1 {
                     continue;

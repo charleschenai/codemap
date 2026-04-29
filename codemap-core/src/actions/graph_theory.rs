@@ -11,60 +11,57 @@ pub fn pagerank(graph: &Graph) -> String {
         return "No files to rank.".to_string();
     }
 
+    // Build index map: id -> index for Vec-based scoring
     let ids: Vec<String> = graph.nodes.keys().cloned().collect();
-    let mut scores: HashMap<String, f64> = HashMap::new();
+    let id_to_idx: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+
+    // Pre-compute local imports as indices for each node
+    let import_indices: Vec<Vec<usize>> = ids.iter().map(|id| {
+        graph.nodes.get(id).map(|node| {
+            node.imports.iter()
+                .filter_map(|imp| id_to_idx.get(imp.as_str()).copied())
+                .collect()
+        }).unwrap_or_default()
+    }).collect();
+
     let init = 1.0 / n as f64;
-    for id in &ids {
-        scores.insert(id.clone(), init);
-    }
+    let mut scores = vec![init; n];
+    let mut new_scores = vec![0.0f64; n];
 
     for _ in 0..iterations {
-        let mut new_scores: HashMap<String, f64> = HashMap::new();
-
         // Collect dangling node rank mass
         let mut dangling_sum: f64 = 0.0;
-        for (id, node) in &graph.nodes {
-            let local_imports: Vec<&String> = node.imports.iter()
-                .filter(|i| graph.nodes.contains_key(*i))
-                .collect();
-            if local_imports.is_empty() {
-                dangling_sum += scores.get(id).copied().unwrap_or(0.0);
+        for (i, local) in import_indices.iter().enumerate() {
+            if local.is_empty() {
+                dangling_sum += scores[i];
             }
         }
 
         // Base score: teleportation + dangling redistribution
         let base = (1.0 - d) / n as f64 + d * dangling_sum / n as f64;
-        for id in &ids {
-            new_scores.insert(id.clone(), base);
-        }
+        new_scores.fill(base);
 
-        for (id, node) in &graph.nodes {
-            let local_imports: Vec<&String> = node.imports.iter()
-                .filter(|i| graph.nodes.contains_key(*i))
-                .collect();
-            if local_imports.is_empty() { continue; }
-            let share = scores.get(id).copied().unwrap_or(0.0) / local_imports.len() as f64;
-            for imp in local_imports {
-                *new_scores.entry(imp.clone()).or_insert(0.0) += d * share;
+        for (i, local) in import_indices.iter().enumerate() {
+            if local.is_empty() { continue; }
+            let share = scores[i] / local.len() as f64;
+            for &imp_idx in local {
+                new_scores[imp_idx] += d * share;
             }
         }
-        scores = new_scores;
+        std::mem::swap(&mut scores, &mut new_scores);
     }
 
-    let mut ranked: Vec<(String, f64)> = ids.iter()
-        .map(|id| (id.clone(), scores.get(id).copied().unwrap_or(0.0)))
-        .collect();
+    let mut ranked: Vec<(usize, f64)> = scores.iter().copied().enumerate().collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let top: Vec<&(String, f64)> = ranked.iter().take(30).collect();
+    let top: Vec<&(usize, f64)> = ranked.iter().take(30).collect();
     let mut lines = vec![
         format!("=== PageRank (top {} most important files) ===", top.len()),
         String::new(),
     ];
     for r in &top {
-        // padStart(7) in TS = right-align in 7 chars
         let score_str = format!("{:.2}", r.1 * 1000.0);
-        lines.push(format!("  {:>7} rank  {}", score_str, r.0));
+        lines.push(format!("  {:>7} rank  {}", score_str, ids[r.0]));
     }
     lines.join("\n")
 }
@@ -73,70 +70,76 @@ pub fn pagerank(graph: &Graph) -> String {
 pub fn hubs(graph: &Graph) -> String {
     let iterations = 20;
     let ids: Vec<String> = graph.nodes.keys().cloned().collect();
-    let mut hub_scores: HashMap<String, f64> = HashMap::new();
-    let mut auth_scores: HashMap<String, f64> = HashMap::new();
-    for id in &ids {
-        hub_scores.insert(id.clone(), 1.0);
-        auth_scores.insert(id.clone(), 1.0);
+    let n = ids.len();
+
+    // Build index map and pre-compute import indices
+    let id_to_idx: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+    let import_indices: Vec<Vec<usize>> = ids.iter().map(|id| {
+        graph.nodes.get(id).map(|node| {
+            node.imports.iter()
+                .filter_map(|imp| id_to_idx.get(imp.as_str()).copied())
+                .collect()
+        }).unwrap_or_default()
+    }).collect();
+
+    // Pre-compute reverse edges: who imports node i?
+    let mut imported_by_indices: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, local) in import_indices.iter().enumerate() {
+        for &imp_idx in local {
+            imported_by_indices[imp_idx].push(i);
+        }
     }
 
+    let mut hub_scores = vec![1.0f64; n];
+    let mut auth_scores = vec![1.0f64; n];
+    let mut new_auth = vec![0.0f64; n];
+    let mut new_hub = vec![0.0f64; n];
+
     for _ in 0..iterations {
-        // Authority = sum of hub scores of nodes pointing to it (from OLD hub scores)
-        let mut new_auth: HashMap<String, f64> = HashMap::new();
-        for id in &ids {
-            new_auth.insert(id.clone(), 0.0);
-        }
-        for (id, node) in &graph.nodes {
-            for imp in &node.imports {
-                if graph.nodes.contains_key(imp) {
-                    *new_auth.entry(imp.clone()).or_insert(0.0) +=
-                        hub_scores.get(id).copied().unwrap_or(0.0);
-                }
+        // Authority = sum of hub scores of nodes pointing to it
+        new_auth.fill(0.0);
+        for (imp_idx, importers) in imported_by_indices.iter().enumerate() {
+            let mut sum = 0.0;
+            for &src_idx in importers {
+                sum += hub_scores[src_idx];
             }
+            new_auth[imp_idx] = sum;
         }
 
-        // Hub = sum of authority scores of nodes it points to (from OLD auth scores — Jacobi)
-        let mut new_hub: HashMap<String, f64> = HashMap::new();
-        for (id, node) in &graph.nodes {
-            let mut h: f64 = 0.0;
-            for imp in &node.imports {
-                if graph.nodes.contains_key(imp) {
-                    h += auth_scores.get(imp).copied().unwrap_or(0.0); // use OLD authScores
-                }
+        // Hub = sum of authority scores of nodes it points to (using OLD auth_scores -- Jacobi)
+        for (i, local) in import_indices.iter().enumerate() {
+            let mut h = 0.0;
+            for &imp_idx in local {
+                h += auth_scores[imp_idx];
             }
-            new_hub.insert(id.clone(), h);
+            new_hub[i] = h;
         }
 
         // Normalize (L2)
-        let hub_norm: f64 = {
-            let s: f64 = new_hub.values().map(|v| v * v).sum();
-            let n = s.sqrt();
-            if n == 0.0 { 1.0 } else { n }
+        let hub_norm = {
+            let s: f64 = new_hub.iter().map(|v| v * v).sum();
+            let norm = s.sqrt();
+            if norm == 0.0 { 1.0 } else { norm }
         };
-        let auth_norm: f64 = {
-            let s: f64 = new_auth.values().map(|v| v * v).sum();
-            let n = s.sqrt();
-            if n == 0.0 { 1.0 } else { n }
+        let auth_norm = {
+            let s: f64 = new_auth.iter().map(|v| v * v).sum();
+            let norm = s.sqrt();
+            if norm == 0.0 { 1.0 } else { norm }
         };
-        for id in &ids {
-            if let Some(v) = new_hub.get_mut(id) { *v /= hub_norm; }
-            if let Some(v) = new_auth.get_mut(id) { *v /= auth_norm; }
-        }
-        hub_scores = new_hub;
-        auth_scores = new_auth;
+        for v in new_hub.iter_mut() { *v /= hub_norm; }
+        for v in new_auth.iter_mut() { *v /= auth_norm; }
+
+        std::mem::swap(&mut hub_scores, &mut new_hub);
+        std::mem::swap(&mut auth_scores, &mut new_auth);
     }
 
-    let mut top_hubs: Vec<(String, f64)> = ids.iter()
-        .map(|id| (id.clone(), hub_scores.get(id).copied().unwrap_or(0.0)))
-        .collect();
+    let mut top_hubs: Vec<(usize, f64)> = hub_scores.iter().copied().enumerate().collect();
     top_hubs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let top_hubs: Vec<&(String, f64)> = top_hubs.iter().take(20).collect();
+    let top_hubs: Vec<&(usize, f64)> = top_hubs.iter().take(20).collect();
 
-    let mut top_auth: Vec<(String, f64)> = ids.iter()
-        .map(|id| (id.clone(), auth_scores.get(id).copied().unwrap_or(0.0)))
-        .collect();
+    let mut top_auth: Vec<(usize, f64)> = auth_scores.iter().copied().enumerate().collect();
     top_auth.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let top_auth: Vec<&(String, f64)> = top_auth.iter().take(20).collect();
+    let top_auth: Vec<&(usize, f64)> = top_auth.iter().take(20).collect();
 
     let mut lines = vec![
         "=== Hubs (orchestrators \u{2014} import many things) ===".to_string(),
@@ -145,7 +148,7 @@ pub fn hubs(graph: &Graph) -> String {
     for h in &top_hubs {
         if h.1 < 0.001 { break; }
         let score_str = format!("{:.2}", h.1 * 100.0);
-        lines.push(format!("  {:>7}  {}", score_str, h.0));
+        lines.push(format!("  {:>7}  {}", score_str, ids[h.0]));
     }
     lines.push(String::new());
     lines.push("=== Authorities (core \u{2014} everyone imports them) ===".to_string());
@@ -153,7 +156,7 @@ pub fn hubs(graph: &Graph) -> String {
     for a in &top_auth {
         if a.1 < 0.001 { break; }
         let score_str = format!("{:.2}", a.1 * 100.0);
-        lines.push(format!("  {:>7}  {}", score_str, a.0));
+        lines.push(format!("  {:>7}  {}", score_str, ids[a.0]));
     }
     lines.join("\n")
 }

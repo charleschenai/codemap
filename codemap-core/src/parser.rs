@@ -4,7 +4,150 @@ use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Tree};
+use tree_sitter_bash;
+
+// ── Static Regex Compilation ───────────────────────────────────────
+
+// extract_exports_from_ast
+static EXPORT_DEFAULT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"export\s+default\s+(?:class|function\s*\*?)\s+(\w+)").unwrap()
+});
+
+// extract_functions_from_ast
+static KERNEL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\w+)\s*<<<[^>]*>>>").unwrap()
+});
+
+// extract_urls
+static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"['"`](https?://[^'"`\s]{5,})['"`]"#).unwrap()
+});
+
+// extract_yaml_bridges
+static YAML_FUNC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"- func:\s*(\w+)"#).unwrap()
+});
+static YAML_DISPATCH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?m)^\s+(CUDA|CPU|CompositeExplicitAutograd|CompositeImplicitAutograd|SparseCPU|SparseCUDA|Meta)\s*:\s*(\w+)"#).unwrap()
+});
+
+// extract_python_bridges
+static TORCH_OPS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"torch\.ops\.(\w+)\.(\w+)"#).unwrap()
+});
+static TRITON_JIT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"@\s*triton\s*\.\s*jit"#).unwrap()
+});
+static DEF_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap()
+});
+static AUTOTUNE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"@\s*triton\s*\.\s*autotune"#).unwrap()
+});
+static TRITON_LAUNCH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(\w+)\s*\[([^\]]+)\]\s*\("#).unwrap()
+});
+static TRITON_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(\w+)\s*=\s*triton\s*\.\s*jit\s*\(\s*(\w+)\s*\)"#).unwrap()
+});
+static MONKEY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(\w+(?:\.\w+)+)\.([A-Z]\w+)\s*=\s*([A-Z]\w+)"#).unwrap()
+});
+static AUTOGRAD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"class\s+(\w+)\s*\(\s*(?:torch\.)?autograd\.Function\s*\)"#).unwrap()
+});
+static APPLY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(\w+)\s*\.\s*apply\s*\("#).unwrap()
+});
+static EXT_MODULE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:CMakeExtension|Extension)\s*\(\s*(?:name\s*=\s*)?['"]([\w.]+)['"]"#).unwrap()
+});
+
+// extract_cpp_bridges
+static TORCH_LIB_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"TORCH_LIBRARY\s*\(\s*(\w+)"#).unwrap()
+});
+static TORCH_DEF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"m\s*\.\s*def\s*\(\s*"(\w+)"#).unwrap()
+});
+static TORCH_IMPL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"m\s*\.\s*impl\s*\(\s*"(\w+)"\s*,\s*(?:&\s*)?(\w+)"#).unwrap()
+});
+static TORCH_IMPL_FUNC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"TORCH_IMPL_FUNC\s*\(\s*(\w+)"#).unwrap()
+});
+static PYBIND_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"PYBIND11_MODULE\s*\(\s*(\w+)"#).unwrap()
+});
+static PY_CLASS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"py::class_<\s*(\w+)\s*>\s*\(\s*\w+\s*,\s*"(\w+)""#).unwrap()
+});
+static CUDA_KERNEL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"__global__\s+\w+\s+(\w+)\s*\("#).unwrap()
+});
+static CUDA_LAUNCH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(\w+)\s*<<<.+?>>>"#).unwrap()
+});
+static CMAKE_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"target_link_libraries\s*\(\s*(\w+)\s+(?:PUBLIC|PRIVATE|INTERFACE)?\s*([\w\s]+)\)"#).unwrap()
+});
+static FIND_PKG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"find_package\s*\(\s*(\w+)"#).unwrap()
+});
+static DISPATCH_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"DispatchKey(?:Set)?\s*::\s*(\w+)"#).unwrap()
+});
+
+// extract_rust_bridges
+static RUST_STRUCT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)\s*(?:pub\s+)?(?:struct|enum)\s+(\w+)"#).unwrap()
+});
+static RUST_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)\s*(?:pub\s+)?(?:fn|async\s+fn)\s+(\w+)"#).unwrap()
+});
+static RUST_IMPL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)\s*impl\s+(\w+)"#).unwrap()
+});
+static RUST_PUB_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)\s*(?:pub\s+)?fn\s+(\w+)"#).unwrap()
+});
+static PYCLASS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[pyclass(?:\s*\([^)]*name\s*=\s*"(\w+)"[^)]*\))?\]"#).unwrap()
+});
+static PYFN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[pyfunction\]"#).unwrap()
+});
+static PYMETHODS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[pymethods\]"#).unwrap()
+});
+static PYMOD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[pymodule\]"#).unwrap()
+});
+static CFG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[cfg\s*\(\s*feature\s*=\s*"(\w+)"\s*\)\]"#).unwrap()
+});
+static TRAIT_IMPL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"impl\s+(\w+)\s+for\s+(\w+)"#).unwrap()
+});
+
+// regex_extract_imports
+static IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)"#,
+    ).unwrap()
+});
+static DYNAMIC_IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"import\s*\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap()
+});
+
+// regex_extract_exports
+static EXPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)",
+    ).unwrap()
+});
 
 /// Global quiet flag to suppress parser warnings.
 static QUIET: AtomicBool = AtomicBool::new(false);
@@ -68,6 +211,7 @@ fn ext_to_grammar(ext: &str) -> Option<&'static str> {
         ".c" | ".h" => Some("c"),
         ".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
         ".cu" | ".cuh" => Some("cpp"), // CUDA as C++ superset
+        ".sh" | ".bash" => Some("bash"),
         ".yaml" | ".yml" | ".cmake" => None, // regex-only, no tree-sitter grammar
         _ => None,
     }
@@ -86,6 +230,7 @@ fn grammar_to_language(grammar: &str) -> Option<Language> {
         "c" => Some(tree_sitter_c::LANGUAGE.into()),
         "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
         "php" => Some(tree_sitter_php::LANGUAGE_PHP.into()),
+        "bash" => Some(tree_sitter_bash::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -160,6 +305,7 @@ fn import_types(grammar: &str) -> &'static [&'static str] {
         "ruby" => &["call", "command_call", "command"],
         "php" => &["namespace_use_declaration", "include_expression", "require_expression"],
         "c" | "cpp" => &["preproc_include"],
+        "bash" => &["command"],
         _ => &[],
     }
 }
@@ -175,6 +321,7 @@ fn func_types(grammar: &str) -> &'static [&'static str] {
         "php" => &["function_definition", "method_declaration"],
         "c" => &["function_definition"],
         "cpp" => &["function_definition", "template_declaration"],
+        "bash" => &["function_definition"],
         _ => &[],
     }
 }
@@ -190,6 +337,7 @@ fn export_types(grammar: &str) -> &'static [&'static str] {
         "php" => &["function_definition", "class_declaration"],
         "c" => &["function_definition"],
         "cpp" => &["function_definition", "template_declaration", "class_specifier"],
+        "bash" => &["function_definition"],
         _ => &[],
     }
 }
@@ -388,6 +536,31 @@ fn extract_imports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
                 }
             }
         }
+    } else if grammar == "bash" {
+        // Look for `source file` and `. file` commands
+        for node in collect(root, itypes) {
+            if node.kind() == "command" {
+                let name_node = node.child_by_field_name("name");
+                if let Some(name) = name_node {
+                    let cmd = text(name, src);
+                    if cmd == "source" || cmd == "." {
+                        // The argument is the file to source
+                        let count = node.child_count();
+                        for i in 0..count {
+                            if let Some(arg) = node.child(i) {
+                                if arg.kind() == "word" || arg.kind() == "string" || arg.kind() == "raw_string" || arg.kind() == "concatenation" {
+                                    let s = text(arg, src).replace(&['\'', '"'][..], "");
+                                    if !s.is_empty() && s != "source" && s != "." {
+                                        imports.push(s);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     imports
@@ -400,7 +573,6 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
     let etypes = export_types(grammar);
 
     if is_js_like(grammar) {
-        let export_default_re = Regex::new(r"export\s+default\s+(?:class|function\s*\*?)\s+(\w+)").unwrap();
         for node in collect(root, etypes) {
             let node_text = text(node, src);
             if node_text.starts_with("export type") || node_text.starts_with("export interface") {
@@ -417,7 +589,7 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
                     }
                 }
             } else if node_text.contains("export default") {
-                if let Some(caps) = export_default_re.captures(node_text) {
+                if let Some(caps) = EXPORT_DEFAULT_RE.captures(node_text) {
                     exports.push(caps[1].to_string());
                 } else {
                     exports.push("default".to_string());
@@ -496,6 +668,15 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
                 }
             }
         }
+    } else if grammar == "bash" {
+        for node in collect(root, etypes) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let t = text(name, src);
+                if !t.is_empty() {
+                    exports.push(t.to_string());
+                }
+            }
+        }
     } else if grammar == "c" || grammar == "cpp" {
         for node in collect(root, etypes) {
             if node.kind() == "function_definition" {
@@ -570,7 +751,6 @@ fn extract_functions_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<Func
     let mut functions = Vec::new();
     let ftypes = func_types(grammar);
 
-    let kernel_re = Regex::new(r"(\w+)\s*<<<[^>]*>>>").unwrap();
     for node in collect(root, ftypes) {
         let name = get_function_name(node, grammar, src);
         let name = match name {
@@ -608,7 +788,7 @@ fn extract_functions_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<Func
         // CUDA kernel launches: detect <<<>>> syntax
         if grammar == "cpp" || grammar == "c" {
             let body_text = text(node, src);
-            for caps in kernel_re.captures_iter(body_text) {
+            for caps in KERNEL_RE.captures_iter(body_text) {
                 let kernel_name = caps[1].to_string();
                 if !kernel_name.is_empty() && seen.insert(kernel_name.clone()) {
                     calls.push(kernel_name);
@@ -751,6 +931,9 @@ fn is_function_exported(node: Node, grammar: &str, name: &str, src: &[u8]) -> bo
             .unwrap_or(true)
     } else if grammar == "c" || grammar == "cpp" {
         !text(node, src).starts_with("static ")
+    } else if grammar == "bash" {
+        // All bash functions are effectively exported (available to subshells via export -f)
+        true
     } else {
         false
     }
@@ -1233,9 +1416,8 @@ fn extract_data_flow_from_ast(
 // ── URL Extraction ──────────────────────────────────────────────────
 
 fn extract_urls(content: &str) -> Vec<String> {
-    let re = Regex::new(r#"['"`](https?://[^'"`\s]{5,})['"`]"#).unwrap();
     let mut urls = Vec::new();
-    for caps in re.captures_iter(content) {
+    for caps in URL_RE.captures_iter(content) {
         let url = &caps[1];
         if url.contains("localhost") || url.contains("127.0.0.1") || url.contains("example.com") {
             continue;
@@ -1246,6 +1428,22 @@ fn extract_urls(content: &str) -> Vec<String> {
         urls.push(sanitize_url(limited));
     }
     urls
+}
+
+// ── Line Index Helpers ─────────────────────────────────────────────
+
+/// Build a sorted index of byte positions where each line starts.
+/// Entry 0 is always 0 (line 1 starts at byte 0).
+fn build_line_index(content: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+        .collect()
+}
+
+/// Given a line index and a byte position, return the 1-based line number.
+/// Uses binary search for O(log n) lookup.
+fn line_at(line_index: &[usize], pos: usize) -> usize {
+    line_index.partition_point(|&start| start <= pos)
 }
 
 // ── Bridge Detection ───────────────────────────────────────────────
@@ -1268,16 +1466,17 @@ fn extract_bridges(content: &str, ext: &str, root: Option<tree_sitter::Node>, sr
 }
 
 fn extract_yaml_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    let line_index = build_line_index(content);
+
     // PyTorch native_functions.yaml pattern:
     // - func: op_name.variant(args) -> return
     //   dispatch:
     //     CUDA: op_cuda_impl
     //     CPU: op_cpu_impl
-    let func_re = Regex::new(r#"- func:\s*(\w+)"#).unwrap();
-    for caps in func_re.captures_iter(content) {
+    for caps in YAML_FUNC_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::YamlDispatch,
             name,
@@ -1288,12 +1487,11 @@ fn extract_yaml_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // dispatch: \n    KEY: impl_function
-    let dispatch_re = Regex::new(r#"(?m)^\s+(CUDA|CPU|CompositeExplicitAutograd|CompositeImplicitAutograd|SparseCPU|SparseCUDA|Meta)\s*:\s*(\w+)"#).unwrap();
-    for caps in dispatch_re.captures_iter(content) {
+    for caps in YAML_DISPATCH_RE.captures_iter(content) {
         let device = caps[1].to_string();
         let func = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::YamlDispatch,
             name: func,
@@ -1305,13 +1503,14 @@ fn extract_yaml_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 }
 
 fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    let line_index = build_line_index(content);
+
     // torch.ops.namespace.op_name(...)
-    let torch_ops_re = Regex::new(r#"torch\.ops\.(\w+)\.(\w+)"#).unwrap();
-    for caps in torch_ops_re.captures_iter(content) {
+    for caps in TORCH_OPS_RE.captures_iter(content) {
         let ns = caps[1].to_string();
         let op = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TorchOps,
             name: op,
@@ -1322,14 +1521,12 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // @triton.jit decorator
-    let triton_jit_re = Regex::new(r#"@\s*triton\s*\.\s*jit"#).unwrap();
-    let def_fn_re = Regex::new(r#"(?s).*?def\s+(\w+)\s*\("#).unwrap();
-    for m in triton_jit_re.find_iter(content) {
+    for m in TRITON_JIT_RE.find_iter(content) {
         let pos = m.start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         // Get function name from next line: def func_name(
         let after = &content[m.end()..];
-        if let Some(caps) = def_fn_re.captures(after) {
+        if let Some(caps) = DEF_FN_RE.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::TritonKernel,
@@ -1342,12 +1539,11 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // @triton.autotune wrapping @triton.jit
-    let autotune_re = Regex::new(r#"@\s*triton\s*\.\s*autotune"#).unwrap();
-    for m in autotune_re.find_iter(content) {
+    for m in AUTOTUNE_RE.find_iter(content) {
         let pos = m.start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         let after = &content[m.end()..];
-        if let Some(caps) = def_fn_re.captures(after) {
+        if let Some(caps) = DEF_FN_RE.captures(after) {
             let name = caps[1].to_string();
             // Only add if not already caught by @triton.jit
             if !bridges.iter().any(|b| b.kind == BridgeKind::TritonKernel && b.name == name) {
@@ -1363,8 +1559,7 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // Triton kernel launch: kernel_name[grid](args) -- subscript followed by call
-    let triton_launch_re = Regex::new(r#"(\w+)\s*\[([^\]]+)\]\s*\("#).unwrap();
-    for caps in triton_launch_re.captures_iter(content) {
+    for caps in TRITON_LAUNCH_RE.captures_iter(content) {
         let name = caps[1].to_string();
         // Filter out obvious non-kernel subscripts (dict access, list indexing with numbers)
         let grid = &caps[2];
@@ -1374,7 +1569,7 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
                 continue;
             }
             let pos = caps.get(0).unwrap().start();
-            let line = content[..pos].matches('\n').count() + 1;
+            let line = line_at(&line_index, pos);
             bridges.push(BridgeInfo {
                 kind: BridgeKind::TritonLaunch,
                 name: name.clone(),
@@ -1386,12 +1581,11 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // triton.jit(fn) -- function-call form (Unsloth pattern)
-    let triton_fn_re = Regex::new(r#"(\w+)\s*=\s*triton\s*\.\s*jit\s*\(\s*(\w+)\s*\)"#).unwrap();
-    for caps in triton_fn_re.captures_iter(content) {
+    for caps in TRITON_FN_RE.captures_iter(content) {
         let var_name = caps[1].to_string();
         let fn_name = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TritonKernel,
             name: var_name,
@@ -1403,8 +1597,7 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 
     // Module monkey-patching: module.path.ClassName = ReplacementClass
     // Pattern: dotted.path.Name = SomeName (where Name is capitalized)
-    let monkey_re = Regex::new(r#"(\w+(?:\.\w+)+)\.([A-Z]\w+)\s*=\s*([A-Z]\w+)"#).unwrap();
-    for caps in monkey_re.captures_iter(content) {
+    for caps in MONKEY_RE.captures_iter(content) {
         let full_path = format!("{}.{}", &caps[1], &caps[2]);
         let original = caps[2].to_string();
         let replacement = caps[3].to_string();
@@ -1415,7 +1608,7 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
                 continue;
             }
             let pos = caps.get(0).unwrap().start();
-            let line = content[..pos].matches('\n').count() + 1;
+            let line = line_at(&line_index, pos);
             bridges.push(BridgeInfo {
                 kind: BridgeKind::MonkeyPatch,
                 name: original,
@@ -1428,11 +1621,10 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 
     // torch.autograd.Function subclass
     // Pattern: class Name(torch.autograd.Function): or class Name(autograd.Function):
-    let autograd_re = Regex::new(r#"class\s+(\w+)\s*\(\s*(?:torch\.)?autograd\.Function\s*\)"#).unwrap();
-    for caps in autograd_re.captures_iter(content) {
+    for caps in AUTOGRAD_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::AutogradFunc,
             name: name.clone(),
@@ -1443,13 +1635,12 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // .apply() invocations for autograd functions: ClassName.apply(args)
-    let apply_re = Regex::new(r#"(\w+)\s*\.\s*apply\s*\("#).unwrap();
-    for caps in apply_re.captures_iter(content) {
+    for caps in APPLY_RE.captures_iter(content) {
         let name = caps[1].to_string();
         // Only if the name starts with uppercase (likely a class)
         if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
             let pos = caps.get(0).unwrap().start();
-            let line = content[..pos].matches('\n').count() + 1;
+            let line = line_at(&line_index, pos);
             // Skip if it's a common non-autograd .apply (like pd.apply)
             if name != "DataFrame" && name != "Series" && name != "GroupBy" {
                 bridges.push(BridgeInfo {
@@ -1464,11 +1655,10 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // setup.py: ext_modules / CMakeExtension
-    let ext_module_re = Regex::new(r#"(?:CMakeExtension|Extension)\s*\(\s*(?:name\s*=\s*)?['"]([\w.]+)['"]"#).unwrap();
-    for caps in ext_module_re.captures_iter(content) {
+    for caps in EXT_MODULE_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::BuildDep,
             name,
@@ -1480,12 +1670,13 @@ fn extract_python_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 }
 
 fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
+    let line_index = build_line_index(content);
+
     // TORCH_LIBRARY(namespace, m) { ... }
-    let lib_re = Regex::new(r#"TORCH_LIBRARY\s*\(\s*(\w+)"#).unwrap();
-    for caps in lib_re.captures_iter(content) {
+    for caps in TORCH_LIB_RE.captures_iter(content) {
         let ns = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TorchLibrary,
             name: format!("TORCH_LIBRARY({ns})"),
@@ -1496,11 +1687,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // m.def("op_name(...)")  and  m.impl("op_name", &cpp_func)
-    let def_re = Regex::new(r#"m\s*\.\s*def\s*\(\s*"(\w+)"#).unwrap();
-    for caps in def_re.captures_iter(content) {
+    for caps in TORCH_DEF_RE.captures_iter(content) {
         let op = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TorchLibrary,
             name: op,
@@ -1510,12 +1700,11 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
         });
     }
 
-    let impl_re = Regex::new(r#"m\s*\.\s*impl\s*\(\s*"(\w+)"\s*,\s*(?:&\s*)?(\w+)"#).unwrap();
-    for caps in impl_re.captures_iter(content) {
+    for caps in TORCH_IMPL_RE.captures_iter(content) {
         let op = caps[1].to_string();
         let func = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TorchLibrary,
             name: op,
@@ -1526,11 +1715,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // TORCH_IMPL_FUNC(op_name)
-    let impl_func_re = Regex::new(r#"TORCH_IMPL_FUNC\s*\(\s*(\w+)"#).unwrap();
-    for caps in impl_func_re.captures_iter(content) {
+    for caps in TORCH_IMPL_FUNC_RE.captures_iter(content) {
         let op = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::TorchLibrary,
             name: op.clone(),
@@ -1541,11 +1729,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // PYBIND11_MODULE(name, m)
-    let pybind_re = Regex::new(r#"PYBIND11_MODULE\s*\(\s*(\w+)"#).unwrap();
-    for caps in pybind_re.captures_iter(content) {
+    for caps in PYBIND_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::Pybind11,
             name: name.clone(),
@@ -1556,12 +1743,11 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // py::class_<Type>(m, "PythonName")
-    let class_re = Regex::new(r#"py::class_<\s*(\w+)\s*>\s*\(\s*\w+\s*,\s*"(\w+)""#).unwrap();
-    for caps in class_re.captures_iter(content) {
+    for caps in PY_CLASS_RE.captures_iter(content) {
         let cpp_type = caps[1].to_string();
         let py_name = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::Pybind11,
             name: py_name,
@@ -1572,11 +1758,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // CUDA kernel declarations: __global__ void kernel_name(...)
-    let cuda_kernel_re = Regex::new(r#"__global__\s+\w+\s+(\w+)\s*\("#).unwrap();
-    for caps in cuda_kernel_re.captures_iter(content) {
+    for caps in CUDA_KERNEL_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::CudaKernel,
             name: name.clone(),
@@ -1587,11 +1772,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // CUDA kernel launches: kernel<<<grid, block>>>(args)
-    let cuda_launch_re = Regex::new(r#"(\w+)\s*<<<.+?>>>"#).unwrap();
-    for caps in cuda_launch_re.captures_iter(content) {
+    for caps in CUDA_LAUNCH_RE.captures_iter(content) {
         let name = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::CudaLaunch,
             name: name.clone(),
@@ -1602,12 +1786,11 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // CMake: target_link_libraries(target lib1 lib2)
-    let cmake_link_re = Regex::new(r#"target_link_libraries\s*\(\s*(\w+)\s+(?:PUBLIC|PRIVATE|INTERFACE)?\s*([\w\s]+)\)"#).unwrap();
-    for caps in cmake_link_re.captures_iter(content) {
+    for caps in CMAKE_LINK_RE.captures_iter(content) {
         let target = caps[1].to_string();
         let libs = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         for lib in libs.split_whitespace() {
             if lib != "PUBLIC" && lib != "PRIVATE" && lib != "INTERFACE" {
                 bridges.push(BridgeInfo {
@@ -1622,11 +1805,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // find_package(Name REQUIRED)
-    let find_pkg_re = Regex::new(r#"find_package\s*\(\s*(\w+)"#).unwrap();
-    for caps in find_pkg_re.captures_iter(content) {
+    for caps in FIND_PKG_RE.captures_iter(content) {
         let pkg = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::BuildDep,
             name: pkg.clone(),
@@ -1637,11 +1819,10 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
     }
 
     // C++ DispatchKey: DispatchKeySet::CUDA, DispatchKey::CUDA
-    let dispatch_key_re = Regex::new(r#"DispatchKey(?:Set)?\s*::\s*(\w+)"#).unwrap();
-    for caps in dispatch_key_re.captures_iter(content) {
+    for caps in DISPATCH_KEY_RE.captures_iter(content) {
         let key = caps[1].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::DispatchKey,
             name: format!("DispatchKey::{key}"),
@@ -1653,20 +1834,15 @@ fn extract_cpp_bridges(content: &str, bridges: &mut Vec<BridgeInfo>) {
 }
 
 fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &[u8], bridges: &mut Vec<BridgeInfo>) {
-    // Pre-compile regexes used inside loops
-    let struct_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:struct|enum)\s+(\w+)"#).unwrap();
-    let fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?(?:fn|async\s+fn)\s+(\w+)"#).unwrap();
-    let impl_re = Regex::new(r#"(?s)\s*impl\s+(\w+)"#).unwrap();
-    let pub_fn_re = Regex::new(r#"(?s)\s*(?:pub\s+)?fn\s+(\w+)"#).unwrap();
+    let line_index = build_line_index(content);
 
     // #[pyclass] or #[pyclass(name = "PythonName")]
-    let pyclass_re = Regex::new(r#"#\[pyclass(?:\s*\([^)]*name\s*=\s*"(\w+)"[^)]*\))?\]"#).unwrap();
-    for caps in pyclass_re.captures_iter(content) {
+    for caps in PYCLASS_RE.captures_iter(content) {
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         // Get the struct/enum name from the next line
         let after = &content[caps.get(0).unwrap().end()..];
-        if let Some(sc) = struct_re.captures(after) {
+        if let Some(sc) = RUST_STRUCT_RE.captures(after) {
             let rust_name = sc[1].to_string();
             let py_name = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_else(|| rust_name.clone());
             bridges.push(BridgeInfo {
@@ -1680,12 +1856,11 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
     }
 
     // #[pyfunction]
-    let pyfn_re = Regex::new(r#"#\[pyfunction\]"#).unwrap();
-    for m in pyfn_re.find_iter(content) {
+    for m in PYFN_RE.find_iter(content) {
         let pos = m.start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         let after = &content[m.end()..];
-        if let Some(caps) = fn_re.captures(after) {
+        if let Some(caps) = RUST_FN_RE.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::PyO3Function,
@@ -1698,13 +1873,12 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
     }
 
     // #[pymethods]
-    let pymethods_re = Regex::new(r#"#\[pymethods\]"#).unwrap();
-    for m in pymethods_re.find_iter(content) {
+    for m in PYMETHODS_RE.find_iter(content) {
         let pos = m.start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         // Get the impl block name
         let after = &content[m.end()..];
-        if let Some(caps) = impl_re.captures(after) {
+        if let Some(caps) = RUST_IMPL_RE.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::PyO3Methods,
@@ -1717,12 +1891,11 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
     }
 
     // #[pymodule]
-    let pymod_re = Regex::new(r#"#\[pymodule\]"#).unwrap();
-    for m in pymod_re.find_iter(content) {
+    for m in PYMOD_RE.find_iter(content) {
         let pos = m.start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         let after = &content[m.end()..];
-        if let Some(caps) = pub_fn_re.captures(after) {
+        if let Some(caps) = RUST_PUB_FN_RE.captures(after) {
             let name = caps[1].to_string();
             bridges.push(BridgeInfo {
                 kind: BridgeKind::PyO3Function,
@@ -1735,15 +1908,14 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
     }
 
     // #[cfg(feature = "cuda")] or #[cfg(feature = "metal")]
-    let cfg_re = Regex::new(r#"#\[cfg\s*\(\s*feature\s*=\s*"(\w+)"\s*\)\]"#).unwrap();
-    for caps in cfg_re.captures_iter(content) {
+    for caps in CFG_RE.captures_iter(content) {
         let feature = caps[1].to_string();
         let gpu_features = ["cuda", "metal", "opencl", "hip", "vulkan", "wgpu", "accelerate"];
         if !gpu_features.iter().any(|&f| feature == f) {
             continue;
         }
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         bridges.push(BridgeInfo {
             kind: BridgeKind::DispatchKey,
             name: format!("cfg(feature={feature})"),
@@ -1753,13 +1925,12 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
         });
     }
 
-    // impl Trait for Type — detect trait implementations
-    let trait_impl_re = Regex::new(r#"impl\s+(\w+)\s+for\s+(\w+)"#).unwrap();
-    for caps in trait_impl_re.captures_iter(content) {
+    // impl Trait for Type -- detect trait implementations
+    for caps in TRAIT_IMPL_RE.captures_iter(content) {
         let trait_name = caps[1].to_string();
         let type_name = caps[2].to_string();
         let pos = caps.get(0).unwrap().start();
-        let line = content[..pos].matches('\n').count() + 1;
+        let line = line_at(&line_index, pos);
         // Filter to interesting trait names (Backend, Storage, CustomOp, etc.)
         let interesting = ["Backend", "BackendStorage", "CustomOp", "CustomOp1", "CustomOp2",
             "Map1", "Map2", "Module", "Layer", "Forward", "Backward"];
@@ -1780,19 +1951,14 @@ fn extract_rust_bridges(content: &str, _root: Option<tree_sitter::Node>, _src: &
 fn regex_extract_imports(content: &str) -> Vec<String> {
     let mut imports = Vec::new();
 
-    let import_re = Regex::new(
-        r#"(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)"#,
-    )
-    .unwrap();
-    for caps in import_re.captures_iter(content) {
+    for caps in IMPORT_RE.captures_iter(content) {
         let t = caps.get(1).or_else(|| caps.get(2));
         if let Some(m) = t {
             imports.push(m.as_str().to_string());
         }
     }
 
-    let dynamic_re = Regex::new(r#"import\s*\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-    for caps in dynamic_re.captures_iter(content) {
+    for caps in DYNAMIC_IMPORT_RE.captures_iter(content) {
         if let Some(m) = caps.get(1) {
             imports.push(m.as_str().to_string());
         }
@@ -1803,11 +1969,7 @@ fn regex_extract_imports(content: &str) -> Vec<String> {
 
 fn regex_extract_exports(content: &str) -> Vec<String> {
     let mut exports = Vec::new();
-    let re = Regex::new(
-        r"export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)",
-    )
-    .unwrap();
-    for caps in re.captures_iter(content) {
+    for caps in EXPORT_RE.captures_iter(content) {
         if let Some(m) = caps.get(1) {
             exports.push(m.as_str().to_string());
         }

@@ -2,11 +2,48 @@ use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::process::Command;
+use std::sync::LazyLock;
 
 use regex::Regex;
 
 use crate::types::Graph;
 use crate::utils::format_number;
+
+// ── Static Regex Compilation ───────────────────────────────────────
+
+// Shared by diff_functions and diff_impact
+static FUNC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()",
+        r"|(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)",
+        r"|def\s+(\w+)",
+        r"|func\s+(\w+)",
+        r"|(?:public|private|protected|static|\s)+\s+function\s+(\w+)",
+    )).unwrap()
+});
+
+// complexity
+static KEYWORD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(if|else if|for|while|do|switch|case|catch)\b").unwrap()
+});
+static OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\?\?|&&|\|\|").unwrap()
+});
+static TERNARY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\?[^?.]").unwrap()
+});
+
+// api_diff
+static EXPORT_DIFF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)",
+    ).unwrap()
+});
+
+// entry_points
+static ROUTE_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:def|function|fn|func|pub fn|async fn)\s+(\w+)").unwrap()
+});
 
 // ── call_graph ──────────────────────────────────────────────────────
 
@@ -250,21 +287,6 @@ pub fn diff_functions(graph: &Graph, target: &str) -> String {
     let mut removed: Vec<FnChange> = Vec::new();
     let mut modified: Vec<FnChange> = Vec::new();
 
-    // Match function definitions across languages:
-    // JS/TS: function foo, const foo = (, export async function foo
-    // Rust: fn foo, pub fn foo, pub async fn foo
-    // Python: def foo
-    // Go: func foo
-    // Ruby: def foo
-    // Java/PHP: public function foo, private function foo, protected function foo
-    let func_re = Regex::new(concat!(
-        r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()",
-        r"|(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)",
-        r"|def\s+(\w+)",
-        r"|func\s+(\w+)",
-        r"|(?:public|private|protected|static|\s)+\s+function\s+(\w+)",
-    )).unwrap();
-
     for file_id in &relevant {
         let current_node = match graph.nodes.get(*file_id) {
             Some(n) => n,
@@ -288,7 +310,7 @@ pub fn diff_functions(graph: &Graph, target: &str) -> String {
 
         // Parse old version for function names
         let mut old_func_names: HashSet<String> = HashSet::new();
-        for caps in func_re.captures_iter(&old_content) {
+        for caps in FUNC_RE.captures_iter(&old_content) {
             let name = caps.get(1)
                 .or_else(|| caps.get(2))
                 .or_else(|| caps.get(3))
@@ -378,10 +400,6 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
     let mut content_cache: HashMap<&str, Vec<String>> = HashMap::new();
 
     // Rust regex doesn't support lookahead, so we use two regexes
-    let keyword_re = Regex::new(r"\b(if|else if|for|while|do|switch|case|catch)\b").unwrap();
-    let operator_re = Regex::new(r"\?\?|&&|\|\|").unwrap();
-    // For ternary ?, we count ? that aren't ?? or ?. (optional chaining)
-    let ternary_re = Regex::new(r"\?[^?.]").unwrap();
 
     for file_id in &files_to_check {
         let node = match graph.nodes.get(*file_id) {
@@ -408,7 +426,7 @@ pub fn complexity(graph: &Graph, target: &str) -> String {
             let start = if f.start_line > 0 { f.start_line - 1 } else { 0 };
             let end = f.end_line.min(file_lines.len());
             for line in &file_lines[start..end] {
-                for _ in keyword_re.find_iter(line).chain(operator_re.find_iter(line)).chain(ternary_re.find_iter(line)) {
+                for _ in KEYWORD_RE.find_iter(line).chain(OPERATOR_RE.find_iter(line)).chain(TERNARY_RE.find_iter(line)) {
                     cc += 1;
                 }
                 // Track nesting depth via braces/indentation
@@ -648,11 +666,6 @@ pub fn api_diff(graph: &Graph, target: &str) -> String {
     let mut added: Vec<ExportChange> = Vec::new();
     let mut removed: Vec<ExportChange> = Vec::new();
 
-    let export_re = Regex::new(
-        r"export\s+(?:const|let|var|function|async\s+function|class|type|interface|enum)\s+(\w+)",
-    )
-    .unwrap();
-
     for file_id in &relevant {
         let current_node = match graph.nodes.get(*file_id) {
             Some(n) => n,
@@ -673,7 +686,7 @@ pub fn api_diff(graph: &Graph, target: &str) -> String {
         };
 
         let mut old_exports: HashSet<String> = HashSet::new();
-        for caps in export_re.captures_iter(&old_content) {
+        for caps in EXPORT_DIFF_RE.captures_iter(&old_content) {
             if let Some(m) = caps.get(1) {
                 old_exports.insert(m.as_str().to_string());
             }
@@ -786,7 +799,6 @@ pub fn entry_points(graph: &Graph, _target: &str) -> String {
     }
 
     let mut entries: Vec<EntryPoint> = Vec::new();
-    let route_fn_re = Regex::new(r"(?:def|function|fn|func|pub fn|async fn)\s+(\w+)").unwrap();
 
     // Pattern-based entry point detection
     let test_patterns = ["test_", "Test", "spec_", "Spec", "it(", "describe(", "should"];
@@ -826,7 +838,7 @@ pub fn entry_points(graph: &Graph, _target: &str) -> String {
                 let trimmed = line.trim();
                 if route_decorators.iter().any(|d| trimmed.starts_with(d)) {
                     for next in content.lines().skip(i + 1).take(3) {
-                        if let Some(caps) = route_fn_re.captures(next) {
+                        if let Some(caps) = ROUTE_FN_RE.captures(next) {
                             entries.push(EntryPoint {
                                 file: file_id.clone(), name: caps[1].to_string(),
                                 kind: "route", line: i + 1,
@@ -914,13 +926,6 @@ pub fn diff_impact(graph: &Graph, target: &str) -> String {
     }
 
     // Function-level changes
-    let func_re = Regex::new(concat!(
-        r"(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\()",
-        r"|(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)",
-        r"|def\s+(\w+)",
-        r"|func\s+(\w+)",
-    )).unwrap();
-
     let mut changed_fns: Vec<(String, String)> = Vec::new();
     for file in &relevant {
         if let Some(node) = graph.nodes.get(file) {
@@ -934,8 +939,8 @@ pub fn diff_impact(graph: &Graph, target: &str) -> String {
                 }
             };
             let mut old_fns: HashSet<String> = HashSet::new();
-            for caps in func_re.captures_iter(&old_content) {
-                let name = caps.get(1).or(caps.get(2)).or(caps.get(3)).or(caps.get(4)).or(caps.get(5));
+            for caps in FUNC_RE.captures_iter(&old_content) {
+                let name = caps.get(1).or(caps.get(2)).or(caps.get(3)).or(caps.get(4)).or(caps.get(5)).or(caps.get(6));
                 if let Some(m) = name { old_fns.insert(m.as_str().to_string()); }
             }
             let cur_fns: HashSet<String> = node.functions.iter().map(|f| f.name.clone()).collect();

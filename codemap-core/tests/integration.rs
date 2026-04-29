@@ -241,3 +241,166 @@ fn test_risk() {
     // May return "No files changed" if HEAD~1 doesn't exist, which is OK
     assert!(!result.is_empty());
 }
+
+// ── Smoke tests for previously untested actions ──────────────────────
+
+fn src_dir() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .to_string_lossy()
+        .to_string()
+}
+
+#[test]
+fn test_compare_self() {
+    let mut graph = scan_self();
+    let dir = src_dir();
+    let result = execute(&mut graph, "compare", &dir, false).unwrap();
+    assert!(!result.is_empty());
+    // Comparing against itself should show no differences or a structural match
+    assert!(result.contains("Compare") || result.contains("compare") || result.contains("identical") || result.contains("diff"));
+}
+
+#[test]
+fn test_why() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "why", "lib.rs mod.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_paths() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "paths", "lib.rs mod.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_subgraph() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "subgraph", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_similar() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "similar", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_call_graph() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "call-graph", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_fn_info() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "fn-info", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_import_cost() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "import-cost", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_blast_radius() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "blast-radius", "lib.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_callers_dispatch() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "callers", "dispatch", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_taint() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "taint", "lib.rs mod.rs", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_slice() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "slice", "lib.rs:1", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_lang_bridges() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "lang-bridges", "", false).unwrap();
+    // Pure Rust codebase likely has no bridges, but should not panic
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_gpu_functions() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "gpu-functions", "", false).unwrap();
+    // Pure Rust codebase has no GPU functions, but should not panic
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_monkey_patches() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "monkey-patches", "", false).unwrap();
+    // Pure Rust codebase has no monkey patches, but should not panic
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_dispatch_map() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "dispatch-map", "", false).unwrap();
+    // Pure Rust codebase may not have dispatch mappings, but should not panic
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_diff_functions() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "diff-functions", "HEAD", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_api_diff() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "api-diff", "HEAD", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_churn() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "churn", "HEAD", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_diff_impact() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "diff-impact", "HEAD", false).unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn test_git_coupling() {
+    let mut graph = scan_self();
+    let result = execute(&mut graph, "git-coupling", "", false).unwrap();
+    assert!(!result.is_empty());
+}
