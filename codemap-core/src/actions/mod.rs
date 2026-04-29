@@ -76,7 +76,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "gpu-functions" => Ok(bridges::gpu_functions(graph)),
         "monkey-patches" => Ok(bridges::monkey_patches(graph)),
         "dispatch-map" => Ok(bridges::dispatch_map(graph)),
-        // Reverse Engineering (7)
+        // Reverse Engineering (11)
         "clarion-schema" => Ok(reverse::clarion_schema(graph, target)),
         "pe-strings" => Ok(reverse::pe_strings(graph, target)),
         "pe-exports" => Ok(reverse::pe_exports(graph, target)),
@@ -84,6 +84,10 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "pe-resources" => Ok(reverse::pe_resources(graph, target)),
         "pe-debug" => Ok(reverse::pe_debug(graph, target)),
         "dbf-schema" => Ok(reverse::dbf_schema(graph, target)),
+        "pe-sections" => Ok(reverse::pe_sections(graph, target)),
+        "dotnet-meta" => Ok(reverse::dotnet_meta(graph, target)),
+        "sql-extract" => Ok(reverse::sql_extract(graph, target)),
+        "binary-diff" => Ok(reverse::binary_diff(graph, target)),
         // LSP (5)
         "lsp-symbols" => Ok(lsp::lsp_symbols(graph, target)),
         "lsp-references" => Ok(lsp::lsp_references(graph, target)),

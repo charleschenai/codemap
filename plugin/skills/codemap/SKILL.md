@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 66 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (PE imports/resources/debug/strings/exports, Clarion/DBF schema), LSP integration, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase structure with 70 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (PE sections/imports/resources/debug/strings/exports, .NET metadata, SQL extraction, binary diff, Clarion/DBF schema), LSP integration, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -12,7 +12,7 @@ allowed-tools:
 
 # /codemap — Codebase Dependency Analysis
 
-66 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
+70 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
 
 ## Usage
 
@@ -119,6 +119,10 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `pe-resources <file>` | Version info, manifests, string tables, dialogs, menus |
 | `pe-debug <file>` | PDB paths, build timestamps, CodeView, compiler info |
 | `dbf-schema <file>` | Parse dBASE/FoxPro .DBF headers — fields, types, record counts |
+| `pe-sections <file>` | Section table with entropy analysis (detect packing/encryption) |
+| `dotnet-meta <file>` | .NET CLR metadata — types, methods, assembly refs, user strings |
+| `sql-extract <file\|dir>` | Smart SQL extraction — table access map, JOINs, per-binary usage |
+| `binary-diff <file1> <file2>` | Compare two binaries — import/string/version changes |
 
 ### LSP
 | Action | What |
@@ -165,5 +169,5 @@ codemap --dir ~/project-a --dir ~/project-b stats
 - Clone detection — `clones`, `git-coupling`
 - Cross-language GPU analysis — `--dir cuda-project stats`, multi-repo merge
 - Visualizing — `dot [target] | dot -Tpng -o graph.png`, `mermaid [target]`
-- Reverse engineering — `clarion-schema`, `pe-strings`, `pe-exports`, `pe-imports`, `pe-resources`, `pe-debug`, `dbf-schema`
+- Reverse engineering — `clarion-schema`, `pe-strings`, `pe-exports`, `pe-imports`, `pe-resources`, `pe-debug`, `pe-sections`, `dbf-schema`, `dotnet-meta`, `sql-extract`, `binary-diff`
 - LSP integration — `lsp-symbols`, `lsp-references`, `lsp-calls`, `lsp-diagnostics`, `lsp-types`
