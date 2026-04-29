@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 88 actions — AST-powered call graphs, binary reverse engineering, schema parsing, security scanning, web scraper blueprinting, LSP integration, and more. TRIGGER when asked to understand code structure, audit dependencies, reverse engineer binaries, map APIs, scan for secrets, or prepare for refactoring.
+description: Analyze codebase structure with 96 actions — AST-powered call graphs, binary reverse engineering, ML model analysis (GGUF/SafeTensors/ONNX/CUDA), schema parsing, security scanning, web scraper blueprinting, LSP integration, composite CI checks, and more. TRIGGER when asked to understand code structure, audit dependencies, reverse engineer binaries, analyze ML models, map APIs, scan for secrets, validate code health, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -10,9 +10,9 @@ allowed-tools:
   - Grep
 ---
 
-# /codemap — Codebase Analysis & Reverse Engineering (88 actions)
+# /codemap — Codebase Analysis & Reverse Engineering (96 actions)
 
-Single Rust binary. 13 languages via tree-sitter AST. Rayon parallel. Bincode mtime cache. No external services.
+Single Rust binary. 15 languages via tree-sitter AST (+ Kotlin/SQL regex). Rayon parallel. Bincode mtime cache. No external services.
 
 ## Quick Start
 
@@ -171,11 +171,28 @@ Options: `--json` (JSON envelope with ok/error), `--tree` (ASCII tree for data-f
 | Detect entry points | `entry-points` | `codemap --dir src entry-points` |
 | Disconnected components | `islands` | `codemap --dir src islands` |
 
+### "I need to analyze an ML model file"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| GGUF model (llama.cpp) | `gguf-info <file>` | `codemap --dir . gguf-info model.gguf` |
+| SafeTensors weights | `safetensors-info <file>` | `codemap --dir . safetensors-info model.safetensors` |
+| ONNX model | `onnx-info <file>` | `codemap --dir . onnx-info model.onnx` |
+| Python bytecode | `pyc-info <file>` | `codemap --dir . pyc-info module.cpython-312.pyc` |
+| CUDA kernels (cubin/fatbin) | `cuda-info <file>` | `codemap --dir . cuda-info kernels.fatbin` |
+
+### "I need a quick CI check or project briefing"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Pass/fail health check for CI | `validate` | `codemap --dir src validate` |
+| Full PR/change analysis | `changeset <ref>` | `codemap --dir src changeset HEAD~1` |
+| Context-switching briefing | `handoff [budget]` | `codemap --dir src handoff 12k` |
+
 ---
 
-## Supported Languages (13)
+## Supported Languages (15 + 2 regex)
 
-TypeScript, TSX, JavaScript, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA, **Bash/Shell**
+**Tree-sitter AST:** TypeScript, TSX, JavaScript, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA, Bash/Shell, C#, Lua
+**Regex fallback:** Kotlin, SQL, YAML, CMake
 
 ## Key Behaviors
 
