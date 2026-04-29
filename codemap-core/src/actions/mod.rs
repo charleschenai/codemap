@@ -6,6 +6,7 @@ pub mod dataflow;
 pub mod bridges;
 pub mod compare;
 pub mod insights;
+pub mod reverse;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -74,6 +75,10 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "gpu-functions" => Ok(bridges::gpu_functions(graph)),
         "monkey-patches" => Ok(bridges::monkey_patches(graph)),
         "dispatch-map" => Ok(bridges::dispatch_map(graph)),
+        // Reverse Engineering (3)
+        "clarion-schema" => Ok(reverse::clarion_schema(graph, target)),
+        "pe-strings" => Ok(reverse::pe_strings(graph, target)),
+        "pe-exports" => Ok(reverse::pe_exports(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 42 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT export, A/B compare, data-flow CPG, taint analysis, backward slicing, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase structure with 57 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (Clarion schema, PE strings/exports), and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -12,7 +12,7 @@ allowed-tools:
 
 # /codemap — Codebase Dependency Analysis
 
-42 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
+57 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
 
 ## Usage
 
@@ -44,6 +44,11 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `layers` | Auto-detect architectural layers |
 | `diff <ref>` | Blast radius of git changes |
 | `orphan-exports` | Exports nothing uses |
+| `health` | Codebase health score |
+| `summary` | High-level codebase summary |
+| `decorators` | List decorators/attributes usage |
+| `rename <old> <new>` | Preview rename impact |
+| `context <file>` | Full context for a file |
 
 ### Navigation
 | Action | What |
@@ -52,6 +57,7 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `paths <A> <B>` | ALL import paths between files |
 | `subgraph <pattern>` | Connected component around a target |
 | `similar <file>` | Files with similar import profiles |
+| `structure` | Directory structure with module boundaries |
 
 ### Graph Theory
 | Action | What |
@@ -62,6 +68,7 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `clusters` | Community detection (module boundaries) |
 | `islands` | Disconnected components |
 | `dot [target]` | Graphviz DOT export |
+| `mermaid [target]` | Mermaid diagram export |
 
 ### Function-Level (AST)
 | Action | What |
@@ -74,6 +81,11 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `import-cost <file>` | Transitive import size (files + lines) |
 | `churn <ref>` | Git churn * coupling = risk hotspots |
 | `api-diff <ref>` | Exports added/removed since a git ref |
+| `clones` | Detect duplicate/similar code blocks |
+| `git-coupling` | Files that change together in git |
+| `risk [file]` | Risk score (complexity + churn + coupling) |
+| `diff-impact <ref>` | Impact analysis of git changes |
+| `entry-points` | Detect main/test/route entry points |
 
 ### Data Flow (CPG)
 | Action | What |
@@ -97,6 +109,13 @@ codemap --dir ~/project-a --dir ~/project-b stats
 |--------|------|
 | `compare <dir>` | Structural A/B diff |
 
+### Reverse Engineering
+| Action | What |
+|--------|------|
+| `clarion-schema <file>` | Parse Clarion .CLW DDL — tables, keys, fields, FK relationships |
+| `pe-strings <file>` | Extract categorized strings from PE binaries (SQL, tables, URLs, paths) |
+| `pe-exports <file>` | Dump DLL/EXE export table |
+
 ## Options
 
 | Flag | What |
@@ -106,6 +125,8 @@ codemap --dir ~/project-a --dir ~/project-b stats
 | `--json` | Output JSON instead of text |
 | `--tree` | Show full dependency tree (data-flow actions) |
 | `--no-cache` | Force fresh scan |
+| `--watch [<secs>]` | Watch mode: re-run every N seconds (default 2) |
+| `-q, --quiet` | Suppress scan/cache status messages |
 
 ## How Parsing Works
 
@@ -126,6 +147,9 @@ codemap --dir ~/project-a --dir ~/project-b stats
 - Security audit — `phone-home`, `sinks`, `taint`
 - Data flow analysis — `data-flow`, `slice`, `trace-value`
 - Comparing versions — `compare`, `api-diff`, `diff-functions`
-- Risk assessment — `churn`, `complexity`
+- Risk assessment — `churn`, `complexity`, `risk`
+- Health check — `health`, `summary`
+- Clone detection — `clones`, `git-coupling`
 - Cross-language GPU analysis — `--dir cuda-project stats`, multi-repo merge
-- Visualizing — `dot [target] | dot -Tpng -o graph.png`
+- Visualizing — `dot [target] | dot -Tpng -o graph.png`, `mermaid [target]`
+- Reverse engineering — `clarion-schema`, `pe-strings`, `pe-exports`
