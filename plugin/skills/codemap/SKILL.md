@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 86 actions — AST-powered function-level call graphs, PageRank, HITS hubs/authorities, bridges, clusters, community detection, similarity, subgraphs, DOT/Mermaid export, A/B compare, data-flow CPG, taint analysis, backward slicing, clone detection, risk scoring, reverse engineering (PE sections/imports/resources/debug/strings/exports, .NET metadata, SQL extraction, binary diff, Clarion/DBF schema), binary formats (ELF/Mach-O/Java class/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dep-tree, dead deps, API surface), LSP integration, and more. Use when asked to understand code structure, audit dependencies, or prepare for refactoring.
+description: Analyze codebase structure with 88 actions — AST-powered call graphs, binary reverse engineering, schema parsing, security scanning, web scraper blueprinting, LSP integration, and more. TRIGGER when asked to understand code structure, audit dependencies, reverse engineer binaries, map APIs, scan for secrets, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -10,199 +10,181 @@ allowed-tools:
   - Grep
 ---
 
-# /codemap — Codebase Dependency Analysis
+# /codemap — Codebase Analysis & Reverse Engineering (88 actions)
 
-86 actions. Native tree-sitter AST across 12 languages. Rayon parallel parsing. Bincode mtime cache. Rust.
+Single Rust binary. 13 languages via tree-sitter AST. Rayon parallel. Bincode mtime cache. No external services.
 
-## Usage
+## Quick Start
 
 ```bash
 codemap [--dir <path>] <action> [target]
+codemap --dir ~/project stats              # overview
+codemap --dir ~/project health             # 0-100 score
+codemap --dir . pe-imports /path/to.exe    # reverse engineer a binary
 ```
 
-Or point at multiple repos:
-```bash
-codemap --dir ~/project-a --dir ~/project-b stats
-```
+Options: `--json` (JSON envelope with ok/error), `--tree` (ASCII tree for data-flow), `--no-cache`, `--watch [secs]`, `-q` (quiet), `--dir` (repeatable for multi-repo), `--include-path` (C/C++ includes).
 
-## Actions
+---
 
-### Analysis
-| Action | What |
-|--------|------|
-| `stats` | Codebase overview |
-| `trace <file>` | Imports and importers of a file |
-| `blast-radius <file>` | All files affected if this changes |
-| `phone-home` | Files with external URLs |
-| `coupling <pattern>` | Files importing a package/pattern |
-| `dead-files` | Files nothing imports |
-| `circular` | Circular dependency chains |
-| `exports <file>` | Exports in a file |
-| `callers <name>` | Where a function is used |
-| `hotspots` | Most coupled files |
-| `size` | Files ranked by line count |
-| `layers` | Auto-detect architectural layers |
-| `diff <ref>` | Blast radius of git changes |
-| `orphan-exports` | Exports nothing uses |
-| `health` | Codebase health score |
-| `summary` | High-level codebase summary |
-| `decorators` | List decorators/attributes usage |
-| `rename <old> <new>` | Preview rename impact |
-| `context [budget]` | PageRank-ranked repo map fitted to a token budget (e.g. `8k`, `16000`) |
+## When to Use Each Action
 
-### Navigation
-| Action | What |
-|--------|------|
-| `why <A> <B>` | Shortest import path |
-| `paths <A> <B>` | ALL import paths between files |
-| `subgraph <pattern>` | Connected component around a target |
-| `similar <file>` | Files with similar import profiles |
-| `structure` | Directory structure with module boundaries |
+### "I need to understand this codebase"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| First look at a project | `stats` | `codemap --dir src stats` |
+| Quick dashboard | `summary` | `codemap --dir src summary` |
+| Health check / code quality | `health` | `codemap --dir src health` → 0-100 score |
+| What does this file do? | `trace <file>` | `codemap --dir src trace src/main.rs` |
+| What are the main files? | `pagerank` | `codemap --dir src pagerank` → top 30 by importance |
+| What are the layers? | `layers` | `codemap --dir src layers` → entry/service/leaf |
+| Find module boundaries | `clusters` | `codemap --dir src clusters` |
+| Build an LLM context map | `context [budget]` | `codemap --dir src context 8k` → fits in a prompt |
+| Directory overview with functions | `structure` | `codemap --dir src structure` |
 
-### Graph Theory
-| Action | What |
-|--------|------|
-| `pagerank` | Recursive importance ranking |
-| `hubs` | Hub/authority analysis (HITS) |
-| `bridges` | Articulation points (critical files) |
-| `clusters` | Community detection (module boundaries) |
-| `islands` | Disconnected components |
-| `dot [target]` | Graphviz DOT export |
-| `mermaid [target]` | Mermaid diagram export |
+### "What happens if I change X?"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| What breaks if I touch this file? | `blast-radius <file>` | `codemap --dir src blast-radius src/parser.rs` |
+| Is this PR risky? | `risk <ref>` | `codemap --dir src risk HEAD~1` → 0-100 score |
+| Full diff impact analysis | `diff-impact <ref>` | `codemap --dir src diff-impact main` |
+| What changed + blast radius | `diff <ref>` | `codemap --dir src diff HEAD~3` |
+| Preview a rename | `rename <old> <new>` | `codemap --dir src rename oldName newName` |
+| How connected is a file? | `import-cost <file>` | `codemap --dir src import-cost src/big.rs` |
 
-### Function-Level (AST)
-| Action | What |
-|--------|------|
-| `call-graph [file]` | Cross-file function call graph |
-| `dead-functions` | Exported functions nothing calls |
-| `fn-info <file>` | Functions in a file with their calls |
-| `diff-functions <ref>` | Functions added/removed since a git ref |
-| `complexity [file]` | Cyclomatic complexity per function |
-| `import-cost <file>` | Transitive import size (files + lines) |
-| `churn <ref>` | Git churn * coupling = risk hotspots |
-| `api-diff <ref>` | Exports added/removed since a git ref |
-| `clones` | Detect duplicate/similar code blocks |
-| `git-coupling` | Files that change together in git |
-| `risk [file]` | Risk score (complexity + churn + coupling) |
-| `diff-impact <ref>` | Impact analysis of git changes |
-| `entry-points` | Detect main/test/route entry points |
+### "How does A connect to B?"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Shortest path between files | `why <A> <B>` | `codemap --dir src why parser.rs lib.rs` |
+| ALL paths between files | `paths <A> <B>` | `codemap --dir src paths a.rs b.rs` |
+| Everything connected to X | `subgraph <pattern>` | `codemap --dir src subgraph auth` |
+| Files with similar imports | `similar <file>` | `codemap --dir src similar src/utils.rs` |
+| Who calls this function? | `callers <name>` | `codemap --dir src callers dispatch` |
+| Function call graph | `call-graph [file]` | `codemap --dir src call-graph src/main.rs` |
+| Function details | `fn-info <file>` | `codemap --dir src fn-info src/parser.rs` |
 
-### Data Flow (CPG)
-| Action | What |
-|--------|------|
-| `data-flow <file> [fn]` | Data dependencies for a file or function |
-| `taint <source> <sink>` | Trace data pipeline between two points |
-| `slice <file>:<line>` | Backward slice — what feeds this line |
-| `trace-value <f>:<l>:<n>` | Forward trace — where does this value go |
-| `sinks [file]` | List all detected sinks |
+### "I need to clean up this codebase"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Find unused files | `dead-files` | `codemap --dir src dead-files` |
+| Find unused functions | `dead-functions` | `codemap --dir src dead-functions` |
+| Find unused exports | `orphan-exports` | `codemap --dir src orphan-exports` |
+| Find unused dependencies | `dead-deps` | `codemap --dir src dead-deps` |
+| Find circular imports | `circular` | `codemap --dir src circular` |
+| Find duplicate code | `clones` | `codemap --dir src clones` |
+| Find complex functions | `complexity [file]` | `codemap --dir src complexity` |
+| Find high-risk files | `churn <ref>` | `codemap --dir src churn HEAD~50` |
+| Find hidden coupling | `git-coupling` | `codemap --dir src git-coupling 500` |
+| Most coupled files | `hotspots` | `codemap --dir src hotspots` |
+| Largest files | `size` | `codemap --dir src size` |
+| Critical single-point-of-failure files | `bridges` | `codemap --dir src bridges` |
+| Hub vs authority ranking | `hubs` | `codemap --dir src hubs` |
 
-### Cross-Language
-| Action | What |
-|--------|------|
-| `lang-bridges [file]` | Show cross-language bridge edges (pybind11, PyO3, TORCH_LIBRARY, Triton, CUDA) |
-| `gpu-functions` | List all GPU-tagged functions (CUDA __global__, @triton.jit) |
-| `monkey-patches` | Show Python module-level class/function replacements |
-| `dispatch-map` | Show op->implementation mappings per device |
+### "I need to trace data flow / find security issues"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Trace user input to database | `taint <source> <sink>` | `codemap --dir src taint req.body db.query` |
+| What feeds this line? | `slice <file>:<line>` | `codemap --dir src slice src/handler.rs:42` |
+| Where does this value go? | `trace-value <f>:<l>:<n>` | `codemap --dir src trace-value src/a.rs:10:user` |
+| Find all sink points | `sinks [file]` | `codemap --dir src sinks` |
+| Data flow for a function | `data-flow <file> [fn]` | `codemap --dir src data-flow src/api.rs handle_upload` |
+| Scan for hardcoded secrets | `secret-scan` | `codemap --dir src secret-scan` |
+| Map the public API surface | `api-surface` | `codemap --dir src api-surface` |
+| Files phoning home (URLs) | `phone-home` | `codemap --dir src phone-home` |
 
-### Comparison
-| Action | What |
-|--------|------|
-| `compare <dir>` | Structural A/B diff |
+### "I need to reverse engineer a compiled binary"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| **Windows PE/DLL** | | |
+| What DLLs and APIs does it call? | `pe-imports <file>` | `codemap --dir . pe-imports app.exe` |
+| Extract SQL/strings from binary | `pe-strings <file>` | `codemap --dir . pe-strings app.exe` |
+| Smart SQL mining + table map | `sql-extract <file\|dir>` | `codemap --dir . sql-extract ./binaries/` |
+| Version info, manifests, UI strings | `pe-resources <file>` | `codemap --dir . pe-resources app.exe` |
+| DLL export table | `pe-exports <file>` | `codemap --dir . pe-exports lib.dll` |
+| PDB paths, build date, compiler | `pe-debug <file>` | `codemap --dir . pe-debug app.exe` |
+| Section entropy (packed?) | `pe-sections <file>` | `codemap --dir . pe-sections app.exe` |
+| .NET types, methods, assemblies | `dotnet-meta <file>` | `codemap --dir . dotnet-meta app.dll` |
+| Compare two binary versions | `binary-diff <f1> <f2>` | `codemap --dir . binary-diff old.exe new.exe` |
+| **Linux ELF** | | |
+| ELF sections, symbols, deps | `elf-info <file>` | `codemap --dir . elf-info /usr/bin/app` |
+| **macOS Mach-O** | | |
+| Mach-O load commands, dylibs | `macho-info <file>` | `codemap --dir . macho-info app` |
+| **Java** | | |
+| Class file / JAR analysis | `java-class <file>` | `codemap --dir . java-class app.jar` |
+| **WebAssembly** | | |
+| WASM imports, exports, sections | `wasm-info <file>` | `codemap --dir . wasm-info module.wasm` |
 
-### Binary Formats
-| Action | What |
-|--------|------|
-| `elf-info <file>` | ELF binary analysis — sections, symbols, dynamic linking |
-| `macho-info <file>` | Mach-O binary analysis — load commands, segments, symbols |
-| `java-class <file>` | Java .class file — constant pool, methods, fields, version |
-| `wasm-info <file>` | WebAssembly module — imports, exports, sections, memory |
+### "I need to parse a legacy database schema"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Clarion .CLW DDL file | `clarion-schema <file>` | `codemap --dir . clarion-schema sql_var.clw` |
+| dBASE/FoxPro .DBF file | `dbf-schema <file>` | `codemap --dir . dbf-schema data.dbf` |
 
-### Schemas
-| Action | What |
-|--------|------|
-| `proto-schema <file>` | Parse Protobuf .proto definitions — messages, services, fields |
-| `openapi-schema <file>` | Parse OpenAPI/Swagger specs — endpoints, schemas, auth |
-| `graphql-schema <file>` | Parse GraphQL schemas — types, queries, mutations, subscriptions |
-| `docker-map <file>` | Parse Dockerfiles — stages, base images, exposed ports, volumes |
-| `terraform-map <file>` | Parse Terraform HCL — resources, variables, outputs, modules |
+### "I need to map a web application"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Map API from HAR capture | `web-api <har>` | `codemap --dir . web-api traffic.har` |
+| Analyze saved HTML page | `web-dom <html>` | `codemap --dir . web-dom page.html` |
+| Build sitemap from HTML files | `web-sitemap <dir>` | `codemap --dir . web-sitemap ./saved-pages/` |
+| Full scraper blueprint | `web-blueprint <har> [html]` | `codemap --dir . web-blueprint traffic.har ./pages/` |
+| Find APIs in JS bundles | `js-api-extract <file\|dir>` | `codemap --dir . js-api-extract dist/app.js` |
 
-### Security
-| Action | What |
-|--------|------|
-| `secret-scan [file]` | Scan for hardcoded secrets, API keys, tokens, passwords |
-| `dep-tree [file]` | Dependency tree with version info from lockfiles |
-| `dead-deps [file]` | Declared dependencies not imported by any source file |
-| `api-surface [file]` | Public API surface — all exported functions/types/constants |
+### "I need to understand infrastructure / API specs"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Protobuf service definitions | `proto-schema <file>` | `codemap --dir . proto-schema api.proto` |
+| OpenAPI/Swagger spec | `openapi-schema <file>` | `codemap --dir . openapi-schema openapi.json` |
+| GraphQL schema | `graphql-schema <file>` | `codemap --dir . graphql-schema schema.graphql` |
+| Docker Compose services | `docker-map <file>` | `codemap --dir . docker-map docker-compose.yml` |
+| Terraform resources | `terraform-map <file>` | `codemap --dir . terraform-map main.tf` |
 
-### Reverse Engineering
-| Action | What |
-|--------|------|
-| `clarion-schema <file>` | Parse Clarion .CLW DDL — tables, keys, fields, FK relationships |
-| `pe-strings <file>` | Extract categorized strings from PE binaries (SQL, tables, URLs, paths) |
-| `pe-exports <file>` | Dump DLL/EXE export table |
-| `pe-imports <file>` | DLL import table — every API call the binary makes |
-| `pe-resources <file>` | Version info, manifests, string tables, dialogs, menus |
-| `pe-debug <file>` | PDB paths, build timestamps, CodeView, compiler info |
-| `dbf-schema <file>` | Parse dBASE/FoxPro .DBF headers — fields, types, record counts |
-| `pe-sections <file>` | Section table with entropy analysis (detect packing/encryption) |
-| `dotnet-meta <file>` | .NET CLR metadata — types, methods, assembly refs, user strings |
-| `sql-extract <file\|dir>` | Smart SQL extraction — table access map, JOINs, per-binary usage |
-| `binary-diff <file1> <file2>` | Compare two binaries — import/string/version changes |
+### "I need to check dependencies"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Show dependency tree | `dep-tree [manifest]` | `codemap --dir src dep-tree` |
+| Find unused dependencies | `dead-deps` | `codemap --dir src dead-deps` |
+| Files importing a package | `coupling <pattern>` | `codemap --dir src coupling lodash` |
 
-### Web
-| Action | What |
-|--------|------|
-| `web-api <file>` | Extract REST API routes and handlers |
-| `web-dom <file>` | DOM structure and component tree |
-| `web-sitemap <file>` | Site map from routes and links |
+### "I need to use LSP for deeper analysis"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Extract symbols from file | `lsp-symbols <server> <file>` | `codemap --dir . lsp-symbols rust-analyzer src/main.rs` |
+| Find all references | `lsp-references <server> <f:l:c>` | `codemap --dir . lsp-references rust-analyzer src/main.rs:42:10` |
+| Call hierarchy | `lsp-calls <server> <f:l:c>` | `codemap --dir . lsp-calls rust-analyzer src/main.rs:42:10` |
+| Get diagnostics | `lsp-diagnostics <server> <file>` | `codemap --dir . lsp-diagnostics pylsp src/` |
+| Get type info | `lsp-types <server> <file>` | `codemap --dir . lsp-types rust-analyzer src/main.rs` |
 
-### LSP
-| Action | What |
-|--------|------|
-| `lsp-symbols <server> <file>` | Extract document symbols via LSP server |
-| `lsp-references <server> <file:line:col>` | Find all references to a symbol |
-| `lsp-calls <server> <file:line:col>` | Incoming/outgoing call hierarchy |
-| `lsp-diagnostics <server> <file>` | Errors and warnings from language server |
-| `lsp-types <server> <file>` | Type signatures via hover |
+### "I need a diagram"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Graphviz DOT | `dot [target]` | `codemap --dir src dot parser > graph.dot` |
+| Mermaid (GitHub-native) | `mermaid [target]` | `codemap --dir src mermaid auth` |
 
-## Options
+### "I need to compare"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Compare two repos | `compare <dir>` | `codemap --dir ./v1 compare ./v2` |
+| Functions changed since ref | `diff-functions <ref>` | `codemap --dir src diff-functions main` |
+| Exports changed since ref | `api-diff <ref>` | `codemap --dir src api-diff HEAD~5` |
+| Compare two binaries | `binary-diff <f1> <f2>` | `codemap --dir . binary-diff old.exe new.exe` |
+| Find decorators/attributes | `decorators <pattern>` | `codemap --dir src decorators test` |
+| Detect entry points | `entry-points` | `codemap --dir src entry-points` |
+| Disconnected components | `islands` | `codemap --dir src islands` |
 
-| Flag | What |
-|------|------|
-| `--dir <path>` | Directory to scan (repeatable for multi-repo) |
-| `--include-path <path>` | C/C++ include search path (repeatable) |
-| `--json` | Output JSON instead of text |
-| `--tree` | Show full dependency tree (data-flow actions) |
-| `--no-cache` | Force fresh scan |
-| `--watch [<secs>]` | Watch mode: re-run every N seconds (default 2) |
-| `-q, --quiet` | Suppress scan/cache status messages |
+---
 
-## How Parsing Works
+## Supported Languages (13)
 
-- **Native tree-sitter** — Compiled Rust grammars, no WASM overhead
-- **12 languages** — TypeScript, TSX, JavaScript, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA
-- **CUDA** — Parsed as C++ superset, kernel launches (`<<<>>>`) detected as call edges
-- **URLs** — Regex across all languages (credentials stripped)
-- **Fallback** — Regex for any extension without a tree-sitter grammar
-- **Parallel** — Rayon par_iter across files, ~23x faster cold scan than TS version
+TypeScript, TSX, JavaScript, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA, **Bash/Shell**
 
-## When to Use
+## Key Behaviors
 
-- Understanding architecture — `stats`, `hotspots`, `layers`, `pagerank`, `hubs`
-- Finding critical code — `bridges`, `call-graph`, `fn-info`, `complexity`
-- Cleaning up — `dead-files`, `dead-functions`, `orphan-exports`, `dead-deps`
-- Before refactoring — `blast-radius`, `bridges`, `similar`, `import-cost`
-- Debugging breakage — `why`, `paths`, `call-graph`
-- Security audit — `phone-home`, `sinks`, `taint`, `secret-scan`, `api-surface`
-- Data flow analysis — `data-flow`, `slice`, `trace-value`
-- Comparing versions — `compare`, `api-diff`, `diff-functions`
-- Risk assessment — `churn`, `complexity`, `risk`
-- Health check — `health`, `summary`
-- Clone detection — `clones`, `git-coupling`
-- Cross-language GPU analysis — `--dir cuda-project stats`, multi-repo merge
-- Visualizing — `dot [target] | dot -Tpng -o graph.png`, `mermaid [target]`
-- Binary analysis — `elf-info`, `macho-info`, `java-class`, `wasm-info`
-- Schema inspection — `proto-schema`, `openapi-schema`, `graphql-schema`, `docker-map`, `terraform-map`
-- Dependency management — `dep-tree`, `dead-deps`, `import-cost`
-- Reverse engineering — `clarion-schema`, `pe-strings`, `pe-exports`, `pe-imports`, `pe-resources`, `pe-debug`, `pe-sections`, `dbf-schema`, `dotnet-meta`, `sql-extract`, `binary-diff`
-- LSP integration — `lsp-symbols`, `lsp-references`, `lsp-calls`, `lsp-diagnostics`, `lsp-types`
+- `--dir` defaults to current directory. Repeat for multi-repo scans.
+- Target arguments are joined with spaces: `codemap why a.rs b.rs` works.
+- `->` separator is stripped: `codemap why a.rs -> b.rs` works.
+- Reverse engineering actions (`pe-*`, `elf-*`, `macho-*`, etc.) take absolute file paths — they don't use the scan directory.
+- `--json` wraps output in `{"action", "target", "files", "result", "ok", "error"}`.
+- `--tree` gives ASCII tree rendering for `taint`, `slice`, `trace-value`.
+- File size limit: 256MB for binaries, 10MB for source files.
+- Cache at `.codemap/cache.bincode` — delete or `--no-cache` to force fresh scan.
+- Custom sinks/sources via `.codemap/dataflow.json`.

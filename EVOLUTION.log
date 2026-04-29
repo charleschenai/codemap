@@ -100,3 +100,84 @@
 [2026-04-23 19:40] upgrade: bump version to 5.0.0 — major release
   source: 54 actions, 31 tests, zero warnings, insights.rs module split
 
+[2026-04-29 10:48] feat: add reverse engineering — clarion-schema, pe-strings, pe-exports (57 actions)
+  source: OMS reverse engineering on Windows server. Found sql_var.clw Clarion DDL file, built parser.
+  result: 179 tables, 2557 fields, 353 keys extracted. 1400 SQL queries from pe-strings on oms_sls.exe.
+
+[2026-04-29 11:15] feat: add LSP client — lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types (62 actions)
+  source: rust-analyzer-lsp plugin already installed. LSP integration gives semantic analysis beyond tree-sitter syntax.
+
+[2026-04-29 11:30] feat: add PE imports/resources/debug + DBF schema (66 actions)
+  source: analyzed goblin (Rust PE parser), Ghidra, pe-parse repos via codemap to identify missing capabilities.
+  result: pe-imports shows 538 API calls + categorized (crypto/network/registry/COM). pe-resources extracts 183 string tables. dbf-schema reads dBASE files.
+
+[2026-04-29 11:50] feat: add dotnet-meta, sql-extract, binary-diff, pe-sections (70 actions)
+  source: continued analysis of goblin/Ghidra/Falcon repos. sql-extract builds table-to-operation access matrix and JOIN relationship maps.
+
+[2026-04-29 12:10] feat: add web analysis — web-api (HAR), web-dom (HTML), web-sitemap (73 actions)
+  source: researched har-file-analyzer, Crawlee repos. Pure file analysis — no browser, no network calls.
+
+[2026-04-29 12:45] audit: full 8-reviewer audit — score 5.7/10, 21 findings
+  team: Principal Architect, Security Engineer, Staff Engineer, SRE, QA Lead, DX Lead, Binary Analysis Specialist, Performance Engineer
+  critical: PAT in git remote, reverse.rs monolith (5059 lines), 58% untested actions, stringly-typed errors, no file-size guards, recursive parsers without depth limits
+  report: .audit/audit-report.md
+
+[2026-04-29 13:00] fix: apply all audit fixes
+  - Stripped PAT from git remote URL
+  - File-size guards (256MB) on all binary reads
+  - Recursion depth limits on PE resource/version parsers
+  - Fixed SQL table extraction break bug (only first table captured)
+  - Fixed truncate_str panic on non-ASCII UTF-8
+  - Deduplicated parse_pe_imports (~300 lines removed)
+  - Changed all reverse/LSP signatures from &mut Graph to &Graph
+  - Removed duplicate formatters and dead SqlStatement.text field
+  - Fixed unwrap() in dataflow.rs, graph_theory.rs, main.rs
+  - Fixed --watch mode (SystemTime instead of shelling to date)
+  - Added ok/error fields to JSON envelope
+  - Added CodemapError std::error::Error impl
+  - Double fs::metadata eliminated in scanner
+  - Parser eprintln gated on quiet flag
+
+[2026-04-29 13:15] feat: add binary format analysis — elf-info, macho-info, java-class, wasm-info (new binary.rs module)
+  source: analyzed goblin ELF/Mach-O modules. Covers Linux, macOS, Java, and WebAssembly binaries.
+
+[2026-04-29 13:15] feat: add schema parsing — proto-schema, openapi-schema, graphql-schema, docker-map, terraform-map (new schemas.rs module)
+  source: pure text/JSON parsing for API specs and infrastructure configs. No external crates.
+
+[2026-04-29 13:15] feat: add security scanning — secret-scan, dep-tree, dead-deps, api-surface (new security.rs module)
+  source: 10 secret patterns (AWS, GitHub PAT, JWT, private keys, connection strings). Dep manifests for npm/Cargo/pip/Go/Maven/Gem.
+
+[2026-04-29 13:30] clean: split reverse.rs monolith into reverse/ directory
+  - reverse/common.rs — shared helpers (read_u16, parse_sections, rva_to_offset, etc.)
+  - reverse/pe.rs — 8 PE analysis actions
+  - reverse/schema.rs — clarion, DBF, SQL extraction
+  - reverse/web.rs — web-api, web-dom, web-sitemap, web-blueprint, js-api-extract
+  - reverse/mod.rs — re-exports all 16 public functions
+  source: audit finding #2 — 5059-line monolith was unmaintainable
+
+[2026-04-29 13:30] perf: LazyLock for all regexes — 36 statics in parser.rs, 7 in functions.rs, 3 in insights.rs
+  source: audit finding #9 — Regex::new().unwrap() compiled on every call in hot paths
+
+[2026-04-29 13:30] perf: O(n²) cross-repo import linking → HashMap O(1)
+  source: audit finding #14 — linear ends_with scan replaced with stem-keyed HashMap
+
+[2026-04-29 13:30] perf: PageRank/HITS allocation optimization — Vec<f64> buffer swap
+  source: audit finding #12 — eliminated HashMap allocation per iteration
+
+[2026-04-29 13:30] perf: bridge extractor line index — binary search O(log n) replaces linear O(n)
+  source: performance audit — content[..pos].matches('\n').count() was O(n) per match
+
+[2026-04-29 13:30] test: 22 new smoke tests (52 total), GitHub Actions CI
+  source: audit finding #3 — 58% of actions were untested. Added CI with cargo test + clippy.
+
+[2026-04-29 13:45] feat: add web-blueprint — combines HAR + HTML into scraper blueprint
+  source: mater session showed Playwright + web-api workflow for law scraping. web-blueprint automates the mapping step.
+
+[2026-04-29 13:45] feat: add js-api-extract — parse JS bundles for API endpoints
+  source: mater session described "30 min of bundle archaeology" per site. This automates finding fetch/axios/XHR calls.
+
+[2026-04-29 13:45] feat: add Bash/Shell support — tree-sitter-bash for .sh/.bash files
+  source: user request — shell scripts are common in infrastructure codebases
+
+[2026-04-29 13:45] upgrade: bump to 88 actions — v5.1.0
+  source: 34 new actions added in one session (54→88), audit fixes applied, architecture improved

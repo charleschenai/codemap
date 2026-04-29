@@ -1,6 +1,6 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 70 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, PE binary analysis, .NET metadata extraction, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 88 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
@@ -34,11 +34,21 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **70 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **88 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
-- **Binary reverse engineering.** 11 actions for cracking compiled binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
+- **Binary reverse engineering.** 11 actions for cracking compiled Windows binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
+
+- **Multi-platform binary analysis.** 4 more binary actions for non-PE formats: ELF (Linux), Mach-O (macOS, including fat/universal binaries), Java `.class`/`.jar` files, and WebAssembly modules. Section entropy, symbol tables, dynamic linking, and version detection.
+
+- **Schema/config parsing.** 5 actions for infrastructure-as-code and API specs: Protobuf `.proto` files, OpenAPI/Swagger specs (JSON/YAML), GraphQL schemas, Docker Compose service graphs with topological startup order, and Terraform resource/module maps with cross-reference detection.
+
+- **Security scanning.** 4 actions for supply-chain and code hygiene: secret detection (AWS keys, GitHub PATs, private keys, JWTs, passwords, connection strings) with severity grouping and value masking, dependency tree parsing across 8 manifest formats, dead dependency detection via cross-referencing manifests against actual imports, and public API surface extraction.
+
+- **Web scraper blueprinting.** 5 actions for reverse-engineering web applications: HAR file parsing into API endpoint maps, HTML DOM analysis for forms/tables/selectors, sitemap building from saved HTML directories, combined HAR+HTML scraper blueprint generation (auth recipe, pagination, rate limits), and JavaScript bundle archaeology for extracting API endpoints from minified code.
 
 - **LSP integration.** 5 actions that connect to any Language Server Protocol server to extract symbols, references, call hierarchies, diagnostics, and type information. Works with rust-analyzer, pylsp, typescript-language-server, clangd, or any LSP-compliant server.
+
+- **Bash/shell support.** 13 languages now covered with tree-sitter AST parsing, including Bash/Shell scripts (`.sh`, `.bash`). Function definitions and `source` imports are extracted from real parse trees.
 
 - **Cross-language bridge detection.** PyO3, pybind11, TORCH_LIBRARY, Triton, CUDA kernels, monkey-patches, and YAML native-function dispatch tables are all first-class edges. A Python function calling into a C++ op registered via TORCH_LIBRARY shows up in the call graph. Most tools quietly drop these edges.
 
@@ -126,7 +136,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 70 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 88 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -256,6 +266,52 @@ Connect to any Language Server Protocol server to extract semantic analysis data
 | `lsp-diagnostics <server> <file>` | Collect all diagnostics (errors, warnings) from `textDocument/publishDiagnostics` notifications. |
 | `lsp-types <server> <file>` | Extract type signatures for each symbol via `textDocument/hover`. |
 
+### Binary formats (4)
+
+For analyzing compiled binaries across platforms — ELF (Linux), Mach-O (macOS), Java bytecode, and WebAssembly.
+
+| Action | What it does |
+|--------|-------------|
+| `elf-info <file>` | ELF binary analysis — sections with entropy, dynamic linking (NEEDED), imported/exported symbols. Supports 32/64-bit, LE/BE. |
+| `macho-info <file>` | Mach-O binary analysis — load commands, segments, dylib dependencies, rpaths, UUID, symbols. Handles fat/universal binaries. |
+| `java-class <file>` | Java .class file analysis — constant pool, class hierarchy, fields, methods with access flags, Java version detection. Handles .jar/.war/.ear (ZIP) with package listing. |
+| `wasm-info <file>` | WebAssembly module analysis — sections with entropy, imports (module.name), exports, type/function/code counts. LEB128 decoding. |
+
+### Schemas (5)
+
+Parse infrastructure-as-code and API specification files into structured summaries.
+
+| Action | What it does |
+|--------|-------------|
+| `proto-schema <file>` | Parse Protobuf `.proto` files — packages, imports, messages with fields, enums, services with RPC methods. Recursive directory scan. |
+| `openapi-schema <file>` | Parse OpenAPI/Swagger specs (JSON/YAML) — endpoints, methods, operation IDs, request/response schemas, auth schemes, tags. |
+| `graphql-schema <file>` | Parse GraphQL schema files — types, inputs, enums, interfaces, unions, scalars, queries, mutations, subscriptions, directives. |
+| `docker-map <file>` | Parse docker-compose.yml — services with image/build/ports/volumes/env, dependency graph, topological startup order, port map. |
+| `terraform-map <file>` | Parse Terraform .tf files — resources, data sources, variables, outputs, modules with sources, providers. Cross-reference detection. |
+
+### Security (4)
+
+Supply-chain hygiene and secret detection.
+
+| Action | What it does |
+|--------|-------------|
+| `secret-scan` | Scan all files for hardcoded secrets — AWS keys, GitHub PATs, private keys, JWTs, passwords, API keys, connection strings, IPs. Groups by severity (critical/high/medium), masks values. |
+| `dep-tree [manifest]` | Parse package manifests (package.json, Cargo.toml, requirements.txt, go.mod, pyproject.toml, pom.xml, Gemfile, Pipfile) and show dependency trees. |
+| `dead-deps` | Cross-reference declared dependencies against actual imports — find packages in manifests that no source file references. |
+| `api-surface [file]` | Extract the public API surface — all exported functions grouped by file, plus HTTP routes, GraphQL resolvers, and CLI commands. |
+
+### Web (5)
+
+Reverse-engineer web applications from captured traffic and saved pages.
+
+| Action | What it does |
+|--------|-------------|
+| `web-api <har-file>` | Parse HAR files — API endpoint map with methods, query params, body fields, response status codes, auth detection, CRUD coverage matrix, static asset summary. |
+| `web-dom <html-file>` | Parse saved HTML — forms with fields and selectors, tables with headers, navigation structure, click handlers, inline JS API references, script sources. |
+| `web-sitemap <html-dir>` | Build sitemap from HTML files — page relationships, hub pages, dead ends, external link domains. |
+| `web-blueprint <har> [html-dir]` | Combine HAR + HTML into a scraper blueprint — auth recipe, API endpoints, data table selectors, pagination patterns, rate limit hints. |
+| `js-api-extract <file\|dir>` | Parse JavaScript bundles for API endpoints — fetch/axios/XHR calls, base URL constants, header configurations, auth patterns. Automates "bundle archaeology." |
+
 ---
 
 ## Examples
@@ -356,6 +412,56 @@ codemap --dir . lsp-calls rust-analyzer src/main.rs:42:10
 codemap --dir . lsp-diagnostics pylsp src/
 ```
 
+### Scan for hardcoded secrets
+
+```bash
+codemap --dir src secret-scan
+```
+
+Finds AWS keys, GitHub PATs, private keys, JWTs, passwords, API keys, and connection strings. Groups by severity (critical/high/medium) and masks values in the output.
+
+### Parse infrastructure schemas
+
+```bash
+# Parse Protobuf definitions
+codemap --dir . proto-schema api/v2.proto
+
+# Parse an OpenAPI spec
+codemap --dir . openapi-schema openapi.yaml
+
+# Map Docker Compose service dependencies
+codemap --dir . docker-map docker-compose.yml
+
+# Map Terraform resources and modules
+codemap --dir . terraform-map infra/
+```
+
+### Analyze non-PE binaries
+
+```bash
+# ELF binary (Linux)
+codemap --dir . elf-info /usr/local/bin/myapp
+
+# Mach-O binary (macOS)
+codemap --dir . macho-info /usr/local/bin/myapp
+
+# Java class or JAR
+codemap --dir . java-class app.jar
+
+# WebAssembly module
+codemap --dir . wasm-info module.wasm
+```
+
+### Build a web scraper blueprint
+
+```bash
+# Combine captured traffic + saved pages into a scraper config
+codemap --dir . web-blueprint traffic.har ./pages/
+
+# Extract API endpoints from a minified JavaScript bundle
+codemap --dir . js-api-extract dist/app.bundle.js
+```
+
 ### Build an LLM-ready repo map
 
 ```bash
@@ -447,6 +553,7 @@ Tree-sitter grammars are in use for every language marked AST. YAML/CMake are sc
 | C | `.c`, `.h` | tree-sitter-c | |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hxx` | tree-sitter-cpp | |
 | CUDA | `.cu`, `.cuh` | tree-sitter-cpp | Parsed as a C++ superset. |
+| Bash/Shell | `.sh`, `.bash` | tree-sitter-bash | Functions, source imports |
 | YAML | `.yaml`, `.yml` | regex | URLs + YAML dispatch tables (e.g. `native_functions.yaml`). |
 | CMake | `.cmake` | regex | URLs + build-dep detection. |
 
@@ -471,7 +578,7 @@ codemap/
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) -> String
+│           ├── mod.rs             # dispatch(action, target) -> String (88 actions)
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure
@@ -480,7 +587,15 @@ codemap/
 │           ├── dataflow.rs        # data-flow, taint, slice, trace-value, sinks
 │           ├── bridges.rs         # lang-bridges, gpu-functions, monkey-patches, dispatch-map
 │           ├── compare.rs         # compare two repos
-│           ├── reverse.rs         # 11 reverse engineering actions (PE, Clarion, DBF, .NET, SQL)
+│           ├── binary.rs          # 4 binary format actions (ELF, Mach-O, Java, WASM)
+│           ├── schemas.rs         # 5 schema actions (Protobuf, OpenAPI, GraphQL, Docker, Terraform)
+│           ├── security.rs        # 4 security actions (secret-scan, dep-tree, dead-deps, api-surface)
+│           ├── reverse/           # 11 reverse engineering actions (PE, Clarion, DBF, .NET, SQL)
+│           │   ├── mod.rs         # dispatch for RE actions
+│           │   ├── common.rs      # shared PE/binary parsing utilities
+│           │   ├── pe.rs          # PE-specific actions (imports, exports, resources, debug, sections)
+│           │   ├── schema.rs      # Clarion DDL, dBASE, dotnet-meta, sql-extract
+│           │   └── web.rs         # web-api, web-dom, web-sitemap, web-blueprint, js-api-extract
 │           └── lsp.rs             # 5 LSP client actions
 ├── codemap-napi/                  # Node.js bindings (same core, napi-rs wrapper)
 ├── plugin/skills/codemap/SKILL.md # The /codemap Claude Code skill
@@ -527,7 +642,9 @@ Measurable from the code and `EVOLUTION.log`:
 - **Parallel parse.** `rayon::par_iter` over cache misses. Parse throughput scales with cores.
 - **Incremental cache.** Warm runs reparse only modified files. On codemap's own source (~8k lines of Rust) a warm `stats` runs in well under a second.
 - **Thread-local parser pool.** `tree_sitter::Parser` instances are created once per grammar per thread and reused (`PARSER_CACHE` thread-local).
-- **Regex hoisting.** All analysis regexes are compiled once per action, not per file or per line.
+- **Regex hoisting.** All analysis regexes are compiled once per action, not per file or per line. Security-scan regexes use `LazyLock` for zero-cost reuse across invocations.
+- **O(1) cross-repo linking.** Multi-repo merges use hash-based lookups for cross-boundary import resolution instead of linear scans.
+- **Vec buffer swap for graph algorithms.** PageRank and HITS alternate between two pre-allocated Vec buffers instead of cloning, halving allocation pressure per iteration.
 - **Zero clippy warnings** at v5.1.0. **31 integration tests** (self-referential — codemap scans its own `codemap-core/src/`).
 - **Cache sanity.** Load caps bincode file at 256 MB and rejects entries with path traversal (`..`, leading `/`). Files > 10 MB are skipped at parse time.
 
