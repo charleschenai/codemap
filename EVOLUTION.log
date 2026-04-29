@@ -181,3 +181,34 @@
 
 [2026-04-29 13:45] upgrade: bump to 88 actions — v5.1.0
   source: 34 new actions added in one session (54→88), audit fixes applied, architecture improved
+
+## 5.1.1 — 2026-04-29
+
+### Bugfix: prevent OOM-cascade reaping user's tmux scope
+
+A `codemap` invocation without `--dir` (defaulting to `$HOME` or `~/Desktop`)
+was walking 192,000+ files and ballooning to ~50 GB heap before the kernel
+OOM-killed it. Because the process ran inside a systemd `tmux-spawn-*.scope`
+cgroup, the kernel/systemd then SIGKILL'd every other process in the same
+scope — including the user's tmux session. Verified incident
+2026-04-29 23:18:39 UTC on Charles's mater workstation.
+
+Three guards added:
+
+1. **CLI refuses to default-scan `$HOME`.** Running `codemap <action>` from
+   the user's home directory without `--dir` now exits with code 2 and a
+   helpful error pointing at `--dir <smaller_path>`. Override with
+   `CODEMAP_NO_FILE_LIMIT=1`.
+2. **Hard file-count cap (50,000 supported files).** `walk_dir` short-circuits
+   when the cap is reached and `scan_single_dir` returns
+   `ScanError("...hit the safety cap of 50000...")`. Override with the same
+   env var.
+3. **Warning at 10,000 files.** `scan_single_dir` prints a stderr warning
+   suggesting `--dir` scoping, but proceeds.
+
+Implementation: `codemap-core/src/scanner.rs` (`walk_dir` now returns `bool`
+and accepts `file_cap`; `scan_single_dir` reads `CODEMAP_NO_FILE_LIMIT`),
+`codemap-cli/src/main.rs` ($HOME-equality refuse + cwd-default note).
+
+No API change to napi bindings or any action; existing integration tests
+unaffected.

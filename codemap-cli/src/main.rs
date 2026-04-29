@@ -116,7 +116,34 @@ fn main() {
     let cli = Cli::parse();
     let target = cli.target.join(" ");
     let dirs = if cli.dirs.is_empty() {
-        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+        // Refuse to default-scan the user's home directory. A $HOME scan can
+        // hit 192K+ files and OOM-kill the process — and on systemd, the
+        // kernel will then reap the entire user@.service / tmux scope along
+        // with it. Verified incident 2026-04-29 23:18 UTC.
+        if let Ok(home) = std::env::var("HOME") {
+            let home_path = PathBuf::from(&home);
+            let allow = std::env::var("CODEMAP_NO_FILE_LIMIT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            if cwd == home_path && !allow {
+                eprintln!(
+                    "Refusing to scan $HOME ({}). Pass --dir <smaller_path> to scope the scan, \
+                     or set CODEMAP_NO_FILE_LIMIT=1 to override.",
+                    home
+                );
+                process::exit(2);
+            }
+        }
+
+        if !cli.quiet {
+            eprintln!(
+                "(no --dir given; defaulting to current directory: {})",
+                cwd.display()
+            );
+        }
+        vec![cwd]
     } else {
         cli.dirs
     };

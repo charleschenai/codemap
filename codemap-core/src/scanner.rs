@@ -16,6 +16,16 @@ use std::time::Instant;
 const CACHE_VERSION: u32 = 8;
 const MAX_DEPTH: usize = 50;
 
+/// Print a warning when a single scan crosses this many supported files.
+const FILE_COUNT_WARN: usize = 10_000;
+
+/// Hard cap to prevent OOM. Without this guard, a scan rooted at $HOME
+/// or any large parent dir (192K+ files) can balloon to 50 GB heap and
+/// trigger a kernel OOM-kill that reaps the entire systemd cgroup —
+/// including the user's tmux session.
+/// Override with CODEMAP_NO_FILE_LIMIT=1 if you genuinely need to scan more.
+const FILE_COUNT_HARD_CAP: usize = 50_000;
+
 /// Directories to skip during walk.
 const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", ".codemap", "target"];
 
@@ -135,15 +145,28 @@ fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
 
 // ── Directory Walk ──────────────────────────────────────────────────
 
-fn walk_dir(dir: &Path, depth: usize, ext_set: &HashSet<&str>, files: &mut Vec<PathBuf>) {
+fn walk_dir(
+    dir: &Path,
+    depth: usize,
+    ext_set: &HashSet<&str>,
+    files: &mut Vec<PathBuf>,
+    file_cap: usize,
+) -> bool {
+    // Returns false when the cap has been hit so callers can short-circuit.
     if depth > MAX_DEPTH {
-        return;
+        return true;
+    }
+    if files.len() >= file_cap {
+        return false;
     }
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(_) => return true,
     };
     for entry in entries.flatten() {
+        if files.len() >= file_cap {
+            return false;
+        }
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
@@ -164,7 +187,9 @@ fn walk_dir(dir: &Path, depth: usize, ext_set: &HashSet<&str>, files: &mut Vec<P
 
         let path = entry.path();
         if ft.is_dir() {
-            walk_dir(&path, depth + 1, ext_set, files);
+            if !walk_dir(&path, depth + 1, ext_set, files, file_cap) {
+                return false;
+            }
         } else if ft.is_file() {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 let dotted = format!(".{ext}");
@@ -174,6 +199,7 @@ fn walk_dir(dir: &Path, depth: usize, ext_set: &HashSet<&str>, files: &mut Vec<P
             }
         }
     }
+    true
 }
 
 // ── File info collected per-file in parallel ────────────────────────
@@ -280,9 +306,35 @@ fn scan_single_dir(
     let dir_str = dir.to_string_lossy().to_string();
     let ext_set: HashSet<&str> = SUPPORTED_EXTS.iter().copied().collect();
 
-    // Walk
+    // Walk with a hard cap to prevent OOM on accidental $HOME-rooted scans.
+    // Override via env var CODEMAP_NO_FILE_LIMIT=1 (uses usize::MAX).
+    let allow_unlimited = std::env::var("CODEMAP_NO_FILE_LIMIT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let file_cap = if allow_unlimited { usize::MAX } else { FILE_COUNT_HARD_CAP };
+
     let mut all_files: Vec<PathBuf> = Vec::new();
-    walk_dir(dir, 0, &ext_set, &mut all_files);
+    let walk_completed = walk_dir(dir, 0, &ext_set, &mut all_files, file_cap);
+
+    if !walk_completed && !allow_unlimited {
+        return Err(CodemapError::ScanError(format!(
+            "Scan of {} hit the safety cap of {} supported files (likely a $HOME or other large \
+             parent dir). codemap previously OOM-killed itself reaping a user's tmux session in \
+             this scenario. Pass --dir <smaller_path> to scope the scan, or set \
+             CODEMAP_NO_FILE_LIMIT=1 to override (use only with plenty of free RAM).",
+            dir_str, FILE_COUNT_HARD_CAP
+        )));
+    }
+
+    if !quiet && all_files.len() >= FILE_COUNT_WARN {
+        eprintln!(
+            "Warning: scanning {} files in {} — this may consume significant memory. \
+             Consider scoping with --dir if you only need a subset.",
+            all_files.len(),
+            dir_str
+        );
+    }
+
     all_files.sort();
 
     // Load cache
