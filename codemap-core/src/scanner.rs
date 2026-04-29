@@ -27,6 +27,7 @@ const SUPPORTED_EXTS: &[&str] = &[
     ".cu", ".cuh",
     ".sh", ".bash",
     ".yaml", ".yml", ".cmake",
+    ".cs", ".kt", ".kts", ".lua", ".sql",
 ];
 
 // ── Cache Types ─────────────────────────────────────────────────────

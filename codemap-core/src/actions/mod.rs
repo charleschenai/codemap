@@ -11,6 +11,8 @@ pub mod binary;
 pub mod security;
 pub mod lsp;
 pub mod schemas;
+pub mod ml;
+pub mod composite;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -119,6 +121,16 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "graphql-schema" => Ok(schemas::graphql_schema(graph, target)),
         "docker-map" => Ok(schemas::docker_map(graph, target)),
         "terraform-map" => Ok(schemas::terraform_map(graph, target)),
+        // ML/AI (5)
+        "gguf-info" => Ok(ml::gguf_info(graph, target)),
+        "safetensors-info" => Ok(ml::safetensors_info(graph, target)),
+        "onnx-info" => Ok(ml::onnx_info(graph, target)),
+        "pyc-info" => Ok(ml::pyc_info(graph, target)),
+        "cuda-info" => Ok(ml::cuda_info(graph, target)),
+        // Composite (3)
+        "validate" => Ok(composite::validate(graph, target)),
+        "changeset" => Ok(composite::changeset(graph, target)),
+        "handoff" => Ok(composite::handoff(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

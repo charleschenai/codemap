@@ -212,6 +212,9 @@ fn ext_to_grammar(ext: &str) -> Option<&'static str> {
         ".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
         ".cu" | ".cuh" => Some("cpp"), // CUDA as C++ superset
         ".sh" | ".bash" => Some("bash"),
+        ".cs" => Some("c_sharp"),
+        ".lua" => Some("lua"),
+        ".kt" | ".kts" | ".sql" => None, // regex-only, no compatible tree-sitter crate
         ".yaml" | ".yml" | ".cmake" => None, // regex-only, no tree-sitter grammar
         _ => None,
     }
@@ -231,6 +234,9 @@ fn grammar_to_language(grammar: &str) -> Option<Language> {
         "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
         "php" => Some(tree_sitter_php::LANGUAGE_PHP.into()),
         "bash" => Some(tree_sitter_bash::LANGUAGE.into()),
+        "c_sharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
+        "lua" => Some(tree_sitter_lua::LANGUAGE.into()),
+        // kotlin and sql: no compatible tree-sitter crate, use regex fallback
         _ => None,
     }
 }
@@ -306,6 +312,10 @@ fn import_types(grammar: &str) -> &'static [&'static str] {
         "php" => &["namespace_use_declaration", "include_expression", "require_expression"],
         "c" | "cpp" => &["preproc_include"],
         "bash" => &["command"],
+        "c_sharp" => &["using_directive"],
+        "kotlin" => &["import_header"],
+        "lua" => &["function_call"],
+        "sql" => &[], // SQL has no imports
         _ => &[],
     }
 }
@@ -322,6 +332,10 @@ fn func_types(grammar: &str) -> &'static [&'static str] {
         "c" => &["function_definition"],
         "cpp" => &["function_definition", "template_declaration"],
         "bash" => &["function_definition"],
+        "c_sharp" => &["method_declaration", "constructor_declaration"],
+        "kotlin" => &["function_declaration"],
+        "lua" => &["function_declaration", "function_definition_statement"],
+        "sql" => &["create_function_statement"],
         _ => &[],
     }
 }
@@ -338,6 +352,10 @@ fn export_types(grammar: &str) -> &'static [&'static str] {
         "c" => &["function_definition"],
         "cpp" => &["function_definition", "template_declaration", "class_specifier"],
         "bash" => &["function_definition"],
+        "c_sharp" => &["method_declaration", "class_declaration"],
+        "kotlin" => &["function_declaration", "class_declaration"],
+        "lua" => &["function_declaration", "function_definition_statement"],
+        "sql" => &["create_function_statement", "create_table_statement"],
         _ => &[],
     }
 }
@@ -351,6 +369,8 @@ fn return_types(grammar: &str) -> &'static [&'static str] {
         "java" => &["return_statement"],
         "ruby" => &["return"],
         "php" => &["return_statement"],
+        "c_sharp" => &["return_statement"],
+        "kotlin" => &["jump_expression"],
         _ => &[],
     }
 }
@@ -561,7 +581,47 @@ fn extract_imports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
                 }
             }
         }
+    } else if grammar == "c_sharp" {
+        // using Namespace.Name;
+        for node in collect(root, itypes) {
+            let t = text(node, src);
+            let cleaned = t
+                .trim_start_matches("using ")
+                .trim_start_matches("static ")
+                .trim_end_matches(';')
+                .trim();
+            if !cleaned.is_empty() {
+                imports.push(cleaned.to_string());
+            }
+        }
+    } else if grammar == "kotlin" {
+        // import package.name
+        for node in collect(root, itypes) {
+            let t = text(node, src);
+            let cleaned = t
+                .trim_start_matches("import ")
+                .trim_end_matches(';')
+                .trim();
+            if !cleaned.is_empty() {
+                imports.push(cleaned.to_string());
+            }
+        }
+    } else if grammar == "lua" {
+        // require("module") or require "module"
+        for node in collect(root, itypes) {
+            let t = text(node, src);
+            if t.contains("require") {
+                // Extract string argument
+                for child in collect(node, &["string"]) {
+                    let s = text(child, src).replace(&['\'', '"'][..], "");
+                    if !s.is_empty() {
+                        imports.push(s);
+                    }
+                }
+            }
+        }
     }
+    // SQL: no imports to extract
 
     imports
 }
@@ -669,6 +729,49 @@ fn extract_exports_from_ast(root: Node, grammar: &str, src: &[u8]) -> Vec<String
             }
         }
     } else if grammar == "bash" {
+        for node in collect(root, etypes) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let t = text(name, src);
+                if !t.is_empty() {
+                    exports.push(t.to_string());
+                }
+            }
+        }
+    } else if grammar == "c_sharp" {
+        // public methods and classes
+        for node in collect(root, etypes) {
+            if let Some(modifiers) = node.child(0) {
+                if modifiers.kind() == "modifier" || text(modifiers, src).contains("public") {
+                    if let Some(name) = node.child_by_field_name("name") {
+                        exports.push(text(name, src).to_string());
+                    }
+                }
+            }
+        }
+    } else if grammar == "kotlin" {
+        // fun declarations and class declarations (public by default)
+        for node in collect(root, etypes) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let t = text(name, src);
+                let node_text = text(node, src);
+                // Skip private/internal
+                if !node_text.contains("private ") && !node_text.contains("internal ") && !t.is_empty() {
+                    exports.push(t.to_string());
+                }
+            }
+        }
+    } else if grammar == "lua" {
+        // function declarations
+        for node in collect(root, etypes) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let t = text(name, src);
+                if !t.is_empty() {
+                    exports.push(t.to_string());
+                }
+            }
+        }
+    } else if grammar == "sql" {
+        // CREATE TABLE and CREATE FUNCTION names
         for node in collect(root, etypes) {
             if let Some(name) = node.child_by_field_name("name") {
                 let t = text(name, src);
@@ -933,6 +1036,21 @@ fn is_function_exported(node: Node, grammar: &str, name: &str, src: &[u8]) -> bo
         !text(node, src).starts_with("static ")
     } else if grammar == "bash" {
         // All bash functions are effectively exported (available to subshells via export -f)
+        true
+    } else if grammar == "c_sharp" {
+        // public methods
+        node.child(0)
+            .map(|c| text(c, src).contains("public"))
+            .unwrap_or(false)
+    } else if grammar == "kotlin" {
+        // Kotlin: public by default, check for private/internal
+        let nt = text(node, src);
+        !nt.contains("private ") && !nt.contains("internal ")
+    } else if grammar == "lua" {
+        // Lua: all top-level functions are effectively exported
+        true
+    } else if grammar == "sql" {
+        // SQL: stored procedures/functions are always exported
         true
     } else {
         false

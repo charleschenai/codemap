@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (88 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (96 actions, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
@@ -25,8 +25,10 @@ Actions:
   Comparison:   compare
   LSP:          lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types
   Schemas:      proto-schema, openapi-schema, graphql-schema, docker-map, terraform-map
+  ML/AI:        gguf-info, safetensors-info, onnx-info, pyc-info, cuda-info
+  Composite:    validate, changeset, handoff
 
-Languages: TS/JS, Python, Rust, Go, Java, Ruby, PHP, C/C++, CUDA, Bash/Shell")]
+Languages: TS/JS, Python, Rust, Go, Java, Ruby, PHP, C/C++, CUDA, Bash/Shell, C#, Kotlin, Lua, SQL")]
 struct Cli {
     /// Directory to scan (repeatable for multi-repo)
     #[arg(long = "dir", value_name = "PATH")]
