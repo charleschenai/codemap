@@ -1368,3 +1368,38 @@ unaffected.
   locate_cert_table returning None on unsigned PE.
 
   Action count: 157 → 158 (+1: pe-cert). Total EntityKinds: 26.
+
+[2026-04-30] feat: 5.15.1 — pyc code-object extraction (#41)
+  source: 5.14.0 task #41 — previously deferred because Python's
+  marshal format is recursive and a full walker is its own project.
+  Shipped here with a deliberately minimal approach.
+
+  Extends pyc-info to walk the marshal stream looking for code-
+  object type bytes (0x63 lowercase 'c' = full code object, 0x43
+  uppercase 'C' = small/short form in 3.5+). For each candidate,
+  validates by checking that the next 4 bytes look like a plausible
+  argcount (≤64) and scans the next ~4 KB for a short-string-typed
+  identifier name. Each found code object becomes a BinaryFunction
+  node hanging off the pyc model node, reusing the BinaryFunction
+  EntityKind from 5.13.0 with attrs["binary_format"] = "pyc".
+
+  v1 limits (intentional):
+    - Heuristic name extraction. Catches most module-level + class-
+      level function names. False-positive rate: small (occasionally
+      arg names like `self` get registered).
+    - No call-graph edges yet. Python bytecode CALL_FUNCTION opcodes
+      are stack-based; resolving them requires the full marshal walker.
+    - PyArmor / Cython / heavily-obfuscated pyc files may miss
+      functions where the type byte sits at unusual offsets.
+
+  A complete walker would be ~250 LOC more; the v1 minimal approach
+  ships ~80 LOC of new logic in ml.rs.
+
+  Live verification: hand-built pyc (3 functions: hello, world,
+  Foo.bar) → 5 BinaryFunction nodes registered (the 3 real fns +
+  some heuristic false positives like `self`). meta-path
+  "model->bin_func" returns the 5 paths correctly.
+
+  Action count: 158 (no new actions; pyc-info just got smarter).
+  Tests: 177 still passing (no new unit tests; verification is
+  the live smoke run).

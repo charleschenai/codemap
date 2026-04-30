@@ -1096,9 +1096,104 @@ pub fn pyc_info(graph: &mut Graph, target: &str) -> String {
         Ok(d) => d,
         Err(e) => return e,
     };
+    // 5.15.1: walk the marshal stream looking for code objects;
+    // register each as a BinaryFunction node hanging off the pyc
+    // module. Minimal extraction (flat — no recursive children).
+    walk_pyc_code_objects_for_graph(graph, target, &data);
     match parse_pyc(&data, target) {
         Ok(info) => info,
         Err(e) => format!("PYC parse error: {e}"),
+    }
+}
+
+/// Best-effort code-object scanner. Python's marshal format uses
+/// type byte 'c' (0x63) for full code objects (CPython < 3.5) and
+/// 'C' (0x43) for "small" code objects (3.5+ short form). After the
+/// type byte comes a series of fixed-size header fields followed by
+/// nested marshal objects (consts/names/varnames/etc.) and finally
+/// the function name as a marshalled string.
+///
+/// We don't fully parse the recursive structure (that's a several-
+/// hundred-LOC walker). Instead, we use a heuristic: scan for the
+/// type byte at positions where the next 4 bytes look like a
+/// plausible argcount (0..=64), and try to extract the readable
+/// function name by looking for short-string type bytes nearby.
+///
+/// This produces useful but incomplete output: typically catches
+/// most module-level + class-level function names. PyArmor /
+/// Cython-cythonized / heavily-obfuscated pyc may miss some.
+fn walk_pyc_code_objects_for_graph(graph: &mut crate::types::Graph, target: &str, data: &[u8]) {
+    use crate::types::EntityKind;
+    let module_id = format!("model:{target}");
+    if data.len() < 32 { return; }
+
+    // Skip pyc header (16 bytes for Python 3.7+)
+    let mut found = 0usize;
+    let mut i = 16;
+    while i < data.len() && found < 2000 {
+        let type_byte = data[i] & 0x7F;
+        if type_byte != 0x63 && type_byte != 0x43 { i += 1; continue; }
+
+        // Code object header layout (CPython 3.8+):
+        //   argcount       u32
+        //   posonlyargcount u32 (3.8+)
+        //   kwonlyargcount  u32
+        //   stacksize       u32   (older) / dropped in 3.11
+        //   flags           u32
+        // Plausibility check on argcount: 0..=64
+        if i + 5 > data.len() { break; }
+        let arg = u32::from_le_bytes([data[i+1], data[i+2], data[i+3], data[i+4]]);
+        if arg > 64 { i += 1; continue; }
+
+        // Look ahead for a short-string name within ~256 bytes.
+        // The function name appears after the bytecode + consts +
+        // names tuples; we scan for a 'Z' (interned short string)
+        // or 'z' (short ASCII) or 'a' (ASCII) marker that decodes
+        // as a valid Python identifier.
+        let scan_start = i + 1;
+        let scan_end = (scan_start + 4096).min(data.len());
+        let mut name = String::new();
+        let mut p = scan_start;
+        while p < scan_end {
+            let tb = data[p] & 0x7F;
+            if (tb == 0x5A || tb == 0x7A || tb == 0x61) && p + 2 < data.len() {
+                // 1-byte length follows
+                let len = data[p + 1] as usize;
+                if len >= 2 && len <= 64 && p + 2 + len <= data.len() {
+                    let candidate = &data[p + 2..p + 2 + len];
+                    if candidate.iter().all(|&b| b == b'_' || b.is_ascii_alphanumeric())
+                        && candidate[0].is_ascii_alphabetic() {
+                        // Common code-object name; record it
+                        name = String::from_utf8_lossy(candidate).to_string();
+                        // Don't accept generic ones like "<module>" — those
+                        // come earlier; we want concrete function names.
+                        if !name.is_empty() && !name.starts_with('<') {
+                            break;
+                        }
+                        name.clear();
+                    }
+                }
+            }
+            p += 1;
+        }
+
+        if name.is_empty() { i += 1; continue; }
+        let func_id = format!("bin_func:pyc:{target}::{found}");
+        let arg_str = arg.to_string();
+        let pos_str = format!("{i:#x}");
+        graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+            ("name", &name),
+            ("binary_format", "pyc"),
+            ("kind_detail", "function"),
+            ("argcount", &arg_str),
+            ("offset", &pos_str),
+        ]);
+        graph.add_edge(&module_id, &func_id);
+        found += 1;
+        // Skip past this code object's plausible header + a few
+        // bytes of body before scanning again, to reduce duplicate
+        // detections of the same function.
+        i += 32;
     }
 }
 
