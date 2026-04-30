@@ -732,14 +732,30 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
     }
 }
 
-/// Same LCP-prefix labeler as Leiden's `cluster_label` — duplicated to
-/// avoid making the leiden module a public API surface for this helper.
-/// If both grow we can lift to a shared module.
+/// LCP-prefix + homogeneous-kind cluster labeler. Same logic as
+/// leiden::cluster_label — duplicated to avoid making the leiden
+/// module a public API surface for this helper. If both grow we
+/// can lift to a shared utility.
 fn lpa_cluster_label<'a, I: Iterator<Item = &'a str> + Clone>(members: I) -> String {
     let first = match members.clone().next() {
         Some(s) => s,
         None => return String::new(),
     };
+
+    // Homogeneous-kind cluster: ep:, dll:, etc. all the same prefix.
+    let known = ["ep", "dll", "pe", "elf", "macho", "java", "wasm",
+        "sym", "form", "table", "field", "model", "proto", "gql",
+        "oapi", "docker", "tf", "asm", "schema"];
+    let kind_prefix = |id: &str| -> Option<String> {
+        let p = id.split(':').next()?;
+        if known.contains(&p) { Some(p.to_string()) } else { None }
+    };
+    if let Some(p) = kind_prefix(first) {
+        if members.clone().all(|m| kind_prefix(m).as_deref() == Some(p.as_str())) {
+            return format!("[{p} cluster] ");
+        }
+    }
+
     if first.contains(':') && !first.contains('/') { return String::new(); }
     let first_segs: Vec<&str> = first.split('/').collect();
     let mut common_depth = first_segs.len();

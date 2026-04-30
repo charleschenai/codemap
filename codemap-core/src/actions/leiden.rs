@@ -335,18 +335,35 @@ fn aggregate(
 /// LPA `clusters` action's output (cluster N, file count, internal
 /// coupling %, sample members) so users get the same UX with a better
 /// algorithm under the hood.
-/// Compute a human-readable label for a cluster: the longest common
-/// path-segment prefix of its member ids. e.g. `["src/algo/dijkstra.rs",
-/// "src/algo/astar.rs", "src/algo/bfs.rs"]` → `"src/algo/* "`. Returns
-/// empty string when nothing meaningful is shared (cross-domain clusters
-/// with mixed kinds tend to have no common prefix).
+/// Compute a human-readable label for a cluster. Two strategies:
+///
+/// 1. If every member is a kind-prefixed graph node (ep:, dll:, model:,
+///    etc.) of the same kind, label by kind: `[endpoint cluster]`,
+///    `[dll cluster]`, etc. Useful when Leiden groups all endpoints
+///    or all DLL imports together due to shared incoming sources.
+/// 2. Otherwise compute the longest common path-segment prefix:
+///    `["src/algo/dijkstra.rs", "src/algo/astar.rs"]` → `"src/algo/*"`.
+///
+/// Returns empty string when neither strategy yields a useful label
+/// (mixed-kind clusters with no shared prefix).
 fn cluster_label<'a, I: Iterator<Item = &'a str> + Clone>(members: I) -> String {
     let first = match members.clone().next() {
         Some(s) => s,
         None => return String::new(),
     };
-    // Skip kind-prefixed nodes that aren't path-shaped (ep:, dll:, etc.)
-    // — we want clusters made of source paths.
+
+    // Strategy 1: homogeneous-kind cluster. If every member shares the
+    // same kind-prefix (`ep:`, `dll:`, `pe:`, `model:`, etc.), label it.
+    if let Some(prefix) = id_kind_prefix(first) {
+        let all_same_kind = members.clone().all(|m| id_kind_prefix(m) == Some(prefix));
+        if all_same_kind {
+            return format!("[{prefix} cluster] ");
+        }
+    }
+
+    // Strategy 2: longest common path-segment prefix.
+    // Skip kind-prefixed nodes that aren't path-shaped — they'd give us
+    // the kind prefix as the LCP, which we don't want.
     if first.contains(':') && !first.contains('/') { return String::new(); }
     let first_segs: Vec<&str> = first.split('/').collect();
     let mut common_depth = first_segs.len();
@@ -360,17 +377,22 @@ fn cluster_label<'a, I: Iterator<Item = &'a str> + Clone>(members: I) -> String 
         if common_depth == 0 { break; }
     }
     if common_depth == 0 { return String::new(); }
-    // We typically want the directory prefix, not the leaf filename. If
-    // all members share the FULL path (i.e. depth == segments), that's a
-    // single file — skip the label.
     let prefix_segs = &first_segs[..common_depth];
     if prefix_segs.is_empty() { return String::new(); }
     let prefix = prefix_segs.join("/");
-    // Avoid noisy single-segment prefixes like "src" — only label when
-    // the prefix has a directory component (slash) or is long enough
-    // to be meaningful.
     if !prefix.contains('/') && prefix.len() < 4 { return String::new(); }
     format!("[{prefix}/*] ")
+}
+
+/// Extract the kind-prefix from a typed-node id (`ep:GET:/users` → `ep`,
+/// `dll:libc.so.6` → `dll`). Returns None for path-shaped ids without a
+/// recognized kind prefix.
+fn id_kind_prefix(id: &str) -> Option<&str> {
+    let known = ["ep", "dll", "pe", "elf", "macho", "java", "wasm",
+        "sym", "form", "table", "field", "model", "proto", "gql",
+        "oapi", "docker", "tf", "asm", "schema"];
+    let prefix = id.split(':').next()?;
+    if known.contains(&prefix) { Some(prefix) } else { None }
 }
 
 fn format_clusters(ids: &[String], partition: &[usize], graph: &Graph) -> String {

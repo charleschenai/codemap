@@ -1250,3 +1250,21 @@ fn test_web_dom_handles_truncated_tags_without_panic() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn test_cluster_label_homogeneous_kind() {
+    use std::collections::HashMap;
+    let mut g = Graph {
+        nodes: HashMap::new(),
+        scan_dir: ".".to_string(),
+        cpg: None,
+    };
+    for i in 0..5 {
+        g.ensure_typed_node(&format!("ep:GET:/api/{i}"), EntityKind::HttpEndpoint, &[]);
+    }
+    for i in 0..5 { for j in 0..5 {
+        if i != j { g.add_edge(&format!("ep:GET:/api/{i}"), &format!("ep:GET:/api/{j}")); }
+    }}
+    let result = execute(&mut g, "clusters", "leiden", false).unwrap();
+    assert!(result.contains("[ep cluster]"), "homogeneous-ep cluster should be labeled: {result}");
+}
