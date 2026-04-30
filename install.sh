@@ -148,36 +148,79 @@ else
     echo "  \"extraKnownMarketplaces\": { \"$PLUGIN_NAME\": { \"source\": { \"source\": \"directory\", \"path\": \"$PLUGIN_DIR\" } } }"
 fi
 
-# --- Build codemap binary ---
+# --- Install codemap binary ---
 echo ""
 info "Installing codemap binary..."
 
-# Detect platform for install path
 BIN_DIR="$HOME/bin"
 if [ "$(id -u)" = "0" ]; then
     BIN_DIR="/usr/local/bin"
 fi
+mkdir -p "$BIN_DIR"
 
-if command -v cargo &>/dev/null; then
+# Detect platform → release archive name. Built artifacts published by
+# .github/workflows/release.yml on each `v*` tag.
+detect_target() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$arch" in
+        aarch64|arm64) arch="aarch64" ;;
+        x86_64|amd64)  arch="x86_64"  ;;
+        *) echo "unsupported-arch:$arch" ; return 1 ;;
+    esac
+    case "$os" in
+        Linux)  echo "Linux-$arch" ;;
+        Darwin) [ "$arch" = "aarch64" ] && arch="arm64"; echo "Darwin-$arch" ;;
+        *) echo "unsupported-os:$os" ; return 1 ;;
+    esac
+}
+
+install_prebuilt() {
+    local target archive url tmp
+    target="$(detect_target)" || return 1
+    archive="codemap-${target}.tar.gz"
+    url="https://github.com/charleschenai/codemap/releases/latest/download/${archive}"
+    tmp="$(mktemp -d)"
+    info "Downloading $archive..."
+    if curl -fsSL --connect-timeout 10 --max-time 120 -o "$tmp/$archive" "$url"; then
+        if tar -xzf "$tmp/$archive" -C "$tmp" 2>/dev/null && [ -f "$tmp/codemap" ]; then
+            install -m 755 "$tmp/codemap" "$BIN_DIR/codemap"
+            rm -rf "$tmp"
+            ok "Installed pre-built binary to $BIN_DIR/codemap"
+            return 0
+        fi
+        warn "Downloaded archive failed to extract; falling back to source build."
+    else
+        info "No matching pre-built release for $target (or offline); falling back."
+    fi
+    rm -rf "$tmp"
+    return 1
+}
+
+build_from_source() {
+    if ! command -v cargo &>/dev/null; then
+        warn "Rust toolchain not found and no pre-built binary available."
+        echo ""
+        echo "  Option 1: Install Rust and re-run"
+        echo "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        echo "    bash $PLUGIN_DIR/install.sh"
+        echo ""
+        echo "  Option 2: Tag a release in GitHub Actions to publish a pre-built"
+        echo "           binary for your platform, then re-run install.sh."
+        return 1
+    fi
     info "Building from source (this may take a minute)..."
     cd "$PLUGIN_DIR"
     cargo build --release -p codemap-cli 2>&1 | tail -3
-    mkdir -p "$BIN_DIR"
-    cp "$PLUGIN_DIR/target/release/codemap" "$BIN_DIR/codemap"
-    chmod +x "$BIN_DIR/codemap"
-    ok "Installed binary to $BIN_DIR/codemap"
+    install -m 755 "$PLUGIN_DIR/target/release/codemap" "$BIN_DIR/codemap"
+    ok "Built and installed binary to $BIN_DIR/codemap"
+}
+
+if [ "${CODEMAP_BUILD_FROM_SOURCE:-}" = "1" ]; then
+    build_from_source
 else
-    warn "Rust toolchain not found — cannot build codemap binary."
-    echo ""
-    echo "  Option 1: Install Rust and re-run"
-    echo "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-    echo "    bash $PLUGIN_DIR/install.sh"
-    echo ""
-    echo "  Option 2: Copy a pre-built binary to $BIN_DIR/codemap"
-    echo "    (get one from a machine that has Rust installed)"
-    echo ""
-    echo "  The /codemap Claude Code skill is installed either way,"
-    echo "  but the binary is needed for it to work."
+    install_prebuilt || build_from_source
 fi
 
 # Check PATH

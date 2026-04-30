@@ -1,0 +1,101 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_os: Linux
+            archive_arch: x86_64
+            napi_name: codemap.linux-x64-gnu.node
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            archive_os: Linux
+            archive_arch: aarch64
+            napi_name: codemap.linux-arm64-gnu.node
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            archive_os: Darwin
+            archive_arch: arm64
+            napi_name: codemap.darwin-arm64.node
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive_os: Darwin
+            archive_arch: x86_64
+            napi_name: codemap.darwin-x64.node
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }} -p codemap-cli
+
+      - name: Package CLI
+        shell: bash
+        run: |
+          ARCHIVE="codemap-${{ matrix.archive_os }}-${{ matrix.archive_arch }}.tar.gz"
+          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" codemap
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build napi addon
+        working-directory: codemap-napi
+        run: |
+          npm install --no-audit --no-fund
+          npx napi build --release --target ${{ matrix.target }} --platform
+          # napi-rs writes codemap.<platform>.node into cwd
+          ls -la *.node || true
+
+      - name: Stage napi artifact with canonical name
+        shell: bash
+        run: |
+          cp "codemap-napi/${{ matrix.napi_name }}" "${{ matrix.napi_name }}" 2>/dev/null \
+            || cp codemap-napi/*.node "${{ matrix.napi_name }}"
+          shasum -a 256 "${{ matrix.napi_name }}" > "${{ matrix.napi_name }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codemap-${{ matrix.archive_os }}-${{ matrix.archive_arch }}
+          path: |
+            codemap-${{ matrix.archive_os }}-${{ matrix.archive_arch }}.tar.gz
+            codemap-${{ matrix.archive_os }}-${{ matrix.archive_arch }}.tar.gz.sha256
+            ${{ matrix.napi_name }}
+            ${{ matrix.napi_name }}.sha256
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
