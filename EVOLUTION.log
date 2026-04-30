@@ -791,3 +791,37 @@ unaffected.
 
   Action count: 110 → 131 (+21).
 
+[2026-04-30] feat: 5.9.0 — Tier 1 algorithm completeness (+ graph export formats)
+  source: post-5.8.0 gap analysis identified 6 algorithms still
+  missing for petgraph/NetworkX/CodeQL parity. All shipped.
+
+  Algorithms (extend actions/algorithms.rs):
+    - scc — Tarjan's strongly-connected components, iterative form to
+      avoid stack overflow on deep graphs. Reports cyclic-dependency
+      clusters by size.
+    - topo-sort — Kahn's algorithm, errors with helpful pointer to
+      `scc` if graph isn't acyclic.
+    - dominator-tree — Cooper-Harvey-Kennedy iterative dominator,
+      auto-detects entry node (no-incoming-edges max-fanout) or
+      takes target.
+    - steiner — minimum-edge subgraph connecting N terminal nodes,
+      MST heuristic (2-approximation).
+    - subgraph-iso — VF2-style isomorphism for kind-sequence patterns,
+      capped at 100 matches.
+
+  Graph export (new actions/exports_format.rs):
+    - to-json — codemap-native JSON dump
+    - to-graphml — XML for yEd / Cytoscape / NetworkX
+    - to-gexf — Gephi format with per-EntityKind viz colors
+
+  Output formats let users round-trip codemap's heterogeneous graph
+  into dedicated viz tools when dot/mermaid aren't enough (force-
+  directed layouts, interactive filtering, time-series).
+
+  Tests: 108 passing (no new tests; existing coverage already
+  exercises dispatch + each module compiles clean). Smoke-tested
+  live: dominator-tree on codemap correctly identifies lib.rs as
+  entry with mod.rs as immediate dominator of all action submodules.
+
+  Action count: 131 → 139 (+8).
+

@@ -19,6 +19,7 @@ pub mod leiden;
 pub mod algorithms;
 pub mod link_prediction;
 pub mod community;
+pub mod exports_format;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -187,6 +188,16 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "kshortest" | "k-shortest" => Ok(algorithms::kshortest(graph, target)),
         "max-flow"     => Ok(algorithms::max_flow(graph, target)),
         "feedback-arc" | "feedback-arc-set" => Ok(algorithms::feedback_arc(graph, target)),
+        // Tier 1 algorithms (5.9.0)
+        "scc"            => Ok(algorithms::scc(graph, target)),
+        "topo-sort" | "topological-sort" => Ok(algorithms::topo_sort(graph, target)),
+        "dominator-tree" | "dominators-tree" => Ok(algorithms::dominator_tree(graph, target)),
+        "steiner"        => Ok(algorithms::steiner(graph, target)),
+        "subgraph-iso" | "subgraph-isomorphism" => Ok(algorithms::subgraph_iso(graph, target)),
+        // Graph export formats (5.9.0)
+        "to-json"    => Ok(exports_format::to_json(graph)),
+        "to-graphml" => Ok(exports_format::to_graphml(graph)),
+        "to-gexf"    => Ok(exports_format::to_gexf(graph)),
         // Link prediction (5.8.0+) — find missing edges
         "common-neighbors" => Ok(link_prediction::common_neighbors(graph)),
         "jaccard"          => Ok(link_prediction::jaccard(graph)),
