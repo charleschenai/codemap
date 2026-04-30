@@ -4,14 +4,16 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (101 actions, heterogeneous graph, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (104 actions, heterogeneous graph, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
                 orphan-exports, health, summary, decorators, rename, context
   Navigation:   why, paths, subgraph, similar, structure
-  Graph Theory: pagerank, hubs, bridges, clusters, islands, dot, mermaid
-  Centrality:   betweenness, eigenvector, katz, closeness
+  Graph Theory: pagerank, hubs, bridges, clusters [leiden|lpa], islands,
+                dot, mermaid
+  Centrality:   betweenness, eigenvector, katz, closeness, harmonic, load,
+                structural-holes (alias: brokers)
                   (target = comma-separated kind filter, e.g. \"table,field\")
   Heterogeneous: meta-path <kindA>-><kindB>[-><kindC>]
                   e.g. \"meta-path source->endpoint\" finds source files calling APIs

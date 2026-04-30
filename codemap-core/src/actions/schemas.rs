@@ -348,6 +348,36 @@ pub fn proto_schema(graph: &mut Graph, target: &str) -> String {
     let mut parsed: Vec<ProtoFile> = files.iter().filter_map(|f| parse_proto_file(f)).collect();
     parsed.sort_by(|a, b| a.path.cmp(&b.path));
 
+    // Pass: register every parsed message + enum + service as typed nodes.
+    // Edges: each message gets an edge from its containing .proto source;
+    // when a field's type matches another message in the same file, add a
+    // message → message edge so meta-paths can traverse type compositions.
+    for pf in &parsed {
+        let pf_id = format!("schema:proto:{}", pf.path);
+        for msg in &pf.messages {
+            let msg_id = format!("proto:{}::{}", pf.path, msg.name);
+            graph.ensure_typed_node(&msg_id, EntityKind::ProtoMessage, &[
+                ("name", &msg.name),
+                ("file", &pf.path),
+                ("package", &pf.package),
+                ("field_count", &msg.fields.len().to_string()),
+            ]);
+            graph.add_edge(&pf_id, &msg_id);
+        }
+        // Field-type composition edges within the same file
+        let local_msgs: std::collections::HashSet<&str> = pf.messages.iter()
+            .map(|m| m.name.as_str()).collect();
+        for msg in &pf.messages {
+            let from = format!("proto:{}::{}", pf.path, msg.name);
+            for field in &msg.fields {
+                if local_msgs.contains(field.typ.as_str()) {
+                    let to = format!("proto:{}::{}", pf.path, field.typ);
+                    graph.add_edge(&from, &to);
+                }
+            }
+        }
+    }
+
     let total_messages: usize = parsed.iter().map(|f| f.messages.len()).sum();
     let total_enums: usize = parsed.iter().map(|f| f.enums.len()).sum();
     let total_services: usize = parsed.iter().map(|f| f.services.len()).sum();
@@ -436,20 +466,43 @@ pub fn openapi_schema(graph: &mut Graph, target: &str) -> String {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     if ext == "json" {
-        parse_openapi_json(&content)
+        parse_openapi_json(&content, graph, target)
     } else if ext == "yaml" || ext == "yml" {
-        parse_openapi_yaml(&content)
+        parse_openapi_yaml(&content, graph, target)
     } else {
         // Try JSON first, then YAML-like
         if content.trim_start().starts_with('{') {
-            parse_openapi_json(&content)
+            parse_openapi_json(&content, graph, target)
         } else {
-            parse_openapi_yaml(&content)
+            parse_openapi_yaml(&content, graph, target)
         }
     }
 }
 
-fn parse_openapi_json(content: &str) -> String {
+/// Heterogeneous-graph helper: register an OpenAPI path operation as both
+/// an OpenApiPath node (spec-level) and an HttpEndpoint (runtime-level).
+/// They share an edge from the schema source. Why both kinds? Spec paths
+/// are the design intent; HttpEndpoint nodes are the operational reality.
+/// Filtering by either kind serves different queries — `--type oapi` for
+/// "what does my spec say should exist", `--type endpoint` for "what's
+/// actually being called" (after web-blueprint or js-api-extract pass).
+fn register_openapi_path(graph: &mut Graph, source: &str, method: &str, path: &str, op_id: &str) {
+    let oapi_id = format!("oapi:{method} {path}");
+    graph.ensure_typed_node(&oapi_id, EntityKind::OpenApiPath, &[
+        ("method", method), ("path", path), ("operation_id", op_id),
+    ]);
+    // Also register as an HttpEndpoint so the same node participates in
+    // meta-paths against runtime-extracted endpoints.
+    let ep_id = format!("ep:{method}:{path}");
+    graph.ensure_typed_node(&ep_id, EntityKind::HttpEndpoint, &[
+        ("method", method), ("url", path), ("source", "openapi-schema"),
+    ]);
+    let src_id = format!("schema:openapi:{source}");
+    graph.add_edge(&src_id, &oapi_id);
+    graph.add_edge(&oapi_id, &ep_id);
+}
+
+fn parse_openapi_json(content: &str, graph: &mut Graph, source: &str) -> String {
     let val: serde_json::Value = match serde_json::from_str(content) {
         Ok(v) => v,
         Err(e) => return format!("Error parsing JSON: {e}"),
@@ -512,6 +565,11 @@ fn parse_openapi_json(content: &str) -> String {
                     }
                 }
             }
+        }
+
+        // Pass: register every spec path as an OpenApiPath + HttpEndpoint.
+        for (m, p, op) in &endpoint_list {
+            register_openapi_path(graph, source, m, p, op);
         }
 
         out.push_str(&format!("\nEndpoints: {}\n", endpoint_list.len()));
@@ -584,7 +642,7 @@ fn parse_openapi_json(content: &str) -> String {
     out
 }
 
-fn parse_openapi_yaml(content: &str) -> String {
+fn parse_openapi_yaml(content: &str, graph: &mut Graph, source: &str) -> String {
     // Basic YAML key-value parsing for OpenAPI — not a full YAML parser
     let lines: Vec<&str> = content.lines().collect();
     let mut out = String::new();
@@ -754,6 +812,11 @@ fn parse_openapi_yaml(content: &str) -> String {
     }
 
     if !endpoints.is_empty() {
+        // Pass: register every YAML-parsed path. operationId not extracted
+        // by the YAML parser (parse is line-based, not full AST), so empty.
+        for (m, p) in &endpoints {
+            register_openapi_path(graph, source, m, p, "");
+        }
         out.push_str(&format!("\nEndpoints: {}\n", endpoints.len()));
         out.push_str("Method distribution:\n");
         for (method, count) in &method_counts {
@@ -1051,6 +1114,27 @@ pub fn graphql_schema(graph: &mut Graph, target: &str) -> String {
     let mut parsed: Vec<GqlFile> = files.iter().filter_map(|f| parse_graphql_file(f)).collect();
     parsed.sort_by(|a, b| a.path.cmp(&b.path));
 
+    // Pass: register every GraphQL type as a typed node, with edges from
+    // schema source and `implements` edges to interfaces.
+    for gf in &parsed {
+        let pf_id = format!("schema:graphql:{}", gf.path);
+        for t in &gf.types {
+            let type_id = format!("gql:{}::{}", gf.path, t.name);
+            graph.ensure_typed_node(&type_id, EntityKind::GraphqlType, &[
+                ("name", &t.name),
+                ("kind", &t.kind),
+                ("file", &gf.path),
+                ("field_count", &t.fields.len().to_string()),
+            ]);
+            graph.add_edge(&pf_id, &type_id);
+            // implements: T → InterfaceType edges
+            for interface in &t.implements {
+                let to = format!("gql:{}::{}", gf.path, interface);
+                graph.add_edge(&type_id, &to);
+            }
+        }
+    }
+
     // Aggregate stats
     let mut type_count = 0usize;
     let mut input_count = 0usize;
@@ -1193,6 +1277,24 @@ pub fn docker_map(graph: &mut Graph, target: &str) -> String {
         for dep in &svc.depends_on {
             dep_edges.push((svc.name.clone(), dep.clone()));
         }
+    }
+
+    // Pass: register every service as a DockerService node + every depends_on
+    // as a service→service edge. After this, `pagerank --type docker`
+    // surfaces the most-depended-on services (typically databases / message
+    // queues) and `meta-path docker->docker` shows dependency chains.
+    let pf_id = format!("schema:docker:{target}");
+    for svc in &services {
+        let svc_id = format!("docker:{}", svc.name);
+        graph.ensure_typed_node(&svc_id, EntityKind::DockerService, &[
+            ("name", &svc.name),
+            ("image", &svc.image),
+            ("port_count", &svc.ports.len().to_string()),
+        ]);
+        graph.add_edge(&pf_id, &svc_id);
+    }
+    for (from, to) in &dep_edges {
+        graph.add_edge(&format!("docker:{from}"), &format!("docker:{to}"));
     }
 
     let mut out = String::new();
@@ -1728,6 +1830,45 @@ pub fn terraform_map(graph: &mut Graph, target: &str) -> String {
 
     if blocks.is_empty() {
         return "No Terraform blocks found.".to_string();
+    }
+
+    // Pass: register every Terraform block as a TerraformResource node.
+    // Cross-reference attributes that mention "<kind>.<block_type>.<name>"
+    // patterns (e.g. "aws_subnet.main.id") become edges between blocks.
+    let pf_id = format!("schema:terraform:{target}");
+    for block in &blocks {
+        let block_id = format!("tf:{}.{}.{}", block.kind, block.block_type, block.name);
+        graph.ensure_typed_node(&block_id, EntityKind::TerraformResource, &[
+            ("kind", &block.kind),
+            ("type", &block.block_type),
+            ("name", &block.name),
+            ("file", &block.file),
+        ]);
+        graph.add_edge(&pf_id, &block_id);
+    }
+    // Reference edges: scan each block's attribute values for tokens of
+    // the form `<type>.<name>.<field>` matching another block. This is
+    // approximate (proper Terraform reference resolution requires full
+    // HCL parse) but catches the common case.
+    let block_ids: std::collections::HashMap<String, String> = blocks.iter()
+        .map(|b| (format!("{}.{}", b.block_type, b.name),
+                  format!("tf:{}.{}.{}", b.kind, b.block_type, b.name)))
+        .collect();
+    for block in &blocks {
+        let from = format!("tf:{}.{}.{}", block.kind, block.block_type, block.name);
+        for value in block.attributes.values() {
+            for tok in value.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '.') {
+                let parts: Vec<&str> = tok.split('.').collect();
+                if parts.len() >= 2 {
+                    let key = format!("{}.{}", parts[0], parts[1]);
+                    if let Some(to) = block_ids.get(&key) {
+                        if to != &from {
+                            graph.add_edge(&from, to);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Categorize

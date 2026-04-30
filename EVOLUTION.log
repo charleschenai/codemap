@@ -368,3 +368,59 @@ unaffected.
     - Group / load / harmonic / percolation / current-flow centrality
       measures (NetworkX has these; we shipped the 4 most useful).
 
+[2026-04-30] feat: 5.3.0 — Leiden clustering + 3 more centrality + per-resource schemas
+  source: 5.2.0 explicitly deferred Leiden community detection, per-resource
+  schema-node registration, and additional centrality measures from the
+  NetworkX catalog. 5.3.0 closes those out.
+
+  Leiden community detection (actions/leiden.rs, ~330 LOC):
+    Faithful implementation of Traag, Waltman, van Eck 2019
+    "From Louvain to Leiden: guaranteeing well-connected communities"
+    (arXiv 1810.08473). Three phases: local moving (greedy modularity
+    gain), refinement (the Leiden secret sauce — within each Louvain
+    community, reset nodes to singletons and merge only when the
+    well-connectedness criterion is satisfied), aggregation. Iterates
+    until convergence.
+
+    `clusters` action default switched from LPA → Leiden. LPA still
+    available via `clusters lpa`. Two-clique synthetic test confirms
+    Leiden recovers the expected partition.
+
+  Centrality additions (actions/centrality.rs):
+    - harmonic   — Marchiori & Latora 2000. Σ 1/d. Handles disconnected
+                   graphs natively (unlike closeness).
+    - load       — Newman 2001. Variant of betweenness, useful as
+                   sanity check on graphs with parallel shortest paths.
+    - structural-holes — Burt 1992. Effective size + constraint.
+                   Identifies brokers between otherwise-disconnected
+                   groups. Aliased as `brokers`. In codebases this maps
+                   to integration files (frontend↔backend, business-
+                   logic↔persistence) — exactly the high blast-radius
+                   spots refactors should know about.
+
+    Centrality measure count: 4 → 7. Still 10 short of NetworkX's 17,
+    but the most-cited & most-useful are all in.
+
+  Per-resource schema node registration (actions/schemas.rs):
+    Closes the 5.2.0 deferral. Each schema action now produces typed
+    nodes for individual resources, not just the schema source:
+      - openapi-schema → OpenApiPath + HttpEndpoint per path operation,
+        with operation_id attrs. Spec paths and runtime endpoints share
+        a node, so meta-paths against either kind work.
+      - proto-schema   → ProtoMessage per message + intra-file field-type
+        composition edges (msg → msg when field type matches another
+        message in the same file).
+      - graphql-schema → GraphqlType per type + `implements` edges.
+      - docker-map     → DockerService per service + depends_on edges.
+        `pagerank --type docker` now finds the most-depended-on services.
+      - terraform-map  → TerraformResource per block + reference edges
+        (approximate via attribute-value tokenization — proper HCL
+        parsing deferred).
+
+  Tests: 72 passing (was 64 in 5.2.0). 8 new tests covering Leiden
+  recovery on a two-clique graph, default-algorithm dispatch, LPA
+  fallback, unknown-algo error path, harmonic + load + structural-
+  holes invocation, and the brokers alias.
+
+  Action count: 101 → 104 (+ harmonic, load, structural-holes).
+

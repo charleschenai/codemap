@@ -592,6 +592,105 @@ fn test_entity_kind_from_str_round_trip() {
     }
 }
 
+// ── Leiden community detection ───────────────────────────────────
+
+/// Build a graph with two clearly-separated cliques of 4 nodes each plus
+/// a single bridge edge. Leiden should recover the two cliques as
+/// communities; LPA also typically finds them but is not guaranteed.
+fn two_clique_graph() -> Graph {
+    let mut g = Graph {
+        nodes: HashMap::new(),
+        scan_dir: ".".to_string(),
+        cpg: None,
+    };
+    let make = |g: &mut Graph, id: &str| {
+        g.ensure_typed_node(id, EntityKind::SourceFile, &[]);
+    };
+    for i in 0..4 { make(&mut g, &format!("a{i}")); }
+    for i in 0..4 { make(&mut g, &format!("b{i}")); }
+
+    // Clique A: a0-a1-a2-a3 fully connected
+    for i in 0..4 {
+        for j in 0..4 {
+            if i != j { g.add_edge(&format!("a{i}"), &format!("a{j}")); }
+        }
+    }
+    // Clique B: b0-b1-b2-b3 fully connected
+    for i in 0..4 {
+        for j in 0..4 {
+            if i != j { g.add_edge(&format!("b{i}"), &format!("b{j}")); }
+        }
+    }
+    // Single bridge edge between cliques
+    g.add_edge("a0", "b0");
+    g
+}
+
+#[test]
+fn test_leiden_recovers_two_cliques() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "clusters", "leiden", false).unwrap();
+    assert!(result.contains("Leiden"), "missing Leiden header: {result}");
+    // Two communities of 4 nodes each.
+    assert!(result.contains("Cluster 1 (4 files"), "expected Cluster 1 of 4 files: {result}");
+    assert!(result.contains("Cluster 2 (4 files"), "expected Cluster 2 of 4 files: {result}");
+}
+
+#[test]
+fn test_clusters_default_is_leiden() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "clusters", "", false).unwrap();
+    assert!(result.contains("Leiden"), "default should be Leiden: {result}");
+}
+
+#[test]
+fn test_clusters_lpa_still_available() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "clusters", "lpa", false).unwrap();
+    // LPA's header is just "Clusters" without "Leiden"
+    assert!(result.contains("Clusters"));
+    assert!(!result.contains("Leiden"), "LPA shouldn't claim Leiden: {result}");
+}
+
+#[test]
+fn test_clusters_unknown_algo_errors_helpfully() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "clusters", "spectral", false).unwrap();
+    assert!(result.contains("Unknown clusters algo"), "should reject unknown: {result}");
+    assert!(result.contains("leiden"), "should suggest leiden: {result}");
+}
+
+#[test]
+fn test_harmonic_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "harmonic", "", false).unwrap();
+    assert!(result.contains("Harmonic Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_load_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "load", "", false).unwrap();
+    assert!(result.contains("Load Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_structural_holes_finds_brokers() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "structural-holes", "", false).unwrap();
+    assert!(result.contains("Structural Holes"), "missing header: {result}");
+    // a0 + b0 form the bridge between cliques, so they should rank
+    // among the highest brokers (they have non-redundant connections).
+    assert!(result.contains("a0") || result.contains("b0"), "expected a0/b0 as broker: {result}");
+}
+
+#[test]
+fn test_brokers_alias() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "brokers", "", false).unwrap();
+    assert!(result.contains("Structural Holes"), "brokers should alias to structural-holes: {result}");
+}
+
 // ── web-dom truncated-tag regression ──────────────────────────────
 //
 // 5.1.4: extract_buttons/forms/tables/navs in actions/reverse/web.rs used

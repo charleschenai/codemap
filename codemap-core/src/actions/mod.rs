@@ -15,6 +15,7 @@ pub mod ml;
 pub mod composite;
 pub mod centrality;
 pub mod meta_path;
+pub mod leiden;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -52,7 +53,16 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "pagerank" => Ok(graph_theory::pagerank(graph)),
         "hubs" => Ok(graph_theory::hubs(graph)),
         "bridges" => Ok(graph_theory::bridges(graph)),
-        "clusters" => Ok(graph_theory::clusters(graph)),
+        // clusters: target chooses the algorithm. Default = leiden (Traag
+        // et al. 2019 — guarantees well-connected communities). Pass
+        // "lpa" for the legacy label-propagation behavior, "louvain" is
+        // currently aliased to leiden (full standalone Louvain may be
+        // separate in 5.3 if there's demand).
+        "clusters" => Ok(match target.trim().to_ascii_lowercase().as_str() {
+            "" | "leiden" | "louvain" => leiden::clusters_leiden(graph),
+            "lpa" | "label-propagation" => graph_theory::clusters(graph),
+            other => format!("Unknown clusters algo '{other}' (try: leiden, lpa)"),
+        }),
         "islands" => Ok(graph_theory::islands(graph)),
         "dot" => Ok(graph_theory::dot(graph, target)),
         "mermaid" => Ok(graph_theory::mermaid(graph, target)),
@@ -139,6 +149,9 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "eigenvector" => Ok(centrality::eigenvector(graph, &centrality::parse_kinds(target))),
         "katz"        => Ok(centrality::katz(graph, &centrality::parse_kinds(target))),
         "closeness"   => Ok(centrality::closeness(graph, &centrality::parse_kinds(target))),
+        "harmonic"    => Ok(centrality::harmonic(graph, &centrality::parse_kinds(target))),
+        "load"        => Ok(centrality::load_centrality(graph, &centrality::parse_kinds(target))),
+        "structural-holes" | "brokers" => Ok(centrality::structural_holes(graph, &centrality::parse_kinds(target))),
         // Meta-Path (1) — heterogeneous graph traversal. Target is the
         // arrow-separated kind sequence: "source->endpoint" etc.
         "meta-path" | "metapath" => Ok(meta_path::meta_path(graph, target)),
