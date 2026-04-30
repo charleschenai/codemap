@@ -20,6 +20,7 @@ pub mod algorithms;
 pub mod link_prediction;
 pub mod community;
 pub mod exports_format;
+pub mod temporal;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -210,6 +211,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // Meta-Path (1) — heterogeneous graph traversal. Target is the
         // arrow-separated kind sequence: "source->endpoint" etc.
         "meta-path" | "metapath" => Ok(meta_path::meta_path(graph, target)),
+        // Temporal (5.10.0) — git-history-aware graph evolution
+        "node-lifespan"        => Ok(temporal::node_lifespan(graph, target)),
+        "edge-churn"           => Ok(temporal::edge_churn(graph, target)),
+        "community-evolution" | "comm-evolution" => Ok(temporal::community_evolution(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

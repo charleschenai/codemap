@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 96 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 142 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.9.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.10.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -34,13 +34,15 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **139 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **142 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
 - **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, and ML model files — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 20 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
 - **11 centrality measures (5.2.0+).** PageRank, HITS, betweenness (Brandes 2001), eigenvector, Katz, closeness, harmonic (Marchiori-Latora 2000, handles disconnected graphs), load (Newman 2001), structural-holes / brokers (Burt 1992 — finds nodes that broker between groups), VoteRank (Zhang 2016 — top-k spreaders), group centrality, percolation (Piraveenan 2013), current-flow betweenness (Newman 2005). Each accepts a kind filter for slicing the heterogeneous graph.
 
 - **Leiden community detection (5.3.0+).** Faithful Traag-Waltman-van Eck 2019 implementation: local moving + refinement (the "well-connected-subset" criterion that distinguishes Leiden from Louvain) + aggregation. Default for `clusters`. Auto-named by longest common path prefix or homogeneous-kind: `Cluster 1 [src/algo/*]` / `Cluster 1 [endpoint cluster]`.
+
+- **Temporal graph analysis (5.10.0+).** `node-lifespan` bucketizes the codebase by first-seen / last-modified age and surfaces young hotspots, active veterans, and ancient stable files. `edge-churn` counts co-change commits per import edge to separate true coupling from vestigial imports. `community-evolution` reconstructs cluster memberships at N evenly-spaced historical snapshots (filtering each to nodes that existed by then) and detects BIRTH / DEATH / SPLIT / MERGE events via Jaccard. All three operate on a single `git log` pass — no checkouts, no reparse loops.
 
 - **Binary reverse engineering.** 11 actions for cracking compiled Windows binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
 
@@ -153,7 +155,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 139 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 142 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -328,6 +330,16 @@ Reverse-engineer web applications from captured traffic and saved pages.
 | `web-sitemap <html-dir>` | Build sitemap from HTML files — page relationships, hub pages, dead ends, external link domains. |
 | `web-blueprint <har> [html-dir]` | Combine HAR + HTML into a scraper blueprint — auth recipe, API endpoints, data table selectors, pagination patterns, rate limit hints. |
 | `js-api-extract <file\|dir>` | Parse JavaScript bundles for API endpoints — fetch/axios/XHR calls, base URL constants, header configurations, auth patterns. Automates "bundle archaeology." |
+
+### Temporal (3)
+
+Treat git history as a sequence of graph states. Single `git log` pass — no checkouts.
+
+| Action | What it does |
+|--------|-------------|
+| `node-lifespan` | Per-file first-seen / last-modified / commit count. Bucketizes the codebase by age. Surfaces young hotspots (high commits/day, < 1y old), active veterans (> 1y but touched recently), and ancient stable files (> 1y, dormant > 90d). |
+| `edge-churn [N=500]` | For every import edge in the graph, count co-change commits across the last N. High co-change = true coupling. Zero co-change with both files having history = vestigial import. |
+| `community-evolution [N=4]` | Run LPA clustering at N evenly-spaced snapshots between the first commit and HEAD (filtering each snapshot to nodes that existed by then). Compares cluster memberships across snapshots via Jaccard to detect BIRTH / DEATH / SPLIT / MERGE events. |
 
 ---
 
@@ -595,7 +607,7 @@ codemap/
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) -> String (139 actions)
+│           ├── mod.rs             # dispatch(action, target) -> String (142 actions)
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure

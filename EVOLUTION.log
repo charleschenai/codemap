@@ -825,3 +825,55 @@ unaffected.
 
   Action count: 131 → 139 (+8).
 
+
+[2026-04-30] feat: 5.10.0 — Tier 2 temporal graph analysis (git history)
+  source: post-5.9.0 next gap was the unique-to-codemap angle —
+  no other code-graph tool reasons about graph evolution over
+  git history. Closing that gap with a self-contained module.
+
+  Three new actions (actions/temporal.rs, ~440 LOC):
+    - node-lifespan — per-file first-seen / last-modified / commit
+      count from a single `git log --name-status -M` pass.
+      Bucketizes files into last-week / last-month / last-quarter /
+      last-year / >1y. Surfaces three lists: young hotspots
+      (high commits/day, < 1y old), active veterans (> 1y old AND
+      touched < 30d ago), ancient stable (> 1y, dormant > 90d).
+      Renames followed via -M flag.
+    - edge-churn [N=500] — for every import edge in the current
+      graph, count co-change commits across the last N. Uses
+      file→commit-set inverted index for O(|edges| × avg-set-size)
+      runtime. Ranks edges by co-change count; flags zero-churn
+      edges where both endpoints have history (vestigial import).
+    - community-evolution [N=4] — virtual snapshot reconstruction:
+      runs LPA clustering at N evenly-spaced snapshots between the
+      first commit and HEAD, where each snapshot is the current
+      graph filtered to nodes whose first_seen ≤ cutoff. Compares
+      consecutive snapshots via Jaccard on cluster membership and
+      emits BIRTH / DEATH / SPLIT / MERGE events. No git checkouts
+      or reparses — virtual rewinding via lifespan timestamps.
+
+  Design choices:
+    - Single git-log pass for histories (vs per-file `git log`
+      invocations) keeps node-lifespan O(commits) not O(files ×
+      commits). Same trick for edge-churn via file→commit-set.
+    - Date formatting: Howard Hinnant's civil_from_days algorithm
+      (no chrono dep). 5 verified test cases including pre-epoch.
+    - Snapshot cutoffs use first-seen ≤ cutoff filter on the
+      current graph instead of `git checkout` + reparse. Trades
+      perfect historical fidelity for 100× speedup; for community
+      tracking the approximation is fine since clusters reflect
+      structural relationships in the current code, not historical
+      LOC counts.
+
+  Tests: 111 passing (was 108). +3 unit tests in temporal::tests
+  covering fmt_date civil-from-days, jaccard symmetry, and LPA
+  separation of disconnected components.
+
+  Smoke-tested live:
+    - codemap-on-itself: 41 files all "last week" (repo is 7d old).
+    - charlie-code: 1953 files, identifies install.sh as top young
+      hotspot (2.965 commits/day), 105 vestigial edges out of 785.
+    - pgwiki: 47 files spanning 21 days, 17-commit hotspot on
+      src/server/layout.ts.
+
+  Action count: 139 → 142 (+3).
