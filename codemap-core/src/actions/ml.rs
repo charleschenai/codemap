@@ -1106,94 +1106,287 @@ pub fn pyc_info(graph: &mut Graph, target: &str) -> String {
     }
 }
 
-/// Best-effort code-object scanner. Python's marshal format uses
-/// type byte 'c' (0x63) for full code objects (CPython < 3.5) and
-/// 'C' (0x43) for "small" code objects (3.5+ short form). After the
-/// type byte comes a series of fixed-size header fields followed by
-/// nested marshal objects (consts/names/varnames/etc.) and finally
-/// the function name as a marshalled string.
+/// Recursive Python marshal walker. Replaces 5.15.1's heuristic byte-scan,
+/// which mistook the first nearby identifier-shaped string for the function
+/// name and routinely registered `co_varnames[0]` (= `self` / `cls`) as a
+/// function. This walker decodes the marshal stream properly, so `co_name`
+/// is read from its actual position in the CODE-object layout.
 ///
-/// We don't fully parse the recursive structure (that's a several-
-/// hundred-LOC walker). Instead, we use a heuristic: scan for the
-/// type byte at positions where the next 4 bytes look like a
-/// plausible argcount (0..=64), and try to extract the readable
-/// function name by looking for short-string type bytes nearby.
-///
-/// This produces useful but incomplete output: typically catches
-/// most module-level + class-level function names. PyArmor /
-/// Cython-cythonized / heavily-obfuscated pyc may miss some.
+/// Walks the module-level CODE object recursively; nested CODE objects
+/// embedded in `co_consts` surface inner functions, methods, and class
+/// bodies. Lambdas and comprehensions appear as `<lambda>` / `<listcomp>` /
+/// etc. and are filtered out (synthetic compiler names — not user-named).
 fn walk_pyc_code_objects_for_graph(graph: &mut crate::types::Graph, target: &str, data: &[u8]) {
     use crate::types::EntityKind;
     let module_id = format!("model:{target}");
-    if data.len() < 32 { return; }
+    if data.len() < 17 { return; }
 
-    // Skip pyc header (16 bytes for Python 3.7+)
-    let mut found = 0usize;
-    let mut i = 16;
-    while i < data.len() && found < 2000 {
-        let type_byte = data[i] & 0x7F;
-        if type_byte != 0x63 && type_byte != 0x43 { i += 1; continue; }
+    let magic = u16::from_le_bytes([data[0], data[1]]);
+    let layout = pyc_magic_to_layout(magic);
+    if layout == PycLayout::Unknown { return; }
 
-        // Code object header layout (CPython 3.8+):
-        //   argcount       u32
-        //   posonlyargcount u32 (3.8+)
-        //   kwonlyargcount  u32
-        //   stacksize       u32   (older) / dropped in 3.11
-        //   flags           u32
-        // Plausibility check on argcount: 0..=64
-        if i + 5 > data.len() { break; }
-        let arg = u32::from_le_bytes([data[i+1], data[i+2], data[i+3], data[i+4]]);
-        if arg > 64 { i += 1; continue; }
+    // PEP 3147 (3.3+) header is 12 bytes; PEP 552 (3.7+) extends to 16.
+    // 2.x predates PEP 3147 and uses an 8-byte header (magic + timestamp).
+    let header_size = if layout == PycLayout::Py27 { 8 } else { 16 };
+    if data.len() <= header_size { return; }
 
-        // Look ahead for a short-string name within ~256 bytes.
-        // The function name appears after the bytecode + consts +
-        // names tuples; we scan for a 'Z' (interned short string)
-        // or 'z' (short ASCII) or 'a' (ASCII) marker that decodes
-        // as a valid Python identifier.
-        let scan_start = i + 1;
-        let scan_end = (scan_start + 4096).min(data.len());
-        let mut name = String::new();
-        let mut p = scan_start;
-        while p < scan_end {
-            let tb = data[p] & 0x7F;
-            if (tb == 0x5A || tb == 0x7A || tb == 0x61) && p + 2 < data.len() {
-                // 1-byte length follows
-                let len = data[p + 1] as usize;
-                if len >= 2 && len <= 64 && p + 2 + len <= data.len() {
-                    let candidate = &data[p + 2..p + 2 + len];
-                    if candidate.iter().all(|&b| b == b'_' || b.is_ascii_alphanumeric())
-                        && candidate[0].is_ascii_alphabetic() {
-                        // Common code-object name; record it
-                        name = String::from_utf8_lossy(candidate).to_string();
-                        // Don't accept generic ones like "<module>" — those
-                        // come earlier; we want concrete function names.
-                        if !name.is_empty() && !name.starts_with('<') {
-                            break;
-                        }
-                        name.clear();
-                    }
-                }
-            }
-            p += 1;
-        }
+    let mut funcs: Vec<(String, usize, u32)> = Vec::new();
+    let mut reader = MarshalReader::new(&data[header_size..], layout, header_size);
+    let _ = reader.read_value(&mut funcs);
 
-        if name.is_empty() { i += 1; continue; }
-        let func_id = format!("bin_func:pyc:{target}::{found}");
-        let arg_str = arg.to_string();
-        let pos_str = format!("{i:#x}");
+    for (i, (name, offset, argcount)) in funcs.into_iter().enumerate().take(2000) {
+        // Skip synthetic CPython names (`<module>`, `<lambda>`, `<listcomp>`,
+        // `<genexpr>`, `<dictcomp>`, `<setcomp>`) — not user-defined functions.
+        if name.starts_with('<') { continue; }
+        let func_id = format!("bin_func:pyc:{target}::{i}");
+        let arg_str = argcount.to_string();
+        let off_str = format!("{offset:#x}");
         graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
             ("name", &name),
             ("binary_format", "pyc"),
             ("kind_detail", "function"),
             ("argcount", &arg_str),
-            ("offset", &pos_str),
+            ("offset", &off_str),
         ]);
         graph.add_edge(&module_id, &func_id);
-        found += 1;
-        // Skip past this code object's plausible header + a few
-        // bytes of body before scanning again, to reduce duplicate
-        // detections of the same function.
-        i += 32;
+    }
+}
+
+/// CODE-object header layout — varies by Python release.
+/// See CPython `Python/marshal.c` `r_object()` for the canonical reader.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PycLayout {
+    Py27,         // argcount, nlocals, stacksize, flags                                       (4 u32)
+    Py34To37,     // argcount, kwonlyargcount, nlocals, stacksize, flags                       (5 u32)
+    Py38To310,    // argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize, flags      (6 u32)
+    Py311Plus,    // argcount, posonlyargcount, kwonlyargcount, stacksize, flags + qualname/exctab (5 u32)
+    Unknown,
+}
+
+fn pyc_magic_to_layout(magic: u16) -> PycLayout {
+    match magic {
+        62211 => PycLayout::Py27,
+        3250..=3399 => PycLayout::Py34To37,   // 3.4 - 3.7
+        3400..=3439 => PycLayout::Py38To310,  // 3.8 - 3.10
+        3440..=3699 => PycLayout::Py311Plus,  // 3.11+
+        _ => PycLayout::Unknown,
+    }
+}
+
+/// Lightweight marshal value. We only materialize what's needed to track
+/// back-references and capture function names — every other payload is
+/// consumed-and-discarded to keep memory + cycles down on large pycs.
+#[derive(Clone)]
+enum MV {
+    Atom,
+    Str(String),
+}
+
+struct MarshalReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+    /// Reference table — Python 3.4+ uses FLAG_REF (0x80) on a type byte to
+    /// indicate "store this object so a later TYPE_REF can point back to it".
+    /// Slot ordering must be preserved even for non-string objects.
+    refs: Vec<MV>,
+    layout: PycLayout,
+    /// Offset of `data` inside the original pyc file (for offset reporting).
+    base_offset: usize,
+    depth: usize,
+}
+
+const MAX_MARSHAL_DEPTH: usize = 256;
+
+impl<'a> MarshalReader<'a> {
+    fn new(data: &'a [u8], layout: PycLayout, base_offset: usize) -> Self {
+        Self {
+            data, pos: 0,
+            refs: Vec::with_capacity(256),
+            layout, base_offset, depth: 0,
+        }
+    }
+
+    fn read_u8(&mut self) -> Option<u8> {
+        let b = *self.data.get(self.pos)?;
+        self.pos += 1;
+        Some(b)
+    }
+
+    fn read_u32(&mut self) -> Option<u32> {
+        if self.pos + 4 > self.data.len() { return None; }
+        let v = u32::from_le_bytes([
+            self.data[self.pos], self.data[self.pos + 1],
+            self.data[self.pos + 2], self.data[self.pos + 3],
+        ]);
+        self.pos += 4;
+        Some(v)
+    }
+
+    fn skip(&mut self, n: usize) -> Option<()> {
+        let end = self.pos.checked_add(n)?;
+        if end > self.data.len() { return None; }
+        self.pos = end;
+        Some(())
+    }
+
+    fn read_str(&mut self, n: usize) -> Option<String> {
+        let end = self.pos.checked_add(n)?;
+        if end > self.data.len() { return None; }
+        let s = String::from_utf8_lossy(&self.data[self.pos..end]).into_owned();
+        self.pos = end;
+        Some(s)
+    }
+
+    /// Read one marshal value. Records (name, offset, argcount) for every
+    /// CODE object encountered (recursively, so nested functions surface).
+    fn read_value(&mut self, out: &mut Vec<(String, usize, u32)>) -> Option<MV> {
+        if self.depth >= MAX_MARSHAL_DEPTH { return None; }
+        self.depth += 1;
+        let res = self.read_value_inner(out);
+        self.depth -= 1;
+        res
+    }
+
+    fn read_value_inner(&mut self, out: &mut Vec<(String, usize, u32)>) -> Option<MV> {
+        let type_byte = self.read_u8()?;
+        let has_ref_flag = type_byte & 0x80 != 0;
+        let typ = type_byte & 0x7F;
+
+        // Reserve refs slot up front — TYPE_REF indices are assigned in the
+        // order FLAG_REF values appear in the stream, so the slot must exist
+        // before we recurse into nested values.
+        let ref_slot = if has_ref_flag {
+            let idx = self.refs.len();
+            self.refs.push(MV::Atom);
+            Some(idx)
+        } else { None };
+
+        let value = match typ {
+            // Singletons / no payload
+            b'0' | b'N' | b'F' | b'T' | b'S' | b'.' => MV::Atom,
+            // 4-byte int
+            b'i' => { self.skip(4)?; MV::Atom }
+            // 8-byte int (deprecated)
+            b'I' => { self.skip(8)?; MV::Atom }
+            // ascii float (deprecated): 1-byte len + ascii digits
+            b'f' => { let n = self.read_u8()? as usize; self.skip(n)?; MV::Atom }
+            // 8-byte IEEE 754 binary float
+            b'g' => { self.skip(8)?; MV::Atom }
+            // ascii complex: two ascii floats back-to-back
+            b'x' => {
+                let n = self.read_u8()? as usize; self.skip(n)?;
+                let n = self.read_u8()? as usize; self.skip(n)?;
+                MV::Atom
+            }
+            // 16-byte binary complex
+            b'y' => { self.skip(16)?; MV::Atom }
+            // long: 4-byte signed digit count, abs(n) * 2 bytes payload
+            b'l' => {
+                let n = self.read_u32()? as i32;
+                self.skip(n.unsigned_abs() as usize * 2)?;
+                MV::Atom
+            }
+            // 4-byte length strings: TYPE_STRING/INTERNED/UNICODE/ASCII/ASCII_INTERNED
+            b's' | b't' | b'u' | b'a' | b'A' => {
+                let n = self.read_u32()? as usize;
+                if n > self.data.len().saturating_sub(self.pos) { return None; }
+                MV::Str(self.read_str(n)?)
+            }
+            // 1-byte length strings: TYPE_SHORT_ASCII / SHORT_ASCII_INTERNED
+            b'z' | b'Z' => {
+                let n = self.read_u8()? as usize;
+                MV::Str(self.read_str(n)?)
+            }
+            // back-reference into the refs table
+            b'r' => {
+                let idx = self.read_u32()? as usize;
+                match self.refs.get(idx) {
+                    Some(MV::Str(s)) => MV::Str(s.clone()),
+                    _ => MV::Atom,
+                }
+            }
+            // STRINGREF (Python 2): 4-byte index — we don't use it.
+            b'R' => { self.skip(4)?; MV::Atom }
+            // tuple, list, set, frozenset (4-byte length)
+            b'(' | b'[' | b'<' | b'>' => {
+                let n = self.read_u32()? as usize;
+                if n > self.data.len() { return None; }
+                for _ in 0..n {
+                    self.read_value(out)?;
+                }
+                MV::Atom
+            }
+            // small tuple (Python 3.4+, 1-byte length)
+            b')' => {
+                let n = self.read_u8()? as usize;
+                for _ in 0..n {
+                    self.read_value(out)?;
+                }
+                MV::Atom
+            }
+            // dict: alternating key/value pairs, terminated by TYPE_NULL (0x30)
+            b'{' => {
+                while self.pos < self.data.len() {
+                    if self.data[self.pos] == 0x30 {
+                        self.pos += 1;
+                        break;
+                    }
+                    self.read_value(out)?;  // key
+                    self.read_value(out)?;  // value
+                }
+                MV::Atom
+            }
+            // CODE OBJECT — the prize.
+            b'c' => {
+                let code_offset = self.base_offset + self.pos - 1;
+                let argcount = self.read_u32()?;
+                match self.layout {
+                    // Header tail (after argcount):
+                    PycLayout::Py27       => self.skip(4 * 3)?,  // nlocals, stacksize, flags
+                    PycLayout::Py34To37   => self.skip(4 * 4)?,  // kwonlyargcount, nlocals, stacksize, flags
+                    PycLayout::Py38To310  => self.skip(4 * 5)?,  // posonlyargcount, kwonlyargcount, nlocals, stacksize, flags
+                    PycLayout::Py311Plus  => self.skip(4 * 4)?,  // posonlyargcount, kwonlyargcount, stacksize, flags
+                    PycLayout::Unknown    => return None,
+                };
+                self.read_value(out)?;       // co_code (bytes)
+                self.read_value(out)?;       // co_consts — recurses into nested CODE objects
+                self.read_value(out)?;       // co_names
+
+                if self.layout == PycLayout::Py311Plus {
+                    self.read_value(out)?;   // co_localsplusnames
+                    self.read_value(out)?;   // co_localspluskinds
+                } else {
+                    self.read_value(out)?;   // co_varnames  ← v1 heuristic mistook this for co_name
+                    self.read_value(out)?;   // co_freevars
+                    self.read_value(out)?;   // co_cellvars
+                }
+
+                self.read_value(out)?;       // co_filename
+                let name_v = self.read_value(out)?;   // co_name — the actual function name
+                if self.layout == PycLayout::Py311Plus {
+                    self.read_value(out)?;   // co_qualname
+                }
+                self.skip(4)?;               // firstlineno
+                self.read_value(out)?;       // lnotab / linetable
+                if self.layout == PycLayout::Py311Plus {
+                    self.read_value(out)?;   // exceptiontable
+                }
+
+                if let MV::Str(name) = &name_v {
+                    out.push((name.clone(), code_offset, argcount));
+                }
+                MV::Atom
+            }
+            // Unknown type byte — bail out rather than mis-read the rest.
+            _ => return None,
+        };
+
+        if let Some(idx) = ref_slot {
+            if let MV::Str(_) = &value {
+                self.refs[idx] = value.clone();
+            }
+        }
+        Some(value)
     }
 }
 

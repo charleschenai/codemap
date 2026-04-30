@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.16.1"
+version = "5.16.2"
 edition = "2021"
 license = "MIT"
 description = "Heterogeneous-graph codebase analysis library — 163 actions across source AST, binary RE, schema parsing, supply chain, and recon-artifact ingestion"

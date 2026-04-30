@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.16.1 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.16.2 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -478,7 +478,7 @@ Read-only metadata extraction from common ML model file formats. No GPU, no infe
 | `gguf-info <file>` | Parse GGUF (llama.cpp / GGML) — metadata key-value, tensor shapes, quantization scheme, context length. |
 | `safetensors-info <file>` | Parse SafeTensors header — tensor list with shapes + dtype, total parameter count. |
 | `onnx-info <file>` | Parse ONNX protobuf — graph operators, inputs / outputs, opset version. |
-| `pyc-info <file>` | Parse Python `.pyc` — magic + version (Python 2.7 → 3.14), marshal-stream string extraction (URLs / SQL / paths from constants). **(5.15.1+)** Heuristic code-object scan registers each found function as a `BinaryFunction` node with `binary_format=pyc`. |
+| `pyc-info <file>` | Parse Python `.pyc` — magic + version (Python 2.7 → 3.14), marshal-stream string extraction (URLs / SQL / paths from constants). **(5.15.1+)** Code-object scan registers each found function as a `BinaryFunction` node with `binary_format=pyc`. **(5.16.2+)** Heuristic byte-scan replaced with a proper recursive marshal walker — version-aware CODE-object header decoding (Py 2.7 / 3.4-3.7 / 3.8-3.10 / 3.11+), reads `co_name` from its actual marshal position rather than guessing the first nearby identifier (which previously caught `co_varnames[0]` = `self`/`cls` as false positives). |
 | `cuda-info <file>` | Parse CUDA cubin / fatbin — SM target, kernel symbol names. |
 
 ### Supply chain / SBOM (5)

@@ -1554,3 +1554,50 @@ unaffected.
 
   Action count: 159 → 163 (+4: robots-parse, web-sitemap-parse,
   web-fingerprint, crt-parse). EntityKinds: still 28.
+
+
+[2026-04-30] fix: 5.16.2 — recursive marshal walker for pyc-info (#50)
+  source: pyc walker quality bug from 5.15.1 ship notes — the
+  v1 heuristic byte-scan registered the first identifier-shaped
+  marshal string after each CODE type byte as the function name.
+  In CPython marshal layout, `co_varnames` precedes `co_name`,
+  so the first identifier-shaped string is `co_varnames[0]` —
+  which is `self` for instance methods and `cls` for classmethods.
+  Result: most class methods got registered as a function literally
+  named "self".
+
+  Fix: replace the heuristic with a proper recursive marshal
+  walker (`MarshalReader` in src/actions/ml.rs). Reads each value
+  by type-byte dispatch (singletons, ints, floats, strings,
+  tuples, lists, dicts, sets, code objects, refs), tracks the
+  FLAG_REF (0x80) backref table, and recurses into co_consts
+  to surface nested code objects (inner functions, lambdas,
+  class bodies). For CODE objects, walks the version-specific
+  header (4 / 5 / 6 / 5 u32 fields for Py 2.7 / 3.4-3.7 /
+  3.8-3.10 / 3.11+ respectively) and reads `co_name` from its
+  actual marshal position.
+
+  Implementation: src/actions/ml.rs walk_pyc_code_objects_for_graph
+  rewritten (~210 LOC). New types: PycLayout enum + pyc_magic_to_layout
+  classifier + MV value enum + MarshalReader struct. Recursion
+  depth capped at 256 to bound pathological pyc inputs. Same
+  function signature, same node ID scheme, same node attrs —
+  drop-in replacement for the call site at pyc_info().
+
+  Live verification: cpython 3.12 compiles a 16-line sample.py
+  with one top-level function, a class with 4 methods (instance,
+  classmethod, staticmethod, dunder), and a closure-returning
+  factory. v1 walker would mis-register `self`/`cls`/arg names.
+  v2 walker registers exactly: top_level_function, Calculator,
+  __init__, add, factory, static_helper, make_doubler,
+  inner_doubler — 8 real names, zero false positives. Closure
+  via co_consts recursion also captured.
+
+  Tests: 187 passing (was 186). +1 regression test
+  test_pyc_marshal_walker_no_self_false_positive — compiles a
+  real .py via python3, runs pyc-info, asserts every expected
+  function name present + asserts forbidden arg names
+  (self/cls/a/b/x/n/value/base/multiplier) are NOT present.
+
+  Action count: 163 (unchanged — quality fix, not new action).
+  EntityKinds: 28 (unchanged).

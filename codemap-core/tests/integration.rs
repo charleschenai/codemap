@@ -1371,3 +1371,93 @@ fn test_cluster_label_homogeneous_kind() {
     let result = execute(&mut g, "clusters", "leiden", false).unwrap();
     assert!(result.contains("[ep cluster]"), "homogeneous-ep cluster should be labeled: {result}");
 }
+
+/// Regression test for the 5.15.1 heuristic false-positive: the byte-scan
+/// walker took the first identifier-shaped marshal string after a CODE
+/// type byte, which is `co_varnames[0]` (= `self` / `cls`) — not `co_name`.
+/// 5.16.2's recursive marshal walker reads co_name from its actual position.
+#[test]
+fn test_pyc_marshal_walker_no_self_false_positive() {
+    use std::process::Command;
+
+    if Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("python3 not available — skipping pyc marshal walker test");
+        return;
+    }
+
+    let tmp = std::env::temp_dir().join(format!("codemap-pyc-walker-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    let py_file = tmp.join("sample.py");
+    let py_source = "\
+def top_level_function(a, b):
+    return a + b
+
+class Calculator:
+    def __init__(self, base):
+        self.base = base
+
+    def add(self, x):
+        return self.base + x
+
+    @classmethod
+    def factory(cls, n):
+        return cls(n)
+
+    @staticmethod
+    def static_helper(value):
+        return value * 2
+
+def make_doubler():
+    multiplier = 2
+    def inner_doubler(x):
+        return x * multiplier
+    return inner_doubler
+";
+    fs::write(&py_file, py_source).unwrap();
+
+    let status = Command::new("python3")
+        .args(["-m", "py_compile", py_file.to_str().unwrap()])
+        .status()
+        .expect("python3 compile should run");
+    assert!(status.success(), "py_compile failed");
+
+    let pyc_dir = tmp.join("__pycache__");
+    let pyc = fs::read_dir(&pyc_dir).unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pyc"))
+        .expect("pyc file should exist after py_compile")
+        .path();
+
+    let mut g = Graph {
+        nodes: HashMap::new(),
+        scan_dir: ".".to_string(),
+        cpg: None,
+    };
+    let _ = execute(&mut g, "pyc-info", pyc.to_str().unwrap(), false).unwrap();
+
+    let names: Vec<String> = g.nodes.values()
+        .filter(|n| n.kind == EntityKind::BinaryFunction)
+        .filter_map(|n| n.attrs.get("name").cloned())
+        .collect();
+
+    eprintln!("pyc walker registered {} BinaryFunction nodes: {:?}", names.len(), names);
+
+    // Real function/class names must be present — tests recursion into class
+    // bodies and into co_consts (where nested code objects live).
+    for expected in ["top_level_function", "__init__", "add", "factory",
+                     "static_helper", "make_doubler", "inner_doubler", "Calculator"] {
+        assert!(names.iter().any(|n| n == expected),
+            "expected real name `{expected}` to be registered, got: {names:?}");
+    }
+
+    // The bug fix: arg / local names must NOT appear as function names.
+    // The v1 heuristic registered `self` because it was co_varnames[0].
+    for forbidden in ["self", "cls", "a", "b", "x", "n", "value", "base", "multiplier"] {
+        assert!(!names.iter().any(|n| n == forbidden),
+            "false positive: arg/local name `{forbidden}` registered as function: {names:?}");
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
