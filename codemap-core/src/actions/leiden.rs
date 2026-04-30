@@ -335,6 +335,44 @@ fn aggregate(
 /// LPA `clusters` action's output (cluster N, file count, internal
 /// coupling %, sample members) so users get the same UX with a better
 /// algorithm under the hood.
+/// Compute a human-readable label for a cluster: the longest common
+/// path-segment prefix of its member ids. e.g. `["src/algo/dijkstra.rs",
+/// "src/algo/astar.rs", "src/algo/bfs.rs"]` → `"src/algo/* "`. Returns
+/// empty string when nothing meaningful is shared (cross-domain clusters
+/// with mixed kinds tend to have no common prefix).
+fn cluster_label<'a, I: Iterator<Item = &'a str> + Clone>(members: I) -> String {
+    let first = match members.clone().next() {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    // Skip kind-prefixed nodes that aren't path-shaped (ep:, dll:, etc.)
+    // — we want clusters made of source paths.
+    if first.contains(':') && !first.contains('/') { return String::new(); }
+    let first_segs: Vec<&str> = first.split('/').collect();
+    let mut common_depth = first_segs.len();
+    for m in members {
+        let segs: Vec<&str> = m.split('/').collect();
+        let mut shared = 0;
+        for (a, b) in first_segs.iter().zip(segs.iter()) {
+            if a == b { shared += 1; } else { break; }
+        }
+        common_depth = common_depth.min(shared);
+        if common_depth == 0 { break; }
+    }
+    if common_depth == 0 { return String::new(); }
+    // We typically want the directory prefix, not the leaf filename. If
+    // all members share the FULL path (i.e. depth == segments), that's a
+    // single file — skip the label.
+    let prefix_segs = &first_segs[..common_depth];
+    if prefix_segs.is_empty() { return String::new(); }
+    let prefix = prefix_segs.join("/");
+    // Avoid noisy single-segment prefixes like "src" — only label when
+    // the prefix has a directory component (slash) or is long enough
+    // to be meaningful.
+    if !prefix.contains('/') && prefix.len() < 4 { return String::new(); }
+    format!("[{prefix}/*] ")
+}
+
 fn format_clusters(ids: &[String], partition: &[usize], graph: &Graph) -> String {
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for (i, &c) in partition.iter().enumerate() {
@@ -380,8 +418,9 @@ fn format_clusters(ids: &[String], partition: &[usize], graph: &Graph) -> String
             "100".to_string()
         };
 
-        lines.push(format!("Cluster {} ({} files, {}% internal coupling):",
-            i + 1, cluster.len(), cohesion));
+        let label = cluster_label(cluster.iter().map(|&v| ids[v].as_str()));
+        lines.push(format!("Cluster {} {}({} files, {}% internal coupling):",
+            i + 1, label, cluster.len(), cohesion));
         for &v in cluster.iter().take(8) {
             lines.push(format!("  {}", ids[v]));
         }

@@ -388,7 +388,8 @@ pub fn clusters(graph: &Graph) -> String {
             "100".to_string()
         };
 
-        lines.push(format!("Cluster {} ({} files, {}% internal coupling):", i + 1, cluster.len(), cohesion));
+        let label = lpa_cluster_label(cluster.iter().map(|s| s.as_str()));
+        lines.push(format!("Cluster {} {}({} files, {}% internal coupling):", i + 1, label, cluster.len(), cohesion));
         for f in cluster.iter().take(8) {
             lines.push(format!("  {}", f));
         }
@@ -729,4 +730,32 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         DotnetAssembly    => "pe",
         DotnetType        => "field",
     }
+}
+
+/// Same LCP-prefix labeler as Leiden's `cluster_label` — duplicated to
+/// avoid making the leiden module a public API surface for this helper.
+/// If both grow we can lift to a shared module.
+fn lpa_cluster_label<'a, I: Iterator<Item = &'a str> + Clone>(members: I) -> String {
+    let first = match members.clone().next() {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    if first.contains(':') && !first.contains('/') { return String::new(); }
+    let first_segs: Vec<&str> = first.split('/').collect();
+    let mut common_depth = first_segs.len();
+    for m in members {
+        let segs: Vec<&str> = m.split('/').collect();
+        let mut shared = 0;
+        for (a, b) in first_segs.iter().zip(segs.iter()) {
+            if a == b { shared += 1; } else { break; }
+        }
+        common_depth = common_depth.min(shared);
+        if common_depth == 0 { break; }
+    }
+    if common_depth == 0 { return String::new(); }
+    let prefix_segs = &first_segs[..common_depth];
+    if prefix_segs.is_empty() { return String::new(); }
+    let prefix = prefix_segs.join("/");
+    if !prefix.contains('/') && prefix.len() < 4 { return String::new(); }
+    format!("[{prefix}/*] ")
 }
