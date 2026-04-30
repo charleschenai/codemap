@@ -141,6 +141,65 @@ fn load_cache(dir: &str) -> Option<CacheData> {
     })
 }
 
+/// Promote URLs found by the parser into HttpEndpoint nodes with edges
+/// from each source file to its URLs. Skips localhost / 127.0.0.1 / file
+/// schemes (not real endpoints). Method defaults to "GET" since plain
+/// URL-string extraction has no method context — RE actions like
+/// js-api-extract and web-api can later upgrade specific endpoints with
+/// proper method/body info.
+fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
+    let mut new_endpoints: Vec<(String, String, String)> = Vec::new(); // (src_id, ep_id, url)
+    let skip_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "example.com", "example.org"];
+
+    for (src_id, node) in nodes.iter() {
+        if node.kind != crate::types::EntityKind::SourceFile { continue; }
+        for url in &node.urls {
+            if !url.starts_with("http://") && !url.starts_with("https://") { continue; }
+            // Skip URLs whose host matches a "demo / example / loopback" placeholder
+            // — those are not real production endpoints we want in the graph.
+            if skip_hosts.iter().any(|h| {
+                let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+                let after = &url[scheme_end..];
+                let host_end = after.find(|c: char| c == '/' || c == ':' || c == '?' || c == '#').unwrap_or(after.len());
+                &after[..host_end] == *h
+            }) { continue; }
+
+            let ep_id = format!("ep:GET:{url}");
+            new_endpoints.push((src_id.clone(), ep_id, url.clone()));
+        }
+    }
+
+    for (src_id, ep_id, url) in new_endpoints {
+        // Skip if this id is already claimed by an RE action (it might
+        // have a richer method like POST). Don't downgrade.
+        if nodes.contains_key(&ep_id) { continue; }
+        let mut attrs = HashMap::new();
+        attrs.insert("method".to_string(), "GET".to_string());
+        attrs.insert("url".to_string(), url.clone());
+        attrs.insert("source".to_string(), "scanner-url-promotion".to_string());
+        nodes.insert(ep_id.clone(), GraphNode {
+            id: ep_id.clone(),
+            imports: Vec::new(),
+            imported_by: vec![src_id.clone()],
+            urls: Vec::new(),
+            exports: Vec::new(),
+            lines: 0,
+            functions: Vec::new(),
+            data_flow: None,
+            bridges: Vec::new(),
+            kind: crate::types::EntityKind::HttpEndpoint,
+            attrs,
+            mtime: None,
+        });
+        // Add forward edge from source file to endpoint
+        if let Some(src_node) = nodes.get_mut(&src_id) {
+            if !src_node.imports.iter().any(|i| i == &ep_id) {
+                src_node.imports.push(ep_id);
+            }
+        }
+    }
+}
+
 /// Public hook: persist any RE-action mutations on `graph` back to cache
 /// after dispatch completes. Source-file entries are preserved (we only
 /// rewrite the typed_nodes section). Called once per CLI invocation by
@@ -552,6 +611,15 @@ fn scan_single_dir(
 
     // Resolve cross-language bridge edges
     resolve_bridge_edges(&mut nodes);
+
+    // Promote URL extractions from each source file to typed HttpEndpoint
+    // nodes with file→endpoint edges. The parser already extracts URLs
+    // into `node.urls`; this step makes them participate in the
+    // heterogeneous graph so `meta-path source->endpoint` and
+    // `pagerank --type endpoint` work on any codebase without needing
+    // to run a web-RE action first. URLs without an HTTP method default
+    // to GET — refined later if a HAR / JS-extract pass overlaps.
+    promote_urls_to_endpoints(&mut nodes);
 
     // Hydrate typed (non-source) nodes from cache. These were registered
     // by past RE-action invocations (pe-imports, web-blueprint, schema

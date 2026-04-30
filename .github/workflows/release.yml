@@ -54,7 +54,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 24 to clear the actions/checkout@v4 deprecation warnings
+          # GH started emitting (Node 20 EOL on runners 2026-09-16).
+          node-version: "24"
 
       - name: Build napi addon
         working-directory: codemap-napi

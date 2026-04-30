@@ -692,6 +692,67 @@ fn test_brokers_alias() {
 }
 
 #[test]
+fn test_scanner_promotes_urls_to_endpoint_nodes() {
+    // 5.4.0: source-code URLs become HttpEndpoint nodes during scan, so
+    // `meta-path source->endpoint` works on any codebase without first
+    // running a web-RE action (web-api, js-api-extract, etc.).
+    let tmp = std::env::temp_dir().join(format!("codemap-url-promote-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src/api.py"), concat!(
+        "import requests\n",
+        "def get_users():\n",
+        "    return requests.get('https://api.production.io/users')\n",
+        "def post_order():\n",
+        "    return requests.post('https://api.production.io/orders')\n",
+    )).unwrap();
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let result = execute(&mut g, "meta-path", "source->endpoint", false).unwrap();
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert!(result.contains("Paths: 2"), "expected 2 source→endpoint paths, got: {result}");
+    assert!(result.contains("api.production.io"), "endpoint url missing: {result}");
+}
+
+#[test]
+fn test_url_promotion_skips_localhost_and_examples() {
+    // localhost / 127.0.0.1 / example.com URLs should NOT become endpoint
+    // nodes — they're typically test fixtures or doc placeholders, and
+    // including them would pollute production-graph queries.
+    let tmp = std::env::temp_dir().join(format!("codemap-url-skip-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src/test.py"), concat!(
+        "fetch('http://localhost:8080/dev')\n",
+        "fetch('http://127.0.0.1/local')\n",
+        "fetch('https://example.com/placeholder')\n",
+        "fetch('https://real.api/endpoint')\n",
+    )).unwrap();
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+    let result = execute(&mut g, "meta-path", "source->endpoint", false).unwrap();
+    let _ = fs::remove_dir_all(&tmp);
+
+    // Only the real endpoint should land in the graph
+    assert!(result.contains("real.api"), "real endpoint missing: {result}");
+    assert!(!result.contains("localhost"), "localhost leaked into graph: {result}");
+    assert!(!result.contains("127.0.0.1"), "127.0.0.1 leaked into graph: {result}");
+    assert!(!result.contains("example.com"), "example.com leaked: {result}");
+}
+
+#[test]
 fn test_typed_node_cache_persists_across_invocations() {
     // 5.3.1: RE-action mutations must persist through a save→load round
     // trip so multi-step CLI workflows can compose passes. Simulates two

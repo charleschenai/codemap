@@ -487,3 +487,30 @@ unaffected.
   also applied across multiple files (touched binary.rs, ml.rs, pe.rs,
   schema.rs, web.rs, leiden.rs, scanner.rs, graph_theory.rs).
 
+[2026-04-30] feat: 5.4.0 — auto-promote source-code URLs to HttpEndpoint nodes
+  source: meta-path source->endpoint required running a web-RE action
+  first (web-api / js-api-extract / web-blueprint) to populate
+  HttpEndpoint nodes. The parser already extracts URL strings from
+  source code into GraphNode.urls — they were just sitting there
+  unconnected to the graph.
+
+  scanner::promote_urls_to_endpoints: post-walk pass that converts each
+  source file's URL list into typed HttpEndpoint nodes with edges from
+  the source file. Default method is GET (URL-string extraction lacks
+  method context); web-RE actions can later overlap with richer methods.
+
+  Filtering: localhost / 127.0.0.1 / 0.0.0.0 / example.com / example.org
+  are skipped (test fixtures + doc placeholders, not real endpoints).
+
+  Result: `meta-path source->endpoint` works on any Python / JS / Go /
+  Rust / etc. codebase out of the box. No web-RE action required.
+  Smoke test on src/api.py with 2 requests.get/post URLs returned 2
+  paths immediately.
+
+  Tests: 75 passing (was 73). +2 new tests covering URL promotion and
+  the localhost/example skip-filter.
+
+  Also: actions/setup-node@v4 bumped to node-version 24 in release.yml
+  to silence the Node 20 deprecation warnings GitHub Actions emits on
+  every run.
+
