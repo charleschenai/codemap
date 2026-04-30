@@ -1599,8 +1599,24 @@ pub fn dotnet_meta(graph: &mut Graph, target: &str) -> String {
     ]);
     graph.add_edge(&format!("pe:{target}"), &asm_id);
 
-    match parse_dotnet_metadata(&data) {
-        Ok(info) => info,
+    match parse_dotnet_metadata_with_methods(&data) {
+        Ok((info, methods)) => {
+            // 5.15.2: register each MethodDef as a BinaryFunction node
+            // hanging off the DotnetAssembly. Reuses the BinaryFunction
+            // EntityKind via attrs["binary_format"]="dotnet".
+            for (i, (name, rva)) in methods.iter().enumerate() {
+                let func_id = format!("bin_func:dotnet:{target}::{i}");
+                let rva_str = format!("{:#x}", rva);
+                graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                    ("name", name),
+                    ("binary_format", "dotnet"),
+                    ("kind_detail", "method"),
+                    ("rva", &rva_str),
+                ]);
+                graph.add_edge(&asm_id, &func_id);
+            }
+            info
+        }
         Err(e) => format!("Not a .NET assembly or parse error: {e}"),
     }
 }
@@ -1669,6 +1685,12 @@ fn find_clr_header(data: &[u8]) -> Result<(usize, Vec<Section>, bool), String> {
 }
 
 fn parse_dotnet_metadata(data: &[u8]) -> Result<String, String> {
+    let (out, _methods) = parse_dotnet_metadata_with_methods(data)?;
+    Ok(out)
+}
+
+fn parse_dotnet_metadata_with_methods(data: &[u8]) -> Result<(String, Vec<(String, u64)>), String> {
+    let mut method_records: Vec<(String, u64)> = Vec::new();
     let (clr_offset, sections, _is_pe64) = find_clr_header(data)?;
 
     // Read CLR header (72 bytes)
@@ -1981,12 +2003,14 @@ fn parse_dotnet_metadata(data: &[u8]) -> Result<String, String> {
                                     if row_start + rs > data.len() { break; }
 
                                     // MethodDef: RVA(4) + ImplFlags(2) + Flags(2) + Name(str) + Signature(blob) + ParamList
+                                    let rva = read_u32(data, row_start)? as u64;
                                     let name_pos = row_start + 4 + 2 + 2;
                                     let (name_idx, _) = read_string_idx(name_pos)?;
                                     let method_name = read_string_from_heap(name_idx);
 
                                     if !method_name.is_empty() {
                                         out.push_str(&format!("  {}\n", method_name));
+                                        method_records.push((method_name, rva));
                                     }
                                 }
                                 if methoddef_count > 200 {
@@ -2111,7 +2135,7 @@ fn parse_dotnet_metadata(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    Ok((out, method_records))
 }
 
 /// Read a compressed unsigned integer from .NET metadata (1, 2, or 4 bytes).

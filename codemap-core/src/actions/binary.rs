@@ -1039,12 +1039,25 @@ pub fn java_class(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
     match parse_java_class(&data) {
-        Ok(info) => info,
+        Ok((info, method_names)) => {
+            // 5.15.2: register each method as a BinaryFunction node.
+            let class_id = format!("jclass:{target}");
+            for (i, name) in method_names.iter().enumerate() {
+                let func_id = format!("bin_func:jclass:{target}::{i}");
+                graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                    ("name", name),
+                    ("binary_format", "jvm"),
+                    ("kind_detail", "method"),
+                ]);
+                graph.add_edge(&class_id, &func_id);
+            }
+            info
+        }
         Err(e) => format!("Java class parse error: {e}"),
     }
 }
 
-fn parse_java_class(data: &[u8]) -> Result<String, String> {
+fn parse_java_class(data: &[u8]) -> Result<(String, Vec<String>), String> {
     if data.len() < 10 {
         return Err("File too small for Java class".to_string());
     }
@@ -1217,7 +1230,7 @@ fn parse_java_class(data: &[u8]) -> Result<String, String> {
 
     // Fields
     if pos + 2 > data.len() {
-        return Ok(out);
+        return Ok((out, Vec::new()));
     }
     let fields_count = read_u16_be(data, pos)? as usize;
     pos += 2;
@@ -1269,7 +1282,7 @@ fn parse_java_class(data: &[u8]) -> Result<String, String> {
 
     // Methods
     if pos + 2 > data.len() {
-        return Ok(out);
+        return Ok((out, Vec::new()));
     }
     let methods_count = read_u16_be(data, pos)? as usize;
     pos += 2;
@@ -1314,7 +1327,8 @@ fn parse_java_class(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    let method_names: Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
+    Ok((out, method_names))
 }
 
 fn parse_jar(target: &str) -> String {

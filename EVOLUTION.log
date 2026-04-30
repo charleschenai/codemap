@@ -1403,3 +1403,36 @@ unaffected.
   Action count: 158 (no new actions; pyc-info just got smarter).
   Tests: 177 still passing (no new unit tests; verification is
   the live smoke run).
+
+[2026-04-30] feat: 5.15.2 — JVM + .NET CIL method-level extraction (#39 + #40)
+  source: 5.14.0 tasks #39 + #40 — both extend existing actions
+  (java-class, dotnet-meta) which already parse the metadata
+  needed; just need to register methods as graph nodes.
+
+  Same pattern as 5.13.1 (WASM) and 5.15.1 (pyc): reuse the
+  BinaryFunction EntityKind from 5.13.0, attach attrs[
+  "binary_format"] = "jvm" / "dotnet" to differentiate. Each method
+  becomes a bin_func node hanging off its parent (jclass / asm).
+
+  - JVM (binary.rs::java_class): refactor parse_java_class to
+    return method names alongside the report. Each MethodInfo
+    becomes a BinaryFunction node with binary_format=jvm,
+    kind_detail=method.
+  - .NET (reverse/pe.rs::dotnet_meta): new
+    parse_dotnet_metadata_with_methods returns method records
+    (name, RVA) alongside the existing report. Each MethodDef
+    table row becomes a BinaryFunction node with binary_format=
+    dotnet, kind_detail=method, attrs["rva"]=method body RVA.
+
+  Call-graph edges deferred: extracting bytecode-level call edges
+  requires walking each method's Code attribute (JVM) or IL stream
+  (.NET CIL). For v1, just exposing methods as graph nodes is
+  enough to enable meta-path "jclass->bin_func" / "asm->bin_func"
+  queries — the structural visibility was the main missing piece.
+  Call graph for managed runtimes ships in a follow-up.
+
+  Tests: 177 still passing (no new tests; verification via
+  existing dotnet-meta + java-class integration paths).
+
+  Action count: 158 (no new actions; java-class and dotnet-meta
+  just register more nodes now).
