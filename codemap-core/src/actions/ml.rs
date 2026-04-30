@@ -676,7 +676,7 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
 
     // Display tensors
     if !tensors.is_empty() {
-        out.push_str(&format!("\n\u{2500}\u{2500} Tensors \u{2500}\u{2500}\n"));
+        out.push_str(&"\n\u{2500}\u{2500} Tensors \u{2500}\u{2500}\n".to_string());
         let max_display = 50;
         for (i, t) in tensors.iter().enumerate() {
             if i >= max_display {
@@ -727,7 +727,7 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
     // Show metadata if present
     if let Some(meta) = header_obj.get("__metadata__").and_then(|v| v.as_object()) {
         if !meta.is_empty() {
-            out.push_str(&format!("\n\u{2500}\u{2500} Metadata \u{2500}\u{2500}\n"));
+            out.push_str(&"\n\u{2500}\u{2500} Metadata \u{2500}\u{2500}\n".to_string());
             for (k, v) in meta.iter().take(20) {
                 let val = v.as_str().unwrap_or(&v.to_string()).to_string();
                 let display_v = if val.len() > 80 {
@@ -1224,9 +1224,9 @@ fn categorize_string(s: &str, constants: &mut Vec<String>, names: &mut Vec<Strin
     let is_identifier = s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.');
     if is_identifier && !s.starts_with('.') && !s.ends_with('.') {
         // Common Python standard library modules or looks like a name
-        if s.contains('.') || s.chars().next().map_or(false, |c| c.is_lowercase()) {
+        if s.contains('.') || s.chars().next().is_some_and(|c| c.is_lowercase()) {
             names.push(s.to_string());
-        } else if s.chars().next().map_or(false, |c| c.is_uppercase()) {
+        } else if s.chars().next().is_some_and(|c| c.is_uppercase()) {
             names.push(s.to_string());
         } else {
             constants.push(format!("\"{}\"", s));
@@ -1330,7 +1330,7 @@ fn sm_arch_name(sm: u32) -> &'static str {
         20 | 21 => "Fermi",
         30 | 32 | 35 | 37 => "Kepler",
         50 | 52 | 53 => "Maxwell",
-        60 | 61 | 62 => "Pascal",
+        60..=62 => "Pascal",
         70 | 72 => "Volta",
         75 => "Turing",
         80 | 86 | 87 => "Ampere",
@@ -1540,19 +1540,16 @@ fn parse_cuda(data: &[u8], target: &str) -> Result<String, String> {
             if elf_end > elf_start {
                 let elf_data = &data[elf_start..elf_end];
                 if elf_data.len() >= 4 && elf_data[0] == 0x7F && elf_data[1] == b'E' {
-                    match extract_cuda_kernels_from_elf(elf_data) {
-                        Ok((kernels, _)) => {
-                            if !kernels.is_empty() {
-                                out.push_str(&format!("  Kernels ({}):\n", kernels.len()));
-                                for k in kernels.iter().take(20) {
-                                    out.push_str(&format!("    {k}\n"));
-                                }
-                                if kernels.len() > 20 {
-                                    out.push_str(&format!("    ... and {} more\n", kernels.len() - 20));
-                                }
+                    if let Ok((kernels, _)) = extract_cuda_kernels_from_elf(elf_data) {
+                        if !kernels.is_empty() {
+                            out.push_str(&format!("  Kernels ({}):\n", kernels.len()));
+                            for k in kernels.iter().take(20) {
+                                out.push_str(&format!("    {k}\n"));
+                            }
+                            if kernels.len() > 20 {
+                                out.push_str(&format!("    ... and {} more\n", kernels.len() - 20));
                             }
                         }
-                        Err(_) => {}
                     }
                 }
             }

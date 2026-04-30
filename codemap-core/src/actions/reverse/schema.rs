@@ -102,7 +102,7 @@ pub fn clarion_schema(graph: &mut Graph, target: &str) -> String {
     out.push_str(&format!("Tables: {}\n", tables.len()));
     out.push_str(&format!("Total fields: {total_fields}\n"));
     out.push_str(&format!("Total keys: {total_keys}\n"));
-    out.push_str("\n");
+    out.push('\n');
 
     // Table details
     for table in &tables {
@@ -132,7 +132,7 @@ pub fn clarion_schema(graph: &mut Graph, target: &str) -> String {
                 }
             }
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
     // Relationship inference
@@ -498,7 +498,7 @@ fn parse_dbf_header(data: &[u8], filename: &str) -> Result<String, String> {
         let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(11);
         let name: String = name_bytes[..name_end]
             .iter()
-            .map(|&b| if b >= 0x20 && b <= 0x7E { b as char } else { '?' })
+            .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '?' })
             .collect();
 
         let field_type = data[offset + 11] as char;
@@ -641,7 +641,7 @@ pub fn sql_extract(graph: &mut Graph, target: &str) -> String {
             ("kind", "sql_extract"),
         ], &[]);
     }
-    for ((a, b), _count) in &result.join_relationships {
+    for (a, b) in result.join_relationships.keys() {
         let a_id = format!("table:{a}");
         let b_id = format!("table:{b}");
         graph.add_edge(&a_id, &b_id);
@@ -866,7 +866,7 @@ fn extract_join_pairs(upper: &str) -> Vec<(String, String)> {
                 if let Some(on_pos) = remaining.find(" ON ") {
                     let on_clause = &remaining[on_pos + 4..];
                     // Extract table names from ON clause (table.col = table.col)
-                    let on_tables: Vec<&str> = on_clause.split(|c: char| c == '=' || c == ' ')
+                    let on_tables: Vec<&str> = on_clause.split(['=', ' '])
                         .filter_map(|part| {
                             let part = part.trim();
                             if part.contains('.') {

@@ -84,7 +84,7 @@ fn collect_proto_dir(dir: &Path, out: &mut Vec<String>) {
             let p = entry.path();
             if p.is_dir() {
                 collect_proto_dir(&p, out);
-            } else if p.extension().map_or(false, |e| e == "proto") {
+            } else if p.extension().is_some_and(|e| e == "proto") {
                 out.push(p.to_string_lossy().to_string());
             }
         }
@@ -907,7 +907,7 @@ fn collect_graphql_dir(dir: &Path, out: &mut Vec<String>) {
             let p = entry.path();
             if p.is_dir() {
                 collect_graphql_dir(&p, out);
-            } else if p.extension().map_or(false, |e| e == "graphql" || e == "gql") {
+            } else if p.extension().is_some_and(|e| e == "graphql" || e == "gql") {
                 out.push(p.to_string_lossy().to_string());
             }
         }
@@ -1475,8 +1475,8 @@ fn parse_docker_compose(content: &str) -> Vec<DockerService> {
 
             // List items under a key (indent 6+)
             if indent > 4 && !current_key.is_empty() {
-                let item = if trimmed.starts_with("- ") {
-                    trimmed[2..].trim().trim_matches('"').trim_matches('\'').to_string()
+                let item = if let Some(rest) = trimmed.strip_prefix("- ") {
+                    rest.trim().trim_matches('"').trim_matches('\'').to_string()
                 } else {
                     // key: value style (for environment)
                     trimmed.trim_matches('"').trim_matches('\'').to_string()
@@ -1589,11 +1589,11 @@ fn collect_tf_dir(dir: &Path, out: &mut Vec<String>) {
             let p = entry.path();
             if p.is_dir() {
                 // Skip .terraform directory
-                if p.file_name().map_or(false, |n| n == ".terraform") {
+                if p.file_name().is_some_and(|n| n == ".terraform") {
                     continue;
                 }
                 collect_tf_dir(&p, out);
-            } else if p.extension().map_or(false, |e| e == "tf") {
+            } else if p.extension().is_some_and(|e| e == "tf") {
                 out.push(p.to_string_lossy().to_string());
             }
         }
@@ -2005,7 +2005,7 @@ pub fn terraform_map(graph: &mut Graph, target: &str) -> String {
         } else {
             format!("{}.{}.{}", block.kind, block.block_type, block.name)
         };
-        for (_key, val) in &block.attributes {
+        for val in block.attributes.values() {
             // Look for references like aws_instance.web or module.vpc
             for r in &resources {
                 let ref_pattern = format!("{}.{}", r.block_type, r.name);

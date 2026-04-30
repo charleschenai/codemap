@@ -255,11 +255,7 @@ pub fn bridges(graph: &Graph) -> String {
     }
 
     let mut ranked: Vec<(String, usize)> = articulation_points.iter().filter_map(|id| {
-        if let Some(node) = graph.nodes.get(id) {
-            Some((id.clone(), node.imports.len() + node.imported_by.len()))
-        } else {
-            None
-        }
+        graph.nodes.get(id).map(|node| (id.clone(), node.imports.len() + node.imported_by.len()))
     }).collect();
     ranked.sort_by_key(|a| Reverse(a.1));
 

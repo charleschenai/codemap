@@ -226,7 +226,7 @@ fn refine_communities(
         .collect();
 
     // Process each coarse community independently
-    for (_coarse_id, members) in &by_coarse {
+    for members in by_coarse.values() {
         if members.len() <= 1 { continue; }
         let member_set: HashSet<usize> = members.iter().copied().collect();
 

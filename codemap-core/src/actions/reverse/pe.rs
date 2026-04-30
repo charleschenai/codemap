@@ -85,7 +85,7 @@ pub fn pe_strings(graph: &mut Graph, target: &str) -> String {
     out.push_str(&format!("URLs: {}\n", url_strings.len()));
     out.push_str(&format!("Paths: {}\n", path_strings.len()));
     out.push_str(&format!("Identifiers: {}\n", field_strings.len()));
-    out.push_str("\n");
+    out.push('\n');
 
     if !sql_strings.is_empty() {
         out.push_str("── SQL ──\n");
@@ -1223,7 +1223,7 @@ fn parse_pe_debug_info(data: &[u8]) -> Result<String, String> {
                     out.push_str(&format!("  Age: {}\n", age));
                 } else {
                     let sig_str: String = sig.iter().map(|&b| {
-                        if b >= 0x20 && b <= 0x7E { b as char } else { '.' }
+                        if (0x20..=0x7E).contains(&b) { b as char } else { '.' }
                     }).collect();
                     out.push_str(&format!("  Signature: {} (unknown)\n", sig_str));
                 }
@@ -1428,7 +1428,7 @@ fn parse_pe_sections_info(data: &[u8]) -> Result<String, String> {
         let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
         let name: String = name_bytes[..name_end]
             .iter()
-            .map(|&b| if b >= 0x20 && b <= 0x7E { b as char } else { '.' })
+            .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
             .collect();
 
         let virtual_size = read_u32(data, offset + 8)?;
@@ -1733,13 +1733,12 @@ fn parse_dotnet_metadata(data: &[u8]) -> Result<String, String> {
                 let mut row_pos = tilde.offset + 24;
 
                 for bit in 0..64u32 {
-                    if valid & (1u64 << bit) != 0 {
-                        if row_pos + 4 <= data.len() {
+                    if valid & (1u64 << bit) != 0
+                        && row_pos + 4 <= data.len() {
                             let count = read_u32(data, row_pos)?;
                             row_counts.push((bit as usize, count));
                             row_pos += 4;
                         }
-                    }
                 }
 
                 let table_data_start = row_pos;
@@ -2076,7 +2075,7 @@ fn read_compressed_uint(data: &[u8], offset: usize) -> (usize, usize) {
 
 // ── 8. binary_diff ─────────────────────────────────────────────────
 
-pub fn binary_diff(graph: &mut Graph, target: &str) -> String {
+pub fn binary_diff(_graph: &mut Graph, target: &str) -> String {
     let parts: Vec<&str> = target.splitn(2, ' ').collect();
     if parts.len() != 2 {
         return "Usage: binary-diff <file1> <file2>\nCompare two PE binaries.".to_string();

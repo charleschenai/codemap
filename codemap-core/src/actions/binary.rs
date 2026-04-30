@@ -363,7 +363,7 @@ fn parse_elf(data: &[u8]) -> Result<String, String> {
     }
 
     if !needed.is_empty() {
-        out.push_str(&format!("\n\u{2500}\u{2500} Dependencies (NEEDED) \u{2500}\u{2500}\n"));
+        out.push_str(&"\n\u{2500}\u{2500} Dependencies (NEEDED) \u{2500}\u{2500}\n".to_string());
         for n in &needed {
             out.push_str(&format!("  {n}\n"));
         }
@@ -890,7 +890,7 @@ fn read_fixed_string(data: &[u8], offset: usize, max_len: usize) -> String {
     let null_pos = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     bytes[..null_pos]
         .iter()
-        .map(|&b| if b >= 0x20 && b <= 0x7E { b as char } else { '.' })
+        .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
         .collect()
 }
 
@@ -1013,7 +1013,7 @@ fn parse_java_class(data: &[u8]) -> Result<String, String> {
                 pos += 2;
             }
             8 => { pos += 2; } // String
-            9 | 10 | 11 => { // FieldRef, MethodRef, InterfaceMethodRef
+            9..=11 => { // FieldRef, MethodRef, InterfaceMethodRef
                 if pos + 4 > data.len() { return Err("Truncated ref entry".to_string()); }
                 let class_idx = read_u16_be(data, pos)?;
                 let nat_idx = read_u16_be(data, pos + 2)?;
@@ -1323,7 +1323,7 @@ fn parse_jar(target: &str) -> String {
         })
         .collect();
     if !notable.is_empty() {
-        out.push_str(&format!("\n\u{2500}\u{2500} Notable Files \u{2500}\u{2500}\n"));
+        out.push_str(&"\n\u{2500}\u{2500} Notable Files \u{2500}\u{2500}\n".to_string());
         for f in notable.iter().take(50) {
             out.push_str(&format!("  {f}\n"));
         }

@@ -1,7 +1,14 @@
 use std::collections::{HashMap, HashSet, BTreeMap};
 use std::path::Path;
+use std::sync::LazyLock;
 use regex::Regex;
 use crate::types::Graph;
+
+// Hoisted out of `parse_cargo_toml` — Regex::new in a hot loop is a real
+// perf hit. Cargo.toml inline-table parser; matched per dep entry.
+static CARGO_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"version\s*=\s*"([^"]+)""#).unwrap()
+});
 
 // ── Skip patterns for secret scanning ──────────────────────────────
 
@@ -106,7 +113,7 @@ pub fn secret_scan(graph: &Graph, _target: &str) -> String {
 
     let mut findings: Vec<Finding> = Vec::new();
 
-    for (file_id, _node) in &graph.nodes {
+    for file_id in graph.nodes.keys() {
         if should_skip_file(file_id) {
             continue;
         }
@@ -243,9 +250,9 @@ fn parse_cargo_toml(content: &str) -> Vec<DepEntry> {
             let version = if rest.starts_with('"') {
                 rest.trim_matches('"').to_string()
             } else if rest.starts_with('{') {
-                // Parse inline table for version
-                let ver_re = Regex::new(r#"version\s*=\s*"([^"]+)""#).unwrap();
-                ver_re.captures(rest)
+                // Parse inline table for version (regex hoisted to module-
+                // level LazyLock — see CARGO_VERSION_RE)
+                CARGO_VERSION_RE.captures(rest)
                     .map(|c| c[1].to_string())
                     .unwrap_or_else(|| "*".to_string())
             } else {
@@ -543,7 +550,7 @@ pub fn dead_deps(graph: &Graph, _target: &str) -> String {
 
     // Also scan source code for import statements
     let import_re = Regex::new(r#"(?:import|require|from|use|extern crate)\s+['"(]?([a-zA-Z0-9_@/.-]+)"#).unwrap();
-    for (file_id, _node) in &graph.nodes {
+    for file_id in graph.nodes.keys() {
         if is_manifest(file_id) {
             continue;
         }

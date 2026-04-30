@@ -1012,7 +1012,7 @@ fn count_component_patterns(content: &str, patterns: &[&str]) -> usize {
     let mut count = 0usize;
     for pat in patterns {
         // Look for class="...modal..." or id="...modal..." etc.
-        let class_pat = format!("class=\"");
+        let class_pat = "class=\"".to_string();
         let mut pos = 0;
         while let Some(start) = lower[pos..].find(&class_pat) {
             let abs_start = pos + start + class_pat.len();
@@ -1567,12 +1567,11 @@ pub fn web_blueprint(graph: &mut Graph, target: &str) -> String {
                 // Detect Set-Cookie for session
                 if name == "set-cookie" {
                     let cookie_lower = val.to_ascii_lowercase();
-                    if cookie_lower.contains("session") || cookie_lower.contains("token") || cookie_lower.contains("auth") {
-                        if session_cookie.is_none() {
+                    if (cookie_lower.contains("session") || cookie_lower.contains("token") || cookie_lower.contains("auth"))
+                        && session_cookie.is_none() {
                             let cookie_name = val.split('=').next().unwrap_or("session").to_string();
                             session_cookie = Some(cookie_name);
                         }
-                    }
                 }
             }
         }
@@ -1838,7 +1837,7 @@ pub fn web_blueprint(graph: &mut Graph, target: &str) -> String {
 
     // Data Tables (from HTML)
     if !html_tables.is_empty() {
-        out.push_str(&format!("\u{2500}\u{2500} Data Tables (from HTML) \u{2500}\u{2500}\n"));
+        out.push_str(&"\u{2500}\u{2500} Data Tables (from HTML) \u{2500}\u{2500}\n".to_string());
         for table in &html_tables {
             out.push_str(&format!("  .{}\n", table.name));
             out.push_str(&format!("    Columns: {}\n", table.columns.join(", ")));
@@ -2006,9 +2005,9 @@ pub fn js_api_extract(graph: &mut Graph, target: &str) -> String {
         // fetch(`template`)
         for caps in JS_FETCH_TEMPLATE_RE.captures_iter(&content) {
             let url = caps[1].to_string();
-            // Convert ${...} to ${var} for display
-            let display_url = url.replace("${", "${");
-            all_api_calls.push(("".to_string(), display_url, filename.clone()));
+            // Pre-fix code did `url.replace("${", "${")` — a no-op left
+            // over from a planned interpolation rewrite. Just use as-is.
+            all_api_calls.push(("".to_string(), url, filename.clone()));
             file_count += 1;
         }
 

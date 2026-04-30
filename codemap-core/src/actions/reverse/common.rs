@@ -100,7 +100,7 @@ pub fn extract_ascii_strings(data: &[u8], min_len: usize) -> Vec<String> {
     let mut current = String::new();
 
     for &byte in data {
-        if byte >= 0x20 && byte <= 0x7E {
+        if (0x20..=0x7E).contains(&byte) {
             current.push(byte as char);
         } else {
             if current.len() >= min_len {
