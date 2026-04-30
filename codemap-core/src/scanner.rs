@@ -200,6 +200,116 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
     }
 }
 
+/// Auto-classify non-source files into typed nodes by extension. Called
+/// during scan walk: when we see foo.exe / bar.gguf / schema.proto / etc.
+/// we don't deep-parse, but we do register a typed node so graph queries
+/// can see them without requiring the user to manually run pe-imports /
+/// gguf-info / proto-schema. Pairing this with the URL-promotion pass
+/// means a vanilla `codemap structure` produces a meaningful
+/// heterogeneous graph out of the box on most repos.
+fn auto_classify_typed_files(dir: &Path, nodes: &mut HashMap<String, GraphNode>) {
+    use crate::types::EntityKind;
+
+    fn classify(ext: &str) -> Option<(EntityKind, &'static str)> {
+        Some(match ext {
+            // PE — Windows binaries (and .NET assemblies, which are PE files)
+            "exe" | "dll" | "sys" => (EntityKind::PeBinary, "pe"),
+            // ELF — Linux binaries / shared objects
+            "so" => (EntityKind::ElfBinary, "elf"),
+            // Mach-O — macOS binaries / shared libraries
+            "dylib" => (EntityKind::MachoBinary, "macho"),
+            // JVM
+            "class" | "jar" => (EntityKind::JavaClass, "java"),
+            // WebAssembly
+            "wasm" => (EntityKind::WasmModule, "wasm"),
+            // ML model formats
+            "gguf"        => (EntityKind::MlModel, "gguf"),
+            "safetensors" => (EntityKind::MlModel, "safetensors"),
+            "onnx"        => (EntityKind::MlModel, "onnx"),
+            "pyc"         => (EntityKind::MlModel, "pyc"),
+            "fatbin" | "cubin" => (EntityKind::MlModel, "cuda"),
+            // Schema sources
+            "proto" => (EntityKind::ProtoMessage, "proto"),
+            "tf"    => (EntityKind::TerraformResource, "terraform"),
+            // Clarion / dBASE schemas
+            "clw" | "txa" | "txd" => (EntityKind::SchemaTable, "clarion"),
+            "dbf"                 => (EntityKind::SchemaTable, "dbf"),
+            _ => return None,
+        })
+    }
+
+    fn walk(dir: &Path, depth: usize, nodes: &mut HashMap<String, GraphNode>, scan_root: &Path) {
+        if depth > MAX_DEPTH { return; }
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e, Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') && name_str != ".codemap" { continue; }
+            if SKIP_DIRS.iter().any(|d| *d == name_str.as_ref()) { continue; }
+
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                walk(&path, depth + 1, nodes, scan_root);
+                continue;
+            }
+            if !ft.is_file() { continue; }
+
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue };
+            let Some((kind, category)) = classify(&ext.to_ascii_lowercase()) else { continue };
+
+            // Use the path relative to scan_root so the id matches what
+            // RE actions would produce when run later (avoids duplicate
+            // nodes in the cache).
+            let rel = path.strip_prefix(scan_root).unwrap_or(&path);
+            let path_str = rel.to_string_lossy().to_string();
+            // Pick the right id-prefix per kind so it matches what the
+            // explicit RE actions register (consistency = no dup nodes
+            // when a user runs e.g. pe-imports later).
+            let id = match kind {
+                EntityKind::PeBinary       => format!("pe:{path_str}"),
+                EntityKind::ElfBinary      => format!("elf:{path_str}"),
+                EntityKind::MachoBinary    => format!("macho:{path_str}"),
+                EntityKind::JavaClass      => format!("java:{path_str}"),
+                EntityKind::WasmModule     => format!("wasm:{path_str}"),
+                EntityKind::MlModel        => format!("model:{path_str}"),
+                EntityKind::ProtoMessage   => format!("schema:proto:{path_str}"),
+                EntityKind::TerraformResource => format!("schema:terraform:{path_str}"),
+                EntityKind::SchemaTable    => format!("schema:{category}:{path_str}"),
+                _ => format!("file:{path_str}"),
+            };
+            // Don't clobber existing entries (RE-action mutations may
+            // already have richer attrs)
+            if nodes.contains_key(&id) { continue; }
+
+            let mut attrs = HashMap::new();
+            attrs.insert("path".to_string(), path_str.clone());
+            attrs.insert("category".to_string(), category.to_string());
+            attrs.insert("auto_classified".to_string(), "true".to_string());
+            if let Ok(meta) = entry.metadata() {
+                attrs.insert("size".to_string(), meta.len().to_string());
+            }
+            nodes.insert(id.clone(), GraphNode {
+                id,
+                imports: Vec::new(),
+                imported_by: Vec::new(),
+                urls: Vec::new(),
+                exports: Vec::new(),
+                lines: 0,
+                functions: Vec::new(),
+                data_flow: None,
+                bridges: Vec::new(),
+                kind,
+                attrs,
+                mtime: None,
+            });
+        }
+    }
+    walk(dir, 0, nodes, dir);
+}
+
 /// Public hook: persist any RE-action mutations on `graph` back to cache
 /// after dispatch completes. Source-file entries are preserved (we only
 /// rewrite the typed_nodes section). Called once per CLI invocation by
@@ -620,6 +730,12 @@ fn scan_single_dir(
     // to run a web-RE action first. URLs without an HTTP method default
     // to GET — refined later if a HAR / JS-extract pass overlaps.
     promote_urls_to_endpoints(&mut nodes);
+
+    // Auto-classify non-source files (binaries / ML models / schema
+    // sources). Pairs with URL promotion to make `codemap structure`
+    // alone produce a useful heterogeneous graph on real repos —
+    // pagerank --type pe / model / proto etc. just work.
+    auto_classify_typed_files(dir, &mut nodes);
 
     // Hydrate typed (non-source) nodes from cache. These were registered
     // by past RE-action invocations (pe-imports, web-blueprint, schema

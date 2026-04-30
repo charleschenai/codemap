@@ -572,3 +572,40 @@ unaffected.
 
   Action count: 108 → 109 (+ pipeline).
 
+[2026-04-30] feat: 5.6.0 — auto-classify binary/ML/schema files during scan
+  source: heterogeneous graph foundations were complete in 5.2.0+, but
+  using them required either explicit RE actions (pe-imports, gguf-info,
+  proto-schema) or `pipeline`/cache-persistence to compose. Plain
+  `codemap structure` only saw source files because scanner walked
+  SUPPORTED_EXTS only.
+
+  scanner::auto_classify_typed_files: post-walk pass that walks the scan
+  tree for binary / ML / schema extensions and registers typed nodes
+  without deep content parse. Light-weight — just file-level metadata
+  (path, size, category) — but enough to make graph queries see them.
+
+  Extensions auto-classified:
+    Binaries: .exe .dll .sys → PeBinary
+              .so → ElfBinary
+              .dylib → MachoBinary
+              .class .jar → JavaClass
+              .wasm → WasmModule
+    ML:       .gguf .safetensors .onnx .pyc .fatbin .cubin → MlModel
+    Schema:   .proto → ProtoMessage source
+              .tf → TerraformResource source
+              .clw .txa .txd → SchemaTable (Clarion)
+              .dbf → SchemaTable (dBASE)
+
+  ID-prefix matches what explicit RE actions register (pe:, elf:, model:,
+  schema:proto:, etc.) so a later `codemap pe-imports foo.exe` augments
+  the existing node rather than creating a duplicate.
+
+  Each auto-classified node carries `auto_classified: true` attr so RE
+  actions can detect "I'm enriching a stub" vs "I'm creating fresh".
+
+  Result: `codemap pagerank --type pe` works on a binary directory after
+  `codemap structure` alone. No RE action needed for first-pass triage.
+
+  Tests: 84 passing (was 83). +1 new test materializes 7 file types and
+  verifies all 6 EntityKind variants are detected.
+

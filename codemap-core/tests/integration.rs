@@ -776,6 +776,52 @@ fn test_pipeline_help() {
 }
 
 #[test]
+fn test_scanner_auto_classifies_typed_files() {
+    // 5.6.0: scanner walks for binary / ML / schema file extensions and
+    // registers typed nodes during scan, so a plain `codemap structure`
+    // produces a heterogeneous graph without needing manual RE actions.
+    let tmp = std::env::temp_dir().join(format!("codemap-auto-classify-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("bin")).unwrap();
+    fs::create_dir_all(tmp.join("models")).unwrap();
+    fs::create_dir_all(tmp.join("schemas")).unwrap();
+
+    fs::write(tmp.join("bin/server.exe"), b"MZ\x00\x00").unwrap();
+    fs::write(tmp.join("bin/lib.so"), b"\x7FELF").unwrap();
+    fs::write(tmp.join("bin/util.dylib"), b"\xFE\xED\xFA\xCE").unwrap();
+    fs::write(tmp.join("models/m.gguf"), b"GGUF").unwrap();
+    fs::write(tmp.join("models/m.onnx"), b"\x08\x00").unwrap();
+    fs::write(tmp.join("schemas/api.proto"), "syntax = \"proto3\";").unwrap();
+    fs::write(tmp.join("schemas/main.tf"), "resource \"x\" \"y\" {}").unwrap();
+
+    let g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    let kinds: std::collections::HashSet<EntityKind> = g.nodes.values()
+        .map(|n| n.kind).collect();
+
+    assert!(kinds.contains(&EntityKind::PeBinary), "no .exe → PeBinary node: {:?}", kinds);
+    assert!(kinds.contains(&EntityKind::ElfBinary), "no .so → ElfBinary node: {:?}", kinds);
+    assert!(kinds.contains(&EntityKind::MachoBinary), "no .dylib → MachoBinary node: {:?}", kinds);
+    assert!(kinds.contains(&EntityKind::MlModel), "no .gguf/.onnx → MlModel node: {:?}", kinds);
+    assert!(kinds.contains(&EntityKind::ProtoMessage), "no .proto → ProtoMessage node: {:?}", kinds);
+    assert!(kinds.contains(&EntityKind::TerraformResource), "no .tf → TerraformResource node: {:?}", kinds);
+
+    // Verify auto-classified nodes are tagged so future RE-action runs
+    // know they were lightly classified (not deeply parsed)
+    let auto_count = g.nodes.values()
+        .filter(|n| n.attrs.get("auto_classified").map(|s| s == "true").unwrap_or(false))
+        .count();
+    assert!(auto_count >= 7, "expected ≥7 auto-classified nodes, got {auto_count}");
+}
+
+#[test]
 fn test_pipeline_halts_on_error() {
     let mut g = synthetic_hetero_graph();
     let result = execute(&mut g, "pipeline",
