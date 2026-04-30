@@ -172,6 +172,19 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
         "http://www.w3.org/", "https://www.w3.org/",
         "http://schemas.xmlsoap.org/", "https://schemas.xmlsoap.org/",
         "http://schemas.microsoft.com/", "https://schemas.microsoft.com/",
+        // Graph-export schemas (Cytoscape/yEd/NetworkX, Gephi)
+        "http://graphml.graphdrawing.org/", "https://graphml.graphdrawing.org/",
+        "http://www.gexf.net/", "https://www.gexf.net/",
+        "http://gexf.net/", "https://gexf.net/",
+        // SVG / MathML / XSL-FO / DocBook namespaces
+        "http://www.inkscape.org/", "https://www.inkscape.org/",
+        "http://docbook.org/", "https://docbook.org/",
+        "http://relaxng.org/", "https://relaxng.org/",
+        "http://purl.org/", "https://purl.org/",
+        "http://xml.apache.org/", "https://xml.apache.org/",
+        "http://xmlns.jcp.org/", "https://xmlns.jcp.org/",
+        "http://java.sun.com/xml/", "https://java.sun.com/xml/",
+        "http://maven.apache.org/POM/", "https://maven.apache.org/POM/",
         "urn:",
     ];
 

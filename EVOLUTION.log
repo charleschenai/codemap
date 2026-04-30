@@ -933,3 +933,28 @@ unaffected.
       Eigengap heuristic recommends ~19 communities.
 
   Action count: 142 → 145 (+3).
+
+[2026-04-30] fix: 5.11.1 — extend xmlns namespace filter
+  source: 5.11.0 spectral analysis on the codemap repo itself
+  surfaced 3 spurious HttpEndpoint nodes for XML namespace strings
+  baked into the source code of actions/exports_format.rs
+  (graphml.graphdrawing.org, gexf.net). The 5.7.1 namespace filter
+  only knew w3.org/xmlsoap.org/microsoft.com.
+
+  Extended scanner.rs xml_namespaces list to include:
+    - graphml.graphdrawing.org (Cytoscape/yEd/NetworkX export schema)
+    - www.gexf.net + gexf.net (Gephi export)
+    - inkscape.org, docbook.org, relaxng.org, purl.org
+    - xml.apache.org, xmlns.jcp.org, java.sun.com/xml,
+      maven.apache.org/POM (common Java/XML toolchains)
+
+  Effect: codemap-on-itself drops from 48 nodes → 45 nodes after
+  cache wipe + rescan. Fiedler λ₂ = 0.142, bisection cut size
+  unchanged.
+
+  End-to-end verification: 105/105 CLI actions tested pass on the
+  codemap repo. napi binding (linux-arm64-gnu) loads + dispatches
+  stats / fiedler / spectral-cluster / node-lifespan correctly.
+  114/114 unit + integration tests pass. Clippy clean.
+
+  Action count: 145 (no change).
