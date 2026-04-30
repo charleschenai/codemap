@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 96 actions — AST-powered call graphs, binary reverse engineering, ML model analysis (GGUF/SafeTensors/ONNX/CUDA), schema parsing, security scanning, web scraper blueprinting, LSP integration, composite CI checks, and more. TRIGGER when asked to understand code structure, audit dependencies, reverse engineer binaries, analyze ML models, map APIs, scan for secrets, validate code health, or prepare for refactoring.
+description: Analyze codebase structure with 110 actions on a heterogeneous graph (source files, binaries, schema tables, HTTP endpoints, ML models, IaC resources — all in one graph). 11 centrality measures (PageRank, betweenness, eigenvector, katz, closeness, harmonic, load, brokers, voterank, group, percolation, current-flow), Leiden community detection, meta-path queries across kinds, audit composite report, kind-aware dot/mermaid viz, AST-powered call graphs, binary reverse engineering (PE/ELF/Mach-O/Java/WASM with library deps as graph nodes), ML model analysis (GGUF/SafeTensors/ONNX/CUDA), schema parsing, security scanning, web scraper blueprinting, LSP integration, composite CI checks. TRIGGER when asked to understand code structure, run an architectural audit, find load-bearing files, trace cross-domain dependencies (source→endpoint, binary→dll), reverse engineer binaries, map APIs, scan for secrets, or prepare for refactoring.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -10,9 +10,11 @@ allowed-tools:
   - Grep
 ---
 
-# /codemap — Codebase Analysis & Reverse Engineering (96 actions)
+# /codemap — Heterogeneous-Graph Codebase Analysis & Reverse Engineering (110 actions)
 
-Single Rust binary. 15 languages via tree-sitter AST (+ Kotlin/SQL regex). Rayon parallel. Bincode mtime cache. No external services.
+Single Rust binary. **One graph, many node types**: source files share a graph with PE/ELF/Mach-O binaries + their imported DLLs + symbol tables, HTTP endpoints (auto-promoted from URL strings), schema tables (Clarion/SQL/dBASE), GraphQL/Proto/OpenAPI types, Docker services, Terraform resources, ML model files. All graph algorithms (PageRank, Leiden, betweenness, etc.) run uniformly across mixed kinds.
+
+15 languages via tree-sitter AST. Rayon parallel. Bincode cache (typed-node mutations persist across CLI runs). No external services.
 
 ## Quick Start
 
@@ -28,6 +30,28 @@ Options: `--json` (JSON envelope with ok/error), `--tree` (ASCII tree for data-f
 ---
 
 ## When to Use Each Action
+
+### "I need an architectural risk overview"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| One-page audit before refactoring | `audit` | `codemap --dir src audit` → chokepoints + brokers + 🚨 dual-risk + clusters + per-kind census |
+| Find chokepoints (continuous score) | `betweenness` | `codemap --dir src betweenness` |
+| Find integration brokers | `brokers` (alias `structural-holes`) | `codemap --dir src brokers` |
+| Find core nodes by importance | `pagerank` / `eigenvector` / `katz` | `codemap --dir src pagerank` |
+| Distance-based importance | `closeness` / `harmonic` | `codemap --dir src harmonic` (handles disconnected) |
+| Influence/diffusion ranking | `voterank` | `codemap --dir src voterank` (top-k spreaders) |
+| Detect modules (Leiden default) | `clusters [leiden\|lpa]` | `codemap --dir src clusters` (auto-named by path prefix) |
+
+### "I need cross-domain queries (heterogeneous)"
+| Trigger | Action | Example |
+|---------|--------|---------|
+| Find source files that hit APIs | `meta-path source->endpoint` | `codemap --dir src meta-path "source->endpoint"` |
+| Trace binary→DLL→symbol chains | `meta-path pe->dll->symbol` | `codemap --dir src meta-path "pe->dll->symbol"` |
+| Find code that touches schema tables | `meta-path source->table` | `codemap --dir src meta-path "source->table"` |
+| Filter by entity kind | any centrality action with `<kind>` target | `codemap --dir src betweenness table` |
+| Run multiple actions in one process | `pipeline` | `codemap pipeline "js-api-extract:src/,meta-path:source->endpoint"` |
+
+Entity kinds: `source pe elf macho jclass wasm dll symbol endpoint form table field proto gql oapi docker tf model asm`. Auto-classified during scan from filename: `.exe/.dll/.so/.dylib → binary`, `.gguf/.safetensors/.onnx/.pyc → model`, `.proto/.tf/.clw/.dbf → schema`. URL strings in source → HttpEndpoint nodes.
 
 ### "I need to understand this codebase"
 | Trigger | Action | Example |
