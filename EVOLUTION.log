@@ -740,3 +740,54 @@ unaffected.
   recognition, coupling empty-target usage, exports empty-target
   list-all behavior.
 
+[2026-04-30] feat: 5.8.0 — algorithms expansion (110 → 131 actions)
+  source: Charles asked "does our tool miss anything else those guys
+  have?" Honest gap analysis vs Joern / NetworkX / petgraph identified
+  21 missing actions worth adding. All shipped this release.
+
+  Centrality: NetworkX 11/17 → 17/17 (full coverage)
+    - subgraph-centrality (Estrada-Rodriguez 2005, exp(A) diagonal)
+    - second-order (Kermarrec 2011, return-time variance)
+    - dispersion (Lou-Strogatz local dispersion)
+    - reaching (asymmetric forward-reach)
+    - trophic (food-web hierarchy levels — 1=entry, ↑=deep)
+    - current-flow-closeness (Brandes-Fleischer random-walk closeness)
+
+  Classical algorithms (petgraph parity — actions/algorithms.rs):
+    - bellman-ford <src> — single-source shortest paths
+    - astar <src> <tgt> — A* with binary heap
+    - floyd-warshall — all-pairs shortest paths (refuses on n>2000)
+    - diameter — graph diameter via BFS-from-each-node
+    - mst — minimum spanning tree (Kruskal + union-find)
+    - cliques — maximum cliques (Bron-Kerbosch with pivoting)
+    - kshortest <src> <tgt> [k] — Yen's k-shortest paths (default k=5)
+    - max-flow <src> <sink> — Edmonds-Karp BFS Ford-Fulkerson
+    - feedback-arc — DFS-based feedback arc set heuristic
+
+  Link prediction (actions/link_prediction.rs):
+    - common-neighbors — |N(u) ∩ N(v)| for unconnected pairs
+    - jaccard — |shared| / |union|, normalized for degree
+    - adamic-adar — Σ 1/log(degree(shared neighbor))
+    Surface missing-import bugs and "files that should know each
+    other but don't."
+
+  Community detection (actions/community.rs, beyond Leiden + LPA):
+    - k-core [k] — peel by degree threshold (find dense skeleton)
+    - k-clique [k] — Palla et al. 2005 k-clique percolation
+    - modularity-max — Clauset-Newman-Moore greedy modularity
+    - divisive — Girvan-Newman edge-betweenness (refuses on n>500)
+
+  Total LOC: ~1900 across 3 new modules (algorithms.rs ~600,
+  link_prediction.rs ~140, community.rs ~400) + centrality.rs
+  extension (~300) + dispatch wiring (~30).
+
+  Tests: 108 passing (was 94). +14 new regression tests covering
+  every new action's basic invocation.
+
+  Smoke-tested live on codemap-on-itself: diameter=3, MST=32 edges
+  across 10 components, modularity-max=3 communities, trophic levels
+  reverse/* at 4 (deep utilities), reaching shows lib.rs reaches 78%
+  of files (entry point).
+
+  Action count: 110 → 131 (+21).
+

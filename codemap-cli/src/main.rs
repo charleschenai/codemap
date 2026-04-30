@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (110 actions, heterogeneous graph, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (131 actions, heterogeneous graph, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
@@ -14,9 +14,22 @@ Actions:
                 dot, mermaid
   Centrality:   betweenness, eigenvector, katz, closeness, harmonic, load,
                 structural-holes (alias: brokers), voterank, group,
-                percolation, current-flow (alias: current-flow-betweenness)
+                percolation, current-flow (alias: current-flow-betweenness),
+                subgraph-centrality, second-order, dispersion, reaching,
+                trophic, current-flow-closeness  (17 of NetworkX's 17)
                   (target = comma-separated kind filter, e.g. \"table,field\")
                   (group requires a kind filter; defines the node set)
+  Algorithms:   bellman-ford <src>, astar <src> <tgt>, floyd-warshall,
+                diameter, mst, cliques, kshortest <src> <tgt> [k],
+                max-flow <src> <tgt>, feedback-arc
+  Link prediction: jaccard, adamic-adar, common-neighbors
+                  (top-30 unconnected pairs by similarity — surfaces
+                   missing imports / refactor opportunities)
+  Community:    clusters [leiden|lpa], k-core [k], k-clique [k],
+                modularity-max, divisive
+                  (Leiden default; k-core peels by degree;
+                   modularity-max is greedy Clauset-Newman-Moore;
+                   divisive is Girvan-Newman edge-betweenness)
   Heterogeneous: meta-path <kindA>-><kindB>[-><kindC>]
                   e.g. \"meta-path source->endpoint\" finds source files calling APIs
   Functions:    call-graph, dead-functions, fn-info, diff-functions, complexity,

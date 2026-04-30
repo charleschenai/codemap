@@ -1003,6 +1003,109 @@ fn test_exports_empty_target_lists_top_files() {
     assert!(a_pos < b_pos, "a.py (3 exports) should rank above b.py (1): {result}");
 }
 
+// ── 5.8.0: classical algorithms + 6 more centrality + link prediction + community ──
+
+#[test]
+fn test_diameter_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "diameter", "", false).unwrap();
+    assert!(result.contains("Diameter"), "missing header: {result}");
+}
+
+#[test]
+fn test_mst_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "mst", "", false).unwrap();
+    assert!(result.contains("Spanning Tree"), "missing header: {result}");
+}
+
+#[test]
+fn test_floyd_warshall_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "floyd-warshall", "", false).unwrap();
+    assert!(result.contains("Floyd-Warshall"), "missing header: {result}");
+    assert!(result.contains("Diameter:"));
+}
+
+#[test]
+fn test_cliques_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "cliques", "", false).unwrap();
+    assert!(result.contains("Cliques"), "missing header: {result}");
+}
+
+#[test]
+fn test_feedback_arc_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "feedback-arc", "", false).unwrap();
+    assert!(result.contains("Feedback Arc Set"), "missing header: {result}");
+}
+
+#[test]
+fn test_jaccard_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "jaccard", "", false).unwrap();
+    assert!(result.contains("Jaccard"), "missing header: {result}");
+}
+
+#[test]
+fn test_adamic_adar_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "adamic-adar", "", false).unwrap();
+    assert!(result.contains("Adamic-Adar"), "missing header: {result}");
+}
+
+#[test]
+fn test_common_neighbors_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "common-neighbors", "", false).unwrap();
+    assert!(result.contains("Common Neighbors"), "missing header: {result}");
+}
+
+#[test]
+fn test_k_core_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "k-core", "", false).unwrap();
+    assert!(result.contains("K-Core"), "missing header: {result}");
+}
+
+#[test]
+fn test_modularity_max_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "modularity-max", "", false).unwrap();
+    // May report no communities on the small synthetic graph; just ensure no panic
+    assert!(result.contains("Modularity") || result.contains("no communities"),
+        "unexpected output: {result}");
+}
+
+#[test]
+fn test_subgraph_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "subgraph-centrality", "", false).unwrap();
+    assert!(result.contains("Subgraph Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_dispersion_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "dispersion", "", false).unwrap();
+    assert!(result.contains("Dispersion"), "missing header: {result}");
+}
+
+#[test]
+fn test_reaching_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "reaching", "", false).unwrap();
+    assert!(result.contains("Reaching"), "missing header: {result}");
+}
+
+#[test]
+fn test_trophic_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "trophic", "", false).unwrap();
+    assert!(result.contains("Trophic"), "missing header: {result}");
+}
+
 #[test]
 fn test_minified_js_skipped_at_parse_stage() {
     // 5.7.5: bug 31 from law-sitter-rs e2e test. Minified JS files

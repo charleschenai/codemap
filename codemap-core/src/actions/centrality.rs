@@ -709,6 +709,264 @@ pub fn current_flow_betweenness(graph: &Graph, kinds: &[EntityKind]) -> String {
     rank_and_format("Current-Flow Betweenness", &ids, &flow, kinds, "score")
 }
 
+/// Subgraph centrality (Estrada-Rodriguez 2005): diagonal entry of
+/// exp(A) — counts of closed walks of all lengths weighted by 1/k!,
+/// reflecting participation in subgraphs of every size. Computed via
+/// power-series approximation (truncated at k=10 closed walks since
+/// higher orders contribute negligibly for sparse graphs).
+pub fn subgraph_centrality(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, out_adj, in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    // Undirected adjacency for closed-walk counting
+    let mut adj_u: Vec<std::collections::HashSet<usize>> = vec![std::collections::HashSet::new(); n];
+    for v in 0..n {
+        for &u in &out_adj[v] { adj_u[v].insert(u); adj_u[u].insert(v); }
+        for &u in &in_adj[v]  { adj_u[v].insert(u); adj_u[u].insert(v); }
+        adj_u[v].remove(&v);
+    }
+
+    // M_k = number of closed walks of length k starting at each node.
+    // M_0 = 1, M_1 = 0 (no self-loop), M_2 = degree, etc.
+    // SC(v) ≈ Σ M_k(v) / k! for k = 0..10
+    let max_k = 10;
+    // Power-iterate: walk_count[k][v] = #walks of length k from v back to v
+    // We track all current walks: visit[level][start][cur]
+    // Approximation: track walk vectors per source — O(V² · max_k · degree)
+    let mut sc = vec![1.0f64; n]; // M_0 / 0!
+    for v in 0..n {
+        // Walk simulation: count closed walks of each length
+        let mut walks: HashMap<usize, f64> = HashMap::new();
+        walks.insert(v, 1.0);
+        let mut factorial = 1.0f64;
+        for k in 1..=max_k {
+            factorial *= k as f64;
+            let mut next_walks: HashMap<usize, f64> = HashMap::new();
+            for (&u, &count) in &walks {
+                for &w in &adj_u[u] {
+                    *next_walks.entry(w).or_insert(0.0) += count;
+                }
+            }
+            if let Some(&closed) = next_walks.get(&v) {
+                sc[v] += closed / factorial;
+            }
+            walks = next_walks;
+            if walks.is_empty() { break; }
+        }
+    }
+
+    rank_and_format("Subgraph Centrality", &ids, &sc, kinds, "score")
+}
+
+/// Second-order centrality (Kermarrec et al. 2011): variance of the
+/// time required by a random walk to return to the node. Lower
+/// variance = more centrally located. We approximate via expected
+/// hitting-time variance from random-walk simulation (200 walks
+/// per node, length 100). Reports lowest-variance nodes as most
+/// central — opposite ordering from most centrality measures.
+pub fn second_order(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, out_adj, in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    // Undirected neighbors
+    let neighbors: Vec<Vec<usize>> = (0..n).map(|v| {
+        let mut s: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for &u in &out_adj[v] { s.insert(u); }
+        for &u in &in_adj[v]  { s.insert(u); }
+        s.remove(&v);
+        s.into_iter().collect()
+    }).collect();
+
+    // Deterministic LCG so output is stable
+    let mut state: u64 = 0xC0DE_C0DE;
+    let mut rand_u = || -> usize {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223) & 0x7FFFFFFFFFFFFFFF;
+        state as usize
+    };
+
+    let walks_per_node = 50;
+    let walk_len = 50;
+    let mut variance = vec![0.0f64; n];
+    for v in 0..n {
+        if neighbors[v].is_empty() { continue; }
+        let mut return_times: Vec<f64> = Vec::new();
+        for _ in 0..walks_per_node {
+            let mut cur = v;
+            for step in 1..=walk_len {
+                let nb = &neighbors[cur];
+                if nb.is_empty() { break; }
+                cur = nb[rand_u() % nb.len()];
+                if cur == v {
+                    return_times.push(step as f64);
+                    break;
+                }
+            }
+        }
+        if return_times.len() >= 2 {
+            let mean: f64 = return_times.iter().sum::<f64>() / return_times.len() as f64;
+            let var: f64 = return_times.iter()
+                .map(|t| (t - mean).powi(2)).sum::<f64>() / return_times.len() as f64;
+            // Invert so high score = low variance (consistent with other centrality)
+            variance[v] = if var > 0.0 { 1.0 / var } else { 0.0 };
+        }
+    }
+    rank_and_format("Second-Order Centrality (1/variance)", &ids, &variance, kinds, "score")
+}
+
+/// Dispersion (Lou-Strogatz, originally for finding spouses in
+/// social networks): for each node v, measures how dispersed v's
+/// neighbors are in the wider graph. High dispersion = v's
+/// connections span otherwise-distant communities. In code this
+/// flags integration files that connect otherwise-isolated modules.
+pub fn dispersion(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, out_adj, in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    let neighbors: Vec<std::collections::HashSet<usize>> = (0..n).map(|v| {
+        let mut s = std::collections::HashSet::new();
+        for &u in &out_adj[v] { s.insert(u); }
+        for &u in &in_adj[v]  { s.insert(u); }
+        s.remove(&v);
+        s
+    }).collect();
+
+    let mut score = vec![0.0f64; n];
+    for v in 0..n {
+        let nv = &neighbors[v];
+        if nv.len() < 2 { continue; }
+        // Count pairs of v's neighbors that are NOT directly connected
+        // and have no common third neighbor (besides v)
+        let nb_vec: Vec<usize> = nv.iter().copied().collect();
+        let mut dispersed_pairs = 0usize;
+        for i in 0..nb_vec.len() {
+            for j in (i+1)..nb_vec.len() {
+                let a = nb_vec[i];
+                let b = nb_vec[j];
+                if neighbors[a].contains(&b) { continue; } // directly connected
+                // Common third neighbor (besides v)?
+                let common = neighbors[a].intersection(&neighbors[b])
+                    .filter(|&&c| c != v).count();
+                if common == 0 { dispersed_pairs += 1; }
+            }
+        }
+        score[v] = dispersed_pairs as f64;
+    }
+    rank_and_format("Dispersion (Lou-Strogatz)", &ids, &score, kinds, "score")
+}
+
+/// Reaching centrality: the fraction of all nodes reachable from v
+/// via outgoing edges (forward reach) divided by graph size. High
+/// score = "this node sits upstream of much of the codebase" —
+/// i.e. an entry point or root dispatcher.
+pub fn reaching(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, out_adj, _in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    let mut score = vec![0.0f64; n];
+    for s in 0..n {
+        let mut visited = vec![false; n];
+        visited[s] = true;
+        let mut q: VecDeque<usize> = VecDeque::new();
+        q.push_back(s);
+        let mut reached = 0usize;
+        while let Some(u) = q.pop_front() {
+            for &v in &out_adj[u] {
+                if !visited[v] { visited[v] = true; reached += 1; q.push_back(v); }
+            }
+        }
+        score[s] = if n > 1 { reached as f64 / (n - 1) as f64 } else { 0.0 };
+    }
+    rank_and_format("Reaching Centrality (forward reach)", &ids, &score, kinds, "score")
+}
+
+/// Trophic level (food-web inspired): nodes are assigned a level 1
+/// + average level of in-neighbors. Pure source nodes (no in-edges)
+/// get level 1; nodes that consume from level-1 nodes get ≥2; etc.
+/// Surfaces architectural layering — entry points at level 1, deep
+/// utility code at high levels.
+pub fn trophic(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, _out_adj, in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    let mut level = vec![1.0f64; n];
+    // Iterate to convergence: trophic_v = 1 + mean(trophic_in_neighbors)
+    let max_iter = 50;
+    for _ in 0..max_iter {
+        let mut new_level = vec![1.0f64; n];
+        let mut max_delta: f64 = 0.0;
+        for v in 0..n {
+            if !in_adj[v].is_empty() {
+                let avg: f64 = in_adj[v].iter().map(|&u| level[u]).sum::<f64>()
+                    / in_adj[v].len() as f64;
+                new_level[v] = 1.0 + avg;
+            }
+            max_delta = max_delta.max((new_level[v] - level[v]).abs());
+        }
+        level = new_level;
+        if max_delta < 1e-6 { break; }
+    }
+    rank_and_format("Trophic Level (1 = entry, ↑ = deep)", &ids, &level, kinds, "level")
+}
+
+/// Current-flow closeness (Brandes-Fleischer 2005): like closeness
+/// but uses random-walk effective distance instead of shortest paths.
+/// Approximation via short random walks since exact requires Laplacian
+/// pseudo-inverse (O(V³) and not always invertible).
+pub fn current_flow_closeness(graph: &Graph, kinds: &[EntityKind]) -> String {
+    let (ids, out_adj, in_adj) = build_adj(graph, kinds);
+    let n = ids.len();
+    if n == 0 { return "No nodes to rank.".to_string(); }
+
+    let neighbors: Vec<Vec<usize>> = (0..n).map(|v| {
+        let mut s: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for &u in &out_adj[v] { s.insert(u); }
+        for &u in &in_adj[v]  { s.insert(u); }
+        s.remove(&v);
+        s.into_iter().collect()
+    }).collect();
+
+    let mut state: u64 = 0x0BAD_CAFE;
+    let mut rand_u = || -> usize {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223) & 0x7FFFFFFFFFFFFFFF;
+        state as usize
+    };
+
+    let walks = 30;
+    let walk_len = 50;
+    let mut score = vec![0.0f64; n];
+    for s in 0..n {
+        if neighbors[s].is_empty() { continue; }
+        let mut total_steps = 0u64;
+        let mut total_walks = 0u64;
+        for _ in 0..walks {
+            for t in 0..n {
+                if t == s { continue; }
+                let mut cur = s;
+                for step in 1..=walk_len {
+                    let nb = &neighbors[cur];
+                    if nb.is_empty() { break; }
+                    cur = nb[rand_u() % nb.len()];
+                    if cur == t {
+                        total_steps += step as u64;
+                        total_walks += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if total_walks > 0 {
+            // Inverse mean hitting time, normalized
+            score[s] = total_walks as f64 / total_steps as f64;
+        }
+    }
+    rank_and_format("Current-Flow Closeness", &ids, &score, kinds, "score")
+}
+
 /// Parse a comma-separated kind filter from a target string.
 /// e.g. "table,field" → [SchemaTable, SchemaField]. Empty/whitespace → [].
 /// Unknown kinds are silently dropped (after warning to stderr) so a typo

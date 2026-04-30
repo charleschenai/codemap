@@ -16,6 +16,9 @@ pub mod composite;
 pub mod centrality;
 pub mod meta_path;
 pub mod leiden;
+pub mod algorithms;
+pub mod link_prediction;
+pub mod community;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -167,6 +170,32 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "group"       => Ok(centrality::group_centrality(graph, &centrality::parse_kinds(target))),
         "percolation" => Ok(centrality::percolation(graph, &centrality::parse_kinds(target))),
         "current-flow" | "current-flow-betweenness" => Ok(centrality::current_flow_betweenness(graph, &centrality::parse_kinds(target))),
+        // Centrality additions (5.8.0+) — NetworkX 11 → 17
+        "subgraph-centrality" => Ok(centrality::subgraph_centrality(graph, &centrality::parse_kinds(target))),
+        "second-order"        => Ok(centrality::second_order(graph, &centrality::parse_kinds(target))),
+        "dispersion"          => Ok(centrality::dispersion(graph, &centrality::parse_kinds(target))),
+        "reaching"            => Ok(centrality::reaching(graph, &centrality::parse_kinds(target))),
+        "trophic"             => Ok(centrality::trophic(graph, &centrality::parse_kinds(target))),
+        "current-flow-closeness" => Ok(centrality::current_flow_closeness(graph, &centrality::parse_kinds(target))),
+        // Classical algorithms (5.8.0+ — petgraph parity)
+        "bellman-ford" => Ok(algorithms::bellman_ford(graph, target)),
+        "astar"        => Ok(algorithms::astar(graph, target)),
+        "floyd-warshall" => Ok(algorithms::floyd_warshall(graph, target)),
+        "diameter"     => Ok(algorithms::diameter(graph, target)),
+        "mst"          => Ok(algorithms::mst(graph, target)),
+        "cliques"      => Ok(algorithms::cliques(graph, target)),
+        "kshortest" | "k-shortest" => Ok(algorithms::kshortest(graph, target)),
+        "max-flow"     => Ok(algorithms::max_flow(graph, target)),
+        "feedback-arc" | "feedback-arc-set" => Ok(algorithms::feedback_arc(graph, target)),
+        // Link prediction (5.8.0+) — find missing edges
+        "common-neighbors" => Ok(link_prediction::common_neighbors(graph)),
+        "jaccard"          => Ok(link_prediction::jaccard(graph)),
+        "adamic-adar"      => Ok(link_prediction::adamic_adar(graph)),
+        // Community detection additions (5.8.0+) — beyond Leiden + LPA
+        "k-core"           => Ok(community::k_core(graph, target)),
+        "k-clique"         => Ok(community::k_clique(graph, target)),
+        "modularity-max"   => Ok(community::modularity_max(graph, target)),
+        "divisive"         => Ok(community::divisive(graph, target)),
         // Meta-Path (1) — heterogeneous graph traversal. Target is the
         // arrow-separated kind sequence: "source->endpoint" etc.
         "meta-path" | "metapath" => Ok(meta_path::meta_path(graph, target)),
