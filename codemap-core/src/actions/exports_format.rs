@@ -165,6 +165,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             StringLiteral     => (245, 245, 245),
             Overlay           => (239, 154, 154),
             BinaryFunction    => (255, 249, 196),
+            License           => (197, 225, 165),
+            Cve               => (239, 83, 80),
         }
     }
 

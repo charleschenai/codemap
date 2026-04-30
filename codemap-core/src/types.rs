@@ -157,6 +157,21 @@ pub enum EntityKind {
     /// algorithms (PageRank, Leiden, betweenness) run at the
     /// function-within-binary level — not just file-within-repo.
     BinaryFunction,
+    /// Software license detected via SPDX identifier, manifest
+    /// `license` field, or LICENSE / COPYING / NOTICE template
+    /// matching. Edges: source/binary → license. attrs include
+    /// SPDX id, family (permissive/copyleft/proprietary/unknown),
+    /// detection method. Feeds the SBOM exporter and lets
+    /// meta-path queries answer "which copyleft files are in this
+    /// repo?"
+    License,
+    /// CVE imported from an offline NVD JSON dump. Edges: dll →
+    /// cve when a known-vulnerable version matches. attrs include
+    /// CVE id, CVSS score, severity, year, CWE. Together with the
+    /// existing dll/binary nodes, this turns codemap into a real
+    /// supply-chain auditor: meta-path "source->binary->dll->cve"
+    /// finds vulnerable transitive deps in your code.
+    Cve,
 }
 
 impl EntityKind {
@@ -186,6 +201,8 @@ impl EntityKind {
             EntityKind::StringLiteral => "string",
             EntityKind::Overlay => "overlay",
             EntityKind::BinaryFunction => "bin_func",
+            EntityKind::License => "license",
+            EntityKind::Cve => "cve",
         }
     }
 
@@ -217,6 +234,8 @@ impl EntityKind {
             "string" | "str" | "literal" => EntityKind::StringLiteral,
             "overlay" | "trailing" => EntityKind::Overlay,
             "bin_func" | "binfunc" | "function" | "func" => EntityKind::BinaryFunction,
+            "license" | "spdx" => EntityKind::License,
+            "cve" | "vuln" => EntityKind::Cve,
             _ => return None,
         })
     }

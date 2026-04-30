@@ -1185,3 +1185,59 @@ unaffected.
   Tests: 150 passing (no new unit tests; verification is the live
   smoke run).
   Action count: 150 (no new actions; wasm-info just got smarter).
+
+[2026-04-30] feat: 5.14.0 — supply-chain dimension (license-scan + cve-import + cve-match)
+  source: 5.15.0 tasks #44 + #45 lifted forward — both add their own
+  EntityKind, both fit cleanly in one release, and #45 (cve-match)
+  proves the killer supply-chain meta-path that codemap now does
+  natively where dedicated tools (Snyk, Trivy, Grype, syft) need a
+  separate dependency-scanning pass.
+
+  Two new EntityKinds:
+    - License (kind: "license") — SPDX identifier nodes. attrs:
+      spdx, family (permissive/weak_copyleft/strong_copyleft/
+      proprietary/unknown), usage_count.
+    - Cve (kind: "cve") — vulnerability records imported from
+      offline NVD JSON dumps. attrs: id, severity (CRITICAL/HIGH/
+      MEDIUM/LOW), cvss, year, cwe, description, cpe_products,
+      cpe_full.
+
+  Three new actions:
+    - license-scan — walks the scan dir for SPDX-License-Identifier
+      markers in source headers, license fields in 7 manifest
+      formats (Cargo.toml, package.json, pyproject.toml, pom.xml,
+      go.mod, gemspec, composer.json), and LICENSE/COPYING/NOTICE
+      files matched against template fingerprints (15 known
+      licenses: MIT, Apache-2.0, GPL family, LGPL family, AGPL,
+      MPL-2.0, BSD-2/3, ISC, Unlicense, 0BSD, EPL-2.0, BSL-1.0,
+      CC0-1.0). Registers source→license edges; the same License
+      node is reused across all sources claiming it.
+    - cve-import <nvd.json> — parses NVD JSON 1.1 or 2.0 schema
+      (auto-detects from envelope shape). Registers a Cve node per
+      record with full CPE 2.3 product extraction. No network —
+      strictly offline.
+    - cve-match — walks every Dll node in the graph, normalizes
+      its name (strips `lib` prefix + .so/.dll/.dylib/.jar +
+      version suffix), and matches against each Cve's CPE products.
+      On match, adds a dll→cve edge. Together with the existing
+      source→binary→dll edges, enables the killer query:
+      meta-path "source->binary->dll->cve" finds vulnerable
+      transitive dependencies in your code.
+
+  False-positive fix: the SPDX-License-Identifier scanner was
+  finding its own marker constant in license.rs source. Tightened
+  the parser to require ≥2 alphabetic chars + a leading letter
+  in the candidate, eliminating the recursive false-positive.
+
+  Live verification:
+    - codemap repo license-scan → 1 distinct SPDX (MIT, 2 hits in
+      manifests).
+    - Hand-crafted NVD JSON with one CVE-2099-99999 against
+      `cpe:2.3:a:gnu:glibc` → cve-import registers the CVE,
+      cve-match links it to libc.so.6 in codemap's ELF graph,
+      meta-path "elf->dll->cve" returns the path
+      `elf:/usr/local/bin/codemap → dll:libc.so.6 →
+      cve:CVE-2099-99999` correctly.
+
+  Tests: 163 passing (was 150). +13 unit tests (8 license, 5 cve).
+  Action count: 150 → 153 (+3).

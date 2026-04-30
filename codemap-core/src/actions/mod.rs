@@ -26,6 +26,8 @@ pub mod lang_fp;
 pub mod overlay;
 pub mod pe_meta;
 pub mod bin_disasm;
+pub mod license;
+pub mod cve;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -230,6 +232,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "pe-meta" | "rich-header" => Ok(pe_meta::pe_meta(graph, target)),
         // Binary disassembly (5.13.0) — x86/x64 via iced-x86
         "bin-disasm" | "disasm" => Ok(bin_disasm::bin_disasm(graph, target)),
+        // Supply-chain (5.14.0) — licenses + CVEs
+        "license-scan" | "licenses" => Ok(license::license_scan(graph, target)),
+        "cve-import"   => Ok(cve::cve_import(graph, target)),
+        "cve-match"    => Ok(cve::cve_match(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
