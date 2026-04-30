@@ -153,6 +153,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "changeset" => Ok(composite::changeset(graph, target)),
         "handoff" => Ok(composite::handoff(graph, target)),
         "pipeline" => Ok(composite::pipeline(graph, target)),
+        "audit" => Ok(composite::audit(graph, target)),
         // Centrality (4) — modern measures from NetworkX catalog. `target`
         // doubles as a comma-separated kind filter ("table,field").
         "betweenness" => Ok(centrality::betweenness(graph, &centrality::parse_kinds(target))),

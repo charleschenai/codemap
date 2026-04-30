@@ -822,6 +822,35 @@ fn test_scanner_auto_classifies_typed_files() {
 }
 
 #[test]
+fn test_audit_runs_and_reports_kinds() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "audit", "", false).unwrap();
+    assert!(result.contains("Architectural Audit"), "missing header: {result}");
+    assert!(result.contains("chokepoints"));
+    assert!(result.contains("brokers"));
+    assert!(result.contains("clusters"));
+    assert!(result.contains("Node census"));
+    // synthetic_hetero_graph has source + endpoint + table kinds
+    assert!(result.contains("source"));
+    assert!(result.contains("endpoint"));
+    assert!(result.contains("table"));
+}
+
+#[test]
+fn test_dot_output_uses_subgraph_clusters() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "dot", "", false).unwrap();
+    // Heterogeneous graph should produce subgraph cluster blocks
+    assert!(result.contains("subgraph cluster_endpoint"), "missing endpoint cluster: {result}");
+    assert!(result.contains("subgraph cluster_table"), "missing table cluster: {result}");
+    // SourceFile nodes should NOT be wrapped in a cluster (per the
+    // implementation comment — too noisy)
+    assert!(!result.contains("subgraph cluster_source"));
+    // compound=true must be set so cross-cluster edges render
+    assert!(result.contains("compound=true"));
+}
+
+#[test]
 fn test_pipeline_halts_on_error() {
     let mut g = synthetic_hetero_graph();
     let result = execute(&mut g, "pipeline",

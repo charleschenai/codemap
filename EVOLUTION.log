@@ -609,3 +609,31 @@ unaffected.
   Tests: 84 passing (was 83). +1 new test materializes 7 file types and
   verifies all 6 EntityKind variants are detected.
 
+[2026-04-30] feat: 5.7.0 — `audit` composite + cluster-by-kind dot output
+  source: heterogeneous graph + 11 centrality measures + Leiden gave us
+  raw signal but not a synthesis. `audit` synthesizes them into a one-
+  page architectural risk overview.
+
+  audit composite (actions/composite.rs::audit):
+    Runs betweenness + structural-holes + Leiden clusters and reports:
+      - Top 10 chokepoints (betweenness)
+      - Top 10 brokers (structural-holes effective_size)
+      - 🚨 Dual-risk nodes appearing in BOTH top lists — architectural
+        load-bearing walls (chokepoint AND broker)
+      - Top 3 dominant clusters with internal coupling %
+      - Per-EntityKind census
+      - Drill-in tip pointing to `callers` / `subgraph`
+    Use before refactors or when joining a new codebase.
+
+  dot subgraph clustering (actions/graph_theory.rs::dot):
+    Each non-source EntityKind now wraps its members in a graphviz
+    `subgraph cluster_<kind>` block with kind-labeled dashed border.
+    Source files render at the top level (skipping the cluster) since
+    they're typically >80% of nodes and would dominate visually.
+    Added `compound=true` so cross-cluster edges render correctly.
+
+  Tests: 86 passing (was 84). +2 new tests covering audit output
+  structure and dot cluster generation.
+
+  Action count: 109 → 110 (+ audit).
+

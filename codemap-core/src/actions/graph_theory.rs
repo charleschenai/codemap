@@ -512,20 +512,49 @@ pub fn dot(graph: &Graph, target: &str) -> String {
         "digraph codemap {".to_string(),
         "  rankdir=LR;".to_string(),
         "  node [shape=box, fontsize=10];".to_string(),
+        "  compound=true;".to_string(),  // allow edges between subgraphs
         String::new(),
     ];
 
-    // Kind-aware shapes/colors so heterogeneous graphs are readable.
-    // Source files inherit the default (box). Other kinds get distinct
-    // shapes consistent with stack-graphs / Joern visual conventions.
+    // Group nodes by EntityKind for subgraph clustering — graphviz
+    // renders each subgraph as a labeled box that visually groups its
+    // members. Big readability win on heterogeneous graphs where you'd
+    // otherwise have a tangle of mixed-kind nodes.
+    let mut by_kind: std::collections::BTreeMap<&str, Vec<(&String, &crate::types::GraphNode)>> = std::collections::BTreeMap::new();
     for (id, node) in &nodes {
-        let shape_color = dot_kind_attrs(node.kind);
-        if !shape_color.is_empty() {
-            lines.push(format!("  {} [{}];", dot_id(id), shape_color));
+        by_kind.entry(node.kind.as_str()).or_default().push((id, *node));
+    }
+
+    for (kind_name, members) in &by_kind {
+        // Skip the default SourceFile cluster — usually it's >80% of the
+        // graph and clustering it adds noise. Source nodes render at the
+        // top level and are visually distinct enough by absence of fill.
+        if *kind_name == "source" {
+            for (id, node) in members {
+                let shape_color = dot_kind_attrs(node.kind);
+                if !shape_color.is_empty() {
+                    lines.push(format!("  {} [{}];", dot_id(id), shape_color));
+                }
+            }
+            continue;
         }
+        lines.push(format!("  subgraph cluster_{} {{", kind_name));
+        lines.push(format!("    label=\"{kind_name}\";"));
+        lines.push("    style=dashed;".to_string());
+        lines.push("    color=gray60;".to_string());
+        for (id, node) in members {
+            let shape_color = dot_kind_attrs(node.kind);
+            if shape_color.is_empty() {
+                lines.push(format!("    {};", dot_id(id)));
+            } else {
+                lines.push(format!("    {} [{}];", dot_id(id), shape_color));
+            }
+        }
+        lines.push("  }".to_string());
     }
     lines.push(String::new());
 
+    // Edges (always at the top level so cross-cluster connections render)
     for (id, node) in &nodes {
         for imp in &node.imports {
             if nodes.contains_key(imp) {

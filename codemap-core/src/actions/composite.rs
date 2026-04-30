@@ -519,3 +519,142 @@ pub fn pipeline(graph: &mut Graph, target: &str) -> String {
     log.push(final_output);
     log.join("\n")
 }
+
+// ── 5. audit ────────────────────────────────────────────────────────
+//
+// "Architectural risk audit" composite. Runs betweenness + structural-
+// holes + Leiden clusters and synthesizes an overview report flagging:
+//
+//   - High-risk nodes: top of both betweenness AND brokers — they're
+//     chokepoints AND brokers between clusters. Refactoring or removing
+//     them ripples wide. These are the "load-bearing walls" of your code.
+//   - Hot clusters: top-3 largest communities by node count. Shows the
+//     dominant architectural blocs.
+//   - Bridge nodes: top brokers (high effective_size) — your integration
+//     surface, where unrelated kinds touch.
+//
+// The output is a quick-read 1-page summary, not raw scores. Use this
+// before a refactor or when joining a new codebase to see where the
+// blast-radius hotspots are.
+
+pub fn audit(graph: &mut Graph, _target: &str) -> String {
+    use std::collections::HashSet;
+
+    let n = graph.nodes.len();
+    if n == 0 {
+        return "audit: graph is empty (run a scan first or pass --dir).".to_string();
+    }
+
+    let mut lines = vec![
+        "=== Codemap Architectural Audit ===".to_string(),
+        format!("Graph: {} nodes across {} kinds", n,
+            graph.nodes.values().map(|node| node.kind).collect::<HashSet<_>>().len()),
+        String::new(),
+    ];
+
+    // 1) Betweenness — top chokepoints
+    let bt = super::centrality::betweenness(graph, &[]);
+    let chokepoints = parse_top_lines(&bt, 10);
+    lines.push("── Top chokepoints (betweenness) ──".to_string());
+    for (score, name) in &chokepoints {
+        lines.push(format!("  {score:>8}  {name}"));
+    }
+    lines.push(String::new());
+
+    // 2) Structural holes — top brokers
+    let sh = super::centrality::structural_holes(graph, &[]);
+    let brokers = parse_top_lines(&sh, 10);
+    lines.push("── Top brokers (structural holes) ──".to_string());
+    for (score, name) in &brokers {
+        lines.push(format!("  {score:>8}  {name}"));
+    }
+    lines.push(String::new());
+
+    // 3) Risk: nodes that appear in both top-10 lists
+    let chokepoint_names: HashSet<&str> = chokepoints.iter().map(|(_, n)| n.as_str()).collect();
+    let dual_risk: Vec<&str> = brokers.iter()
+        .filter(|(_, n)| chokepoint_names.contains(n.as_str()))
+        .map(|(_, n)| n.as_str())
+        .collect();
+    lines.push("── 🚨 High-risk nodes (chokepoint AND broker) ──".to_string());
+    if dual_risk.is_empty() {
+        lines.push("  (none — your graph has good separation between chokepoints and brokers)".to_string());
+    } else {
+        lines.push("  These are the architectural load-bearing walls. Changes here".to_string());
+        lines.push("  ripple through both shortest paths and cross-cluster edges.".to_string());
+        lines.push("  Treat as 'avoid surprise' nodes for refactors.".to_string());
+        lines.push(String::new());
+        for name in &dual_risk {
+            lines.push(format!("    {name}"));
+        }
+    }
+    lines.push(String::new());
+
+    // 4) Top clusters via Leiden
+    let cl = super::leiden::clusters_leiden(graph);
+    let cluster_summary = parse_cluster_summary(&cl, 3);
+    lines.push("── Dominant clusters (Leiden) ──".to_string());
+    for (i, summary) in cluster_summary.iter().enumerate() {
+        lines.push(format!("  #{}: {}", i + 1, summary));
+    }
+    lines.push(String::new());
+
+    // 5) Per-kind census
+    let mut by_kind: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for node in graph.nodes.values() {
+        *by_kind.entry(node.kind.as_str()).or_insert(0) += 1;
+    }
+    lines.push("── Node census by EntityKind ──".to_string());
+    for (kind, count) in &by_kind {
+        lines.push(format!("  {kind:<10}  {count}"));
+    }
+
+    lines.push(String::new());
+    lines.push("Tip: drill into specific risk nodes with `codemap callers <name>` or".to_string());
+    lines.push("`codemap subgraph <name>` to see what depends on them.".to_string());
+    lines.join("\n")
+}
+
+/// Parse the top N (score, name) entries from a centrality report.
+/// Reports look like:
+///   `   0.1234  some/file.rs`
+/// We just read each non-empty data line and grab the last whitespace
+/// segment as the name, the rest as the score.
+fn parse_top_lines(report: &str, n: usize) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in report.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("===") || line.starts_with("──")
+            || line.starts_with("Filter:") || line.starts_with("Reading:") { continue; }
+        // Expect: "score  name"
+        let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
+        if parts.len() != 2 { continue; }
+        let score = parts[0].trim();
+        // Skip header lines like "eff_size  constraint  node"
+        if score.parse::<f64>().is_err() { continue; }
+        let name = parts[1].trim_start();
+        // For structural-holes the line has "score score name"
+        let cols: Vec<&str> = name.splitn(2, char::is_whitespace).collect();
+        let final_name = if cols.len() == 2 && cols[0].parse::<f64>().is_ok() {
+            cols[1].trim().to_string()
+        } else {
+            name.to_string()
+        };
+        out.push((score.to_string(), final_name));
+        if out.len() >= n { break; }
+    }
+    out
+}
+
+/// Parse the top N cluster summaries from a Leiden/LPA report. Each
+/// cluster block starts with "Cluster N (X files, Y% internal coupling):"
+fn parse_cluster_summary(report: &str, n: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in report.lines() {
+        if line.starts_with("Cluster ") && line.contains(" files,") {
+            out.push(line.trim().trim_end_matches(':').to_string());
+            if out.len() >= n { break; }
+        }
+    }
+    out
+}
