@@ -421,3 +421,101 @@ pub fn handoff(graph: &mut Graph, target: &str) -> String {
 
     lines.join("\n")
 }
+
+// ── 4. pipeline ────────────────────────────────────────────────────
+//
+// Chain multiple actions in a single CLI invocation, accumulating graph
+// mutations across them. Useful for one-shot heterogeneous workflows
+// where cache persistence is overkill or you want determinism (no
+// dependency on whatever's already in `.codemap/cache.bincode`).
+//
+// Syntax: `codemap pipeline "action1:target1,action2:target2,...,final:target"`
+//
+// Examples:
+//   codemap pipeline "js-api-extract:src/,meta-path:source->endpoint"
+//     → registers endpoints from JS bundles, then traces source→endpoint
+//       paths in a single process. Output is the meta-path result.
+//   codemap pipeline "pe-imports:foo.exe,pe-exports:foo.exe,pagerank:"
+//     → builds full PeBinary/Dll/Symbol graph, ranks by pagerank.
+//   codemap pipeline "clarion-schema:db.clw,sql-extract:app.exe,meta-path:source->table"
+//     → schema + binary SQL extraction + cross-domain query.
+//
+// Errors halt the pipeline immediately and print the error chain;
+// preceding actions' partial mutations remain in the graph (and cache,
+// per persist_typed_nodes — which dispatch runs after this composite
+// returns).
+
+pub fn pipeline(graph: &mut Graph, target: &str) -> String {
+    if target.is_empty() {
+        return concat!(
+            "Usage: codemap pipeline \"action1:target1,action2:target2,...,final:target\"\n",
+            "\n",
+            "Each entry runs in order against the same graph. Final entry's output is\n",
+            "what gets printed. Errors halt the pipeline.\n",
+            "\n",
+            "Examples:\n",
+            "  codemap pipeline \"js-api-extract:src/,meta-path:source->endpoint\"\n",
+            "  codemap pipeline \"pe-imports:foo.exe,pagerank:\"\n",
+            "  codemap pipeline \"clarion-schema:db.clw,sql-extract:app.exe,meta-path:source->table\"\n"
+        ).to_string();
+    }
+
+    // Parse the comma-separated entries. Each is `action:target` (target
+    // may contain '/' or '-' but not the outer comma; an entry without
+    // a colon is an action with empty target — useful for things like
+    // `pagerank` that don't take a target).
+    let entries: Vec<(String, String)> = target.split(',')
+        .map(|e| {
+            let e = e.trim();
+            match e.find(':') {
+                Some(i) => (e[..i].trim().to_string(), e[i+1..].trim().to_string()),
+                None => (e.to_string(), String::new()),
+            }
+        })
+        .filter(|(a, _)| !a.is_empty())
+        .collect();
+
+    if entries.is_empty() {
+        return "pipeline: no actions specified".to_string();
+    }
+
+    let mut log = vec![
+        format!("=== Pipeline ({} steps) ===", entries.len()),
+        String::new(),
+    ];
+    let last_idx = entries.len() - 1;
+    let mut final_output = String::new();
+
+    for (i, (action, t)) in entries.iter().enumerate() {
+        let step_label = format!("Step {}/{}: {} {}",
+            i + 1, entries.len(), action, t);
+        log.push(format!("→ {step_label}"));
+
+        // Recursively dispatch — but call dispatch_inner directly to avoid
+        // double-running persist_typed_nodes per step (the outer dispatch
+        // call that invoked `pipeline` will persist once at the end).
+        match super::dispatch_inner(graph, action, t, false) {
+            Ok(out) => {
+                if i == last_idx {
+                    final_output = out;
+                } else {
+                    // Intermediate steps: just summarize
+                    let summary = out.lines().take(2).collect::<Vec<_>>().join(" | ");
+                    log.push(format!("    ✓ {summary}"));
+                }
+            }
+            Err(e) => {
+                log.push(format!("    ✗ pipeline halted: {e}"));
+                log.push(String::new());
+                log.push("(preceding steps' mutations remain in the graph and persist to cache)".to_string());
+                return log.join("\n");
+            }
+        }
+    }
+
+    log.push(String::new());
+    log.push("── Final output ──".to_string());
+    log.push(String::new());
+    log.push(final_output);
+    log.join("\n")
+}

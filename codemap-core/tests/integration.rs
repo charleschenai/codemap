@@ -730,6 +730,64 @@ fn test_current_flow_runs() {
 }
 
 #[test]
+fn test_pipeline_chains_actions() {
+    // 5.5.1: pipeline composite chains multiple actions in one call,
+    // accumulating graph mutations. Cache-persistence makes this also
+    // work across processes; pipeline is the one-shot variant that
+    // doesn't depend on .codemap/ state.
+    let tmp = std::env::temp_dir().join(format!("codemap-pipeline-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src/c.js"),
+        "fetch('https://api.real.io/users');".to_string()
+    ).unwrap();
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    // Pipeline: js-api-extract THEN meta-path. The JS-extracted endpoint
+    // should be visible to the meta-path step in the same process.
+    let pipeline_arg = format!("js-api-extract:{},meta-path:source->endpoint",
+        tmp.join("src/").to_string_lossy());
+    let result = execute(&mut g, "pipeline", &pipeline_arg, false).unwrap();
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert!(result.contains("Pipeline (2 steps)"));
+    assert!(result.contains("Step 1/2: js-api-extract"));
+    assert!(result.contains("Step 2/2: meta-path"));
+    assert!(result.contains("Final output"));
+    assert!(result.contains("Paths:"), "meta-path output missing: {result}");
+    // The JS source already auto-promotes URL → endpoint via scanner pass,
+    // so we expect at least 1 path.
+    assert!(!result.contains("Paths: 0"), "expected paths from chained js-api-extract: {result}");
+}
+
+#[test]
+fn test_pipeline_help() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "pipeline", "", false).unwrap();
+    assert!(result.contains("Usage:"), "should show usage: {result}");
+    assert!(result.contains("action1:target1"), "should explain syntax: {result}");
+}
+
+#[test]
+fn test_pipeline_halts_on_error() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "pipeline",
+        "pagerank:,nonexistent-action:foo,closeness:", false).unwrap();
+    assert!(result.contains("halted"), "should report halt: {result}");
+    // First step succeeded
+    assert!(result.contains("Step 1"));
+    // Closeness (step 3) should NOT have run
+    assert!(!result.contains("Closeness Centrality"));
+}
+
+#[test]
 fn test_scanner_promotes_urls_to_endpoint_nodes() {
     // 5.4.0: source-code URLs become HttpEndpoint nodes during scan, so
     // `meta-path source->endpoint` works on any codebase without first

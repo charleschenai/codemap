@@ -543,3 +543,32 @@ unaffected.
   (subgraph_alg, second_order, dispersion, reaching, trophic, voterank's
   k-influencer set variant) — those are more situational.
 
+[2026-04-30] feat: 5.5.1 — `pipeline` composite action chains RE+analysis steps
+  source: cache-persistence (5.3.1) made multi-process composition work,
+  but for one-shot scripted workflows `pipeline` is cleaner — single CLI
+  invocation, deterministic, no .codemap/ state dependency.
+
+  Syntax:
+    codemap pipeline "action1:target1,action2:target2,...,final:target"
+
+  Each comma-separated entry is `action:target` (or just `action` for
+  no-target actions like pagerank). Steps run in order against the
+  same Graph; final step's output is what gets printed. Errors halt
+  the pipeline; preceding mutations remain in the graph and persist
+  to cache.
+
+  Examples:
+    codemap pipeline "js-api-extract:src/,meta-path:source->endpoint"
+    codemap pipeline "pe-imports:foo.exe,pe-exports:foo.exe,pagerank:"
+    codemap pipeline "clarion-schema:db.clw,sql-extract:app.exe,meta-path:source->table"
+
+  Implementation: composite::pipeline parses the target string, calls
+  dispatch_inner (now pub(crate)) per step, collects step summaries +
+  final output. Errors abort with the full step log so users see where
+  things broke.
+
+  Tests: 83 passing (was 80). +3 new tests covering chain success, help
+  text, error halting.
+
+  Action count: 108 → 109 (+ pipeline).
+

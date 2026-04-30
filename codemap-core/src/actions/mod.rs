@@ -29,7 +29,7 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
     result
 }
 
-fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) -> Result<String, CodemapError> {
+pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) -> Result<String, CodemapError> {
     match action {
         // Analysis (14)
         "stats" => Ok(analysis::stats(graph)),
@@ -148,10 +148,11 @@ fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree_mode: bool
         "onnx-info" => Ok(ml::onnx_info(graph, target)),
         "pyc-info" => Ok(ml::pyc_info(graph, target)),
         "cuda-info" => Ok(ml::cuda_info(graph, target)),
-        // Composite (3)
+        // Composite (4)
         "validate" => Ok(composite::validate(graph, target)),
         "changeset" => Ok(composite::changeset(graph, target)),
         "handoff" => Ok(composite::handoff(graph, target)),
+        "pipeline" => Ok(composite::pipeline(graph, target)),
         // Centrality (4) — modern measures from NetworkX catalog. `target`
         // doubles as a comma-separated kind filter ("table,field").
         "betweenness" => Ok(centrality::betweenness(graph, &centrality::parse_kinds(target))),

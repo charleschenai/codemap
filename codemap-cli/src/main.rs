@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (108 actions, heterogeneous graph, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (109 actions, heterogeneous graph, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
@@ -34,7 +34,8 @@ Actions:
   LSP:          lsp-symbols, lsp-references, lsp-calls, lsp-diagnostics, lsp-types
   Schemas:      proto-schema, openapi-schema, graphql-schema, docker-map, terraform-map
   ML/AI:        gguf-info, safetensors-info, onnx-info, pyc-info, cuda-info
-  Composite:    validate, changeset, handoff
+  Composite:    validate, changeset, handoff, pipeline
+                  (pipeline target = comma-separated \"action:target\" entries)
 
 Entity kinds (heterogeneous graph): source pe elf macho jclass wasm dll symbol
   endpoint form table field proto gql oapi docker tf model asm
