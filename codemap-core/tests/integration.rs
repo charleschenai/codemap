@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use codemap_core::{scan, execute, ScanOptions};
 
@@ -403,4 +404,58 @@ fn test_git_coupling() {
     let mut graph = scan_self();
     let result = execute(&mut graph, "git-coupling", "", false).unwrap();
     assert!(!result.is_empty());
+}
+
+// ── Skip-dir guards ────────────────────────────────────────────────
+//
+// Regression test for the OOM-cascade incident 2026-04-29 23:18 UTC.
+// SKIP_DIRS must exclude vendored / cached / build trees so a scan
+// rooted near user code doesn't descend into 10K-file `.venv` trees
+// and AST-parse the world.
+
+fn write(path: &std::path::Path, body: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, body).unwrap();
+}
+
+#[test]
+fn test_skip_dirs_exclude_dep_trees() {
+    let tmp = std::env::temp_dir().join(format!("codemap-skip-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+
+    write(&tmp.join("src/user_code.py"), "def real_function():\n    pass\n");
+    write(&tmp.join(".venv/lib/python3.13/site-packages/mypy/vendored.py"), "def junk(): pass\n");
+    write(&tmp.join("venv/lib/site.py"), "def junk(): pass\n");
+    write(&tmp.join("__pycache__/cached.py"), "def junk(): pass\n");
+    write(&tmp.join(".pytest_cache/v/cache.py"), "def junk(): pass\n");
+    write(&tmp.join(".mypy_cache/3.13/types.py"), "def junk(): pass\n");
+    write(&tmp.join("vendor/dep.go"), "package vendored\n");
+    write(&tmp.join("node_modules/lib/index.js"), "function junk(){}\n");
+    write(&tmp.join(".next/server/page.js"), "function junk(){}\n");
+    write(&tmp.join("Pods/lib.swift"), "func junk(){}\n");
+    write(&tmp.join("target/release/build.rs"), "fn junk() {}\n");
+    write(&tmp.join("dist/bundle.js"), "function junk(){}\n");
+
+    let graph = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let scanned: Vec<&String> = graph.nodes.keys().collect();
+    let user_hits = scanned.iter().filter(|p| p.contains("user_code.py")).count();
+    let vendored_hits = scanned.iter().filter(|p| {
+        p.contains(".venv/") || p.contains("/venv/") || p.contains("__pycache__/")
+            || p.contains(".pytest_cache/") || p.contains(".mypy_cache/")
+            || p.contains("/vendor/") || p.contains("/node_modules/")
+            || p.contains("/.next/") || p.contains("/Pods/")
+            || p.contains("/target/") || p.contains("/dist/")
+    }).count();
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert_eq!(user_hits, 1, "expected user_code.py to be scanned (found paths: {:?})", scanned);
+    assert_eq!(vendored_hits, 0, "expected zero vendored/cache files in graph (found: {:?})",
+        scanned.iter().filter(|p| !p.contains("user_code.py")).collect::<Vec<_>>());
 }

@@ -212,3 +212,25 @@ and accepts `file_cap`; `scan_single_dir` reads `CODEMAP_NO_FILE_LIMIT`),
 
 No API change to napi bindings or any action; existing integration tests
 unaffected.
+
+[2026-04-30] fix: 5.1.2 — root-cause SKIP_DIRS, prevent vendored-tree AST parse
+  source: post-mortem of 5.1.1 incident — 50 GB heap was driven by codemap
+  AST-parsing every file in every project's `.venv/lib/python3.13/site-packages/`
+  tree. SKIP_DIRS only knew about `node_modules .git dist build .codemap target`
+  (Node + Rust + git), so a Python venv was indistinguishable from user code.
+  Smoke test on mater: `~/Desktop` walk dropped 6,888 → 4,237 files (-39%) once
+  `.venv venv __pycache__ vendor .next .nuxt .tox .pytest_cache .mypy_cache
+  .ruff_cache site-packages bower_components Pods .gradle .svelte-kit .vercel
+  .turbo .parcel-cache .cache .nyc_output .idea .vscode .hg .svn out coverage
+  jspm_packages` were added.
+
+  This is the actual fix for the 2026-04-29 OOM cascade. The 5.1.1 guards
+  (50K hard cap, $HOME refuse, 10K warning) remain as belt-and-suspenders
+  for genuinely large user codebases, but should no longer trigger in
+  normal use.
+
+  Implementation: `codemap-core/src/scanner.rs` (SKIP_DIRS expanded with
+  ecosystem-wide dep/cache/build conventions). New regression test
+  `test_skip_dirs_exclude_dep_trees` materializes 12 vendored/cached files
+  alongside one user file and asserts only the user file lands in the graph.
+

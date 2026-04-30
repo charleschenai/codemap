@@ -26,8 +26,35 @@ const FILE_COUNT_WARN: usize = 10_000;
 /// Override with CODEMAP_NO_FILE_LIMIT=1 if you genuinely need to scan more.
 const FILE_COUNT_HARD_CAP: usize = 50_000;
 
-/// Directories to skip during walk.
-const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", ".codemap", "target"];
+/// Directories to skip during walk. These are dependency, build, cache, and
+/// IDE/VCS dirs that contain vendored or generated files — never user source
+/// code. Walking into them is the documented cause of the OOM-cascade
+/// incident 2026-04-29 23:18 UTC: a scan rooted at $HOME descended into
+/// every project's `.venv/` (each ~10K vendored Python files), AST-parsed
+/// all of them, and ballooned to ~50 GB heap before kernel-OOM-killing the
+/// whole tmux scope. Each entry below should pay for its place — reject
+/// additions that match real user code paths.
+const SKIP_DIRS: &[&str] = &[
+    // VCS
+    ".git", ".hg", ".svn",
+    // Node / JS bundlers / framework caches
+    "node_modules", "bower_components", "jspm_packages",
+    "dist", "build", "out",
+    ".next", ".nuxt", ".svelte-kit", ".vercel", ".turbo",
+    ".parcel-cache", ".cache",
+    // Python venvs + tooling caches
+    ".venv", "venv", "__pycache__",
+    ".tox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "site-packages",
+    // Rust / Go / Java / Ruby / PHP
+    "target", "vendor", ".gradle",
+    // Coverage / IDE
+    "coverage", ".nyc_output", ".idea", ".vscode",
+    // iOS / Cocoapods
+    "Pods",
+    // codemap's own cache
+    ".codemap",
+];
 
 /// Supported file extensions (with leading dot).
 const SUPPORTED_EXTS: &[&str] = &[
