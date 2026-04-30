@@ -691,6 +691,44 @@ fn test_brokers_alias() {
     assert!(result.contains("Structural Holes"), "brokers should alias to structural-holes: {result}");
 }
 
+#[test]
+fn test_typed_node_cache_persists_across_invocations() {
+    // 5.3.1: RE-action mutations must persist through a save→load round
+    // trip so multi-step CLI workflows can compose passes. Simulates two
+    // separate `codemap` processes scanning the same directory.
+    let tmp = std::env::temp_dir().join(format!("codemap-persist-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src/client.js"),
+        r#"async function getUsers() { return await fetch('https://api.example.com/users'); }"#
+    ).unwrap();
+
+    // Process 1: scan + js-api-extract (registers HttpEndpoint, saves cache)
+    let mut g1 = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan 1 should succeed");
+    let _ = execute(&mut g1, "js-api-extract", &tmp.join("src/").to_string_lossy(), false).unwrap();
+    drop(g1); // simulate process exit (cache flush already happened)
+
+    // Process 2: scan + meta-path (should read cached endpoints)
+    let mut g2 = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: false,
+        quiet: true,
+    }).expect("scan 2 should succeed");
+    let result = execute(&mut g2, "meta-path", "source->endpoint", false).unwrap();
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert!(result.contains("Paths:"), "missing paths header: {result}");
+    // Should NOT be 0 — js-api-extract from process 1 left endpoints in cache
+    assert!(!result.contains("Paths: 0"), "endpoints did not persist across processes: {result}");
+}
+
 // ── web-dom truncated-tag regression ──────────────────────────────
 //
 // 5.1.4: extract_buttons/forms/tables/navs in actions/reverse/web.rs used

@@ -11,6 +11,13 @@ use super::common::*;
 /// Edges from SourceFile/JsBundle/HAR to the endpoint give us cross-domain
 /// queries — e.g. `meta-path SourceFile->HttpEndpoint` traces every code
 /// file that ultimately produces an API call.
+///
+/// `source` is matched against existing scanned source-file IDs. If a
+/// source-file node already exists with the same id (the common case
+/// when a JS file is both scanned and js-api-extracted), edge from it
+/// directly. Otherwise create a new SourceFile node tagged with the
+/// path as-is — this lets non-source artifacts (HAR captures, HTML
+/// pages outside the scan root) still anchor edges.
 fn register_endpoint(graph: &mut Graph, source: &str, method: &str, url: &str) {
     let ep_id = format!("ep:{method}:{url}");
     graph.ensure_typed_node(&ep_id, EntityKind::HttpEndpoint, &[
@@ -18,7 +25,7 @@ fn register_endpoint(graph: &mut Graph, source: &str, method: &str, url: &str) {
         ("url", url),
         ("first_seen", source),
     ]);
-    let src_id = format!("file:{source}");
+    let src_id = source_node_id(graph, source);
     graph.ensure_typed_node(&src_id, EntityKind::SourceFile, &[("path", source)]);
     graph.add_edge(&src_id, &ep_id);
 }
@@ -32,9 +39,42 @@ fn register_form(graph: &mut Graph, source: &str, action: &str, method: &str) {
         ("method", method),
         ("page", source),
     ]);
-    let src_id = format!("file:{source}");
+    let src_id = source_node_id(graph, source);
     graph.ensure_typed_node(&src_id, EntityKind::SourceFile, &[("path", source)]);
     graph.add_edge(&src_id, &form_id);
+}
+
+/// Resolve a `source` path to the canonical node id used by the scanner.
+/// The scanner registers source files by their path relative to scan_dir
+/// (e.g. "src/api_client.py"); RE actions take an absolute or different
+/// relative path. This helper checks if any of: bare source, basename,
+/// or stripped-prefix variants matches a scanned node and returns that
+/// id. Falls back to "file:<source>" for non-source artifacts (HAR,
+/// HTML files outside the scan root) so they still anchor edges.
+fn source_node_id(graph: &Graph, source: &str) -> String {
+    // Direct hit — most common case once IDs align
+    if graph.nodes.contains_key(source) {
+        return source.to_string();
+    }
+    // Try with scan_dir stripped (RE action passed an absolute path)
+    if !graph.scan_dir.is_empty() {
+        if let Some(rel) = source.strip_prefix(&graph.scan_dir) {
+            let rel = rel.trim_start_matches('/');
+            if graph.nodes.contains_key(rel) {
+                return rel.to_string();
+            }
+        }
+    }
+    // Suffix match — covers cases where RE sees a basename and scanner
+    // saw a longer relative path (or vice versa)
+    let basename = source.rsplit('/').next().unwrap_or(source);
+    for id in graph.nodes.keys() {
+        if id.ends_with(source) || id.ends_with(&format!("/{basename}")) {
+            return id.clone();
+        }
+    }
+    // Fallback: non-source artifact (HAR / HTML capture / external file)
+    format!("file:{source}")
 }
 
 // ── 1. web_api ────────────────────────────────────────────────────

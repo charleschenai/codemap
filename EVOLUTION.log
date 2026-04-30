@@ -424,3 +424,37 @@ unaffected.
 
   Action count: 101 → 104 (+ harmonic, load, structural-holes).
 
+[2026-04-30] fix: 5.3.1 — typed-node cache persistence + RE-action ID alignment
+  source: real-world validation of 5.3.0 surfaced two issues:
+    1. RE-action mutations (HttpEndpoint/SchemaTable/etc nodes) lived
+       only inside a single CLI invocation and got thrown away on
+       process exit. Two-step workflows like
+         `codemap js-api-extract src/ && codemap meta-path source->endpoint`
+       returned 0 paths because the second invocation started fresh.
+    2. ID-scheme mismatch: web-action `register_endpoint` anchored
+       endpoints to `file:<source>` while the scanner produced bare
+       relative paths like `src/client.js`. Source→endpoint edges
+       therefore connected disjoint id namespaces.
+
+  Fixes:
+    - scanner.rs: cache version 9 → 10. CacheData now carries a
+      `typed_nodes` Vec alongside `files`. save_cache writes both;
+      load_cache hydrates non-source nodes back into the graph.
+    - actions/mod.rs: dispatch wraps the inner match in a fn that runs
+      `scanner::persist_typed_nodes(graph)` after every action. RE
+      actions now flush their mutations every invocation.
+    - actions/reverse/web.rs: new `source_node_id` resolver — checks
+      direct match → strip-prefix match → suffix match → fallback. RE
+      actions anchor to the scanner's actual node id when one exists,
+      so meta-paths stitch correctly.
+
+  Validation: created src/client.js with two fetch calls; ran
+  `js-api-extract src/` in process 1, then `meta-path source->endpoint`
+  in process 2. Result: 2 paths found (one per fetch). pagerank --type
+  endpoint also surfaces them.
+
+  New regression test test_typed_node_cache_persists_across_invocations
+  drops the post-extract Graph (simulating process exit) and re-scans
+  to verify the meta-path output reads cached endpoints. 73 tests
+  passing (was 72).
+

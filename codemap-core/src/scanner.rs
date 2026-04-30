@@ -14,7 +14,8 @@ use std::time::Instant;
 // ── Constants ───────────────────────────────────────────────────────
 
 // 9: heterogeneous graph (EntityKind + attrs on GraphNode)
-const CACHE_VERSION: u32 = 9;
+// 10: typed_nodes persistence — RE-action mutations cache across CLI runs
+const CACHE_VERSION: u32 = 10;
 const MAX_DEPTH: usize = 50;
 
 /// Print a warning when a single scan crosses this many supported files.
@@ -82,10 +83,30 @@ struct CacheEntry {
     bridges: Vec<crate::types::BridgeInfo>,
 }
 
+/// Persisted RE-action graph mutations (heterogeneous nodes that aren't
+/// tied to a source file). Lets multi-step CLI workflows compose RE
+/// actions: first invocation `codemap pe-imports foo.exe` creates the
+/// PeBinary/Dll/Symbol nodes, second `codemap meta-path source->endpoint`
+/// reads them back and traverses. Without this, each CLI process starts
+/// with only source-file nodes regardless of past RE runs.
+#[derive(Serialize, Deserialize, Clone)]
+struct TypedNodeEntry {
+    id: String,
+    kind: crate::types::EntityKind,
+    imports: Vec<String>,
+    imported_by: Vec<String>,
+    attrs: HashMap<String, String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct CacheData {
     version: u32,
     files: HashMap<String, CacheEntry>,
+    /// Non-source-file typed nodes registered by RE-action passes. These
+    /// persist across CLI invocations so meta-path / pagerank / etc. can
+    /// see RE outputs from earlier runs.
+    #[serde(default)]
+    typed_nodes: Vec<TypedNodeEntry>,
 }
 
 // ── Cache I/O ───────────────────────────────────────────────────────
@@ -116,7 +137,17 @@ fn load_cache(dir: &str) -> Option<CacheData> {
     Some(CacheData {
         version: CACHE_VERSION,
         files,
+        typed_nodes: data.typed_nodes,
     })
+}
+
+/// Public hook: persist any RE-action mutations on `graph` back to cache
+/// after dispatch completes. Source-file entries are preserved (we only
+/// rewrite the typed_nodes section). Called once per CLI invocation by
+/// actions::dispatch so RE actions accumulate state across processes.
+pub fn persist_typed_nodes(graph: &crate::types::Graph) {
+    if graph.scan_dir.is_empty() { return; }
+    save_cache(&graph.scan_dir, &graph.nodes);
 }
 
 fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
@@ -126,9 +157,10 @@ fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
             return;
         }
     let mut files = HashMap::new();
+    let mut typed_nodes: Vec<TypedNodeEntry> = Vec::new();
     for (id, node) in nodes {
         let mtime = node.mtime.unwrap_or(0.0);
-        if mtime > 0.0 {
+        if node.kind == crate::types::EntityKind::SourceFile && mtime > 0.0 {
             files.insert(
                 id.clone(),
                 CacheEntry {
@@ -142,11 +174,22 @@ fn save_cache(dir: &str, nodes: &HashMap<String, GraphNode>) {
                     bridges: node.bridges.clone(),
                 },
             );
+        } else if node.kind != crate::types::EntityKind::SourceFile {
+            // RE-action nodes (PeBinary, SchemaTable, HttpEndpoint, etc.)
+            // persist independently of mtime — they're not file-backed.
+            typed_nodes.push(TypedNodeEntry {
+                id: id.clone(),
+                kind: node.kind,
+                imports: node.imports.clone(),
+                imported_by: node.imported_by.clone(),
+                attrs: node.attrs.clone(),
+            });
         }
     }
     let data = CacheData {
         version: CACHE_VERSION,
         files,
+        typed_nodes,
     };
     let encoded = match bincode::serialize(&data) {
         Ok(b) => b,
@@ -510,7 +553,33 @@ fn scan_single_dir(
     // Resolve cross-language bridge edges
     resolve_bridge_edges(&mut nodes);
 
-    // Save cache
+    // Hydrate typed (non-source) nodes from cache. These were registered
+    // by past RE-action invocations (pe-imports, web-blueprint, schema
+    // actions, etc.) and persist across CLI processes so multi-step
+    // workflows can chain RE passes into meta-path queries.
+    if let Some(ref c) = cache {
+        for tn in &c.typed_nodes {
+            // Skip if a real source-file node already claims this id
+            if nodes.contains_key(&tn.id) { continue; }
+            nodes.insert(tn.id.clone(), GraphNode {
+                id: tn.id.clone(),
+                imports: tn.imports.clone(),
+                imported_by: tn.imported_by.clone(),
+                urls: Vec::new(),
+                exports: Vec::new(),
+                lines: 0,
+                functions: Vec::new(),
+                data_flow: None,
+                bridges: Vec::new(),
+                kind: tn.kind,
+                attrs: tn.attrs.clone(),
+                mtime: None,
+            });
+        }
+    }
+
+    // Save cache (source files only — RE-action mutations save themselves
+    // after each action via Graph::persist_typed_nodes; see actions/mod.rs)
     save_cache(&dir_str, &nodes);
 
     // Print cache stats

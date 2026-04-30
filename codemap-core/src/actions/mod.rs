@@ -21,6 +21,15 @@ use crate::types::Graph;
 use crate::CodemapError;
 
 pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) -> Result<String, CodemapError> {
+    let result = dispatch_inner(graph, action, target, tree_mode);
+    // After every action, persist any RE-action node registrations to the
+    // cache so subsequent invocations can compose RE passes (e.g. run
+    // pe-imports first, meta-path source->endpoint second).
+    crate::scanner::persist_typed_nodes(graph);
+    result
+}
+
+fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) -> Result<String, CodemapError> {
     match action {
         // Analysis (14)
         "stats" => Ok(analysis::stats(graph)),
