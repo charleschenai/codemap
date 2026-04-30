@@ -1602,11 +1602,32 @@ fn parse_pyc(data: &[u8], target: &str) -> Result<String, String> {
 // ── 5. cuda_info ──────────────────────────────────────────────────
 
 pub fn cuda_info(graph: &mut Graph, target: &str) -> String {
+    use crate::types::EntityKind;
     register_ml_model(graph, target, "cuda");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
+    // 5.17.0: each CUDA kernel is a function in the cubin — promote to a
+    // BinaryFunction node so kernels participate in centrality / meta-path
+    // queries the same way java/wasm/dotnet/pyc functions do. Reuses the
+    // existing BinaryFunction kind via attrs["binary_format"]="cuda".
+    if let Ok((kernels, sm)) = extract_cuda_kernels_from_elf(&data) {
+        let module_id = format!("model:{target}");
+        let sm_str = sm.to_string();
+        let arch = sm_arch_name(sm);
+        for (i, kernel) in kernels.iter().enumerate().take(2000) {
+            let func_id = format!("bin_func:cuda:{target}::{i}");
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", kernel),
+                ("binary_format", "cuda"),
+                ("kind_detail", "kernel"),
+                ("sm", &sm_str),
+                ("sm_arch", arch),
+            ]);
+            graph.add_edge(&module_id, &func_id);
+        }
+    }
     match parse_cuda(&data, target) {
         Ok(info) => info,
         Err(e) => format!("CUDA binary parse error: {e}"),

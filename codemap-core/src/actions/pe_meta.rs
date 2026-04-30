@@ -295,6 +295,39 @@ pub fn pe_meta(graph: &mut Graph, target: &str) -> String {
             }
             lines.push(format!("\n  Toolchain summary: {summary}"));
         }
+
+        // Promote each unique Rich-header product to a first-class Compiler
+        // node so cross-binary queries like
+        //   meta-path "compiler->pe"   (every binary built with VS2019 link)
+        // work uniformly with lang_fp.rs's family-level Compiler nodes.
+        // De-duplicated by product_name; build_number + count aggregated when
+        // the same tool appears multiple times in the linkage manifest.
+        use std::collections::BTreeMap;
+        let mut by_name: BTreeMap<&'static str, (u16, u16, u32)> = BTreeMap::new();
+        for e in &entries {
+            let name = e.product_name();
+            if name == "(unknown)" { continue; }
+            let slot = by_name.entry(name).or_insert((e.product_id, e.build_number, 0));
+            slot.2 += e.count;
+            // keep highest build_number seen for this product
+            if e.build_number > slot.1 { slot.1 = e.build_number; }
+        }
+        for (name, (pid, build, count)) in by_name {
+            let comp_id = format!("compiler:{name}");
+            let pid_str = format!("{pid:#06x}");
+            let build_str = build.to_string();
+            let count_str = count.to_string();
+            graph.ensure_typed_node(&comp_id, EntityKind::Compiler, &[
+                ("name", name),
+                ("language", "c++"),
+                ("toolchain", "msvc"),
+                ("source", "rich_header"),
+                ("product_id", &pid_str),
+                ("build_number", &build_str),
+                ("object_count", &count_str),
+            ]);
+            graph.add_edge(&bin_id, &comp_id);
+        }
     } else {
         lines.push("\n── Rich header ──\n  (not present — non-MSVC toolchain or stripped)".to_string());
     }
@@ -308,6 +341,25 @@ pub fn pe_meta(graph: &mut Graph, target: &str) -> String {
         if let Some(node) = graph.nodes.get_mut(&bin_id) {
             node.attrs.insert("has_tls_callback".into(), "true".into());
             node.attrs.insert("tls_callback_count".into(), tls.callback_count.to_string());
+        }
+        // Promote each TLS callback to a first-class BinaryFunction node so
+        // they participate in centrality / meta-path queries. The
+        // `tls_callback=true` + `kind_detail=tls_persistence` attrs let
+        // analysts filter for "every binary in this graph with TLS-callback
+        // persistence" via attribute-filter without relying on a
+        // text-output scan.
+        for (i, rva) in tls.callback_rvas.iter().enumerate() {
+            let func_id = format!("bin_func:pe:{target}::tls{i}");
+            let rva_str = format!("{rva:#010x}");
+            let name = format!("tls_callback_{i}");
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", &name),
+                ("binary_format", "pe"),
+                ("kind_detail", "tls_persistence"),
+                ("rva", &rva_str),
+                ("tls_callback", "true"),
+            ]);
+            graph.add_edge(&bin_id, &func_id);
         }
         if tls.callback_count > 0 {
             lines.push("\n  ⚠ TLS callbacks run BEFORE main() — common malware persistence vector".to_string());

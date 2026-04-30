@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.16.2 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.17.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -36,7 +36,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **163 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
-- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, and ML model files — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 28 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
+- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, ML model files, and **(5.17.0+) hardcoded secrets** — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `pagerank --type secret` ranks files by credential-risk concentration. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 29 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
 - **11 centrality measures (5.2.0+).** PageRank, HITS, betweenness (Brandes 2001), eigenvector, Katz, closeness, harmonic (Marchiori-Latora 2000, handles disconnected graphs), load (Newman 2001), structural-holes / brokers (Burt 1992 — finds nodes that broker between groups), VoteRank (Zhang 2016 — top-k spreaders), group centrality, percolation (Piraveenan 2013), current-flow betweenness (Newman 2005). Each accepts a kind filter for slicing the heterogeneous graph.
 
@@ -270,7 +270,7 @@ For analyzing compiled binaries, legacy databases, and applications without sour
 | `pe-resources <file>` | Parse the PE resource directory — version info, manifests, string tables, resource counts. |
 | `pe-debug <file>` | PDB paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, POGO data. |
 | `pe-sections <file>` | Section table with per-section Shannon entropy. Auto-flags packed binaries (any section H > 7.0) via `attrs["packed"]=true`. Detects + registers overlay (data past EOS) as `Overlay` node with `kind` classification (NSIS / Inno / PyInstaller / ZIP self-extract / Authenticode / high-entropy / generic). |
-| `pe-meta <file>` | **(5.12.2+)** Combined PE metadata triage: Rich header parse (Microsoft toolchain fingerprint — VS6 → VS2022 cl.exe / link.exe versions), TLS callback enumeration (run-before-main, common malware persistence), entry-point RVA. |
+| `pe-meta <file>` | **(5.12.2+)** Combined PE metadata triage: Rich header parse (Microsoft toolchain fingerprint — VS6 → VS2022 cl.exe / link.exe versions), TLS callback enumeration (run-before-main, common malware persistence), entry-point RVA. **(5.17.0+)** Each unique Rich header tool promotes to a `Compiler` graph node (with `binary→compiler` edge) so per-version queries work via `meta-path "compiler->pe"`. Each TLS callback promotes to a `BinaryFunction` node with `kind_detail=tls_persistence` so it participates in centrality + meta-path queries. |
 | `pe-cert <file>` | **(5.15.0+)** PE Authenticode parsing. Walks the certificate-table data directory, decodes WIN_CERTIFICATE / PKCS#7 / X.509 DER, extracts subject CN + issuer CN + serial + validity per cert. Each becomes a `Cert` node with binary→cert edge. Recognizes Authenticode signatures as a benign overlay rather than misflagging. |
 | `dbf-schema <file>` | Parse dBASE III/IV/FoxPro `.DBF` file headers — version, last-update date, record count, full field descriptors. |
 | `dotnet-meta <file>` | .NET CLR metadata parser. **(5.15.2+)** Each MethodDef row registers as a `BinaryFunction` node with `attrs["binary_format"]=dotnet, kind_detail=method, rva=...` hanging off the `DotnetAssembly`. |
@@ -335,7 +335,7 @@ Supply-chain hygiene and secret detection.
 
 | Action | What it does |
 |--------|-------------|
-| `secret-scan` | Scan all files for hardcoded secrets — AWS keys, GitHub PATs, private keys, JWTs, passwords, API keys, connection strings, IPs. Groups by severity (critical/high/medium), masks values. |
+| `secret-scan` | Scan all files for hardcoded secrets — AWS keys, GitHub PATs, private keys, JWTs, passwords, API keys, connection strings, IPs. Groups by severity (critical/high/medium), masks values. **(5.17.0+)** Each finding promotes to a `Secret` graph node with edge from its source file. Enables `meta-path "source->secret"` for credential inventory and `pagerank --type secret` for files concentrating credential risk. |
 | `dep-tree [manifest]` | Parse package manifests (package.json, Cargo.toml, requirements.txt, go.mod, pyproject.toml, pom.xml, Gemfile, Pipfile) and show dependency trees. |
 | `dead-deps` | Cross-reference declared dependencies against actual imports — find packages in manifests that no source file references. |
 | `api-surface [file]` | Extract the public API surface — all exported functions grouped by file, plus HTTP routes, GraphQL resolvers, and CLI commands. |
@@ -479,7 +479,7 @@ Read-only metadata extraction from common ML model file formats. No GPU, no infe
 | `safetensors-info <file>` | Parse SafeTensors header — tensor list with shapes + dtype, total parameter count. |
 | `onnx-info <file>` | Parse ONNX protobuf — graph operators, inputs / outputs, opset version. |
 | `pyc-info <file>` | Parse Python `.pyc` — magic + version (Python 2.7 → 3.14), marshal-stream string extraction (URLs / SQL / paths from constants). **(5.15.1+)** Code-object scan registers each found function as a `BinaryFunction` node with `binary_format=pyc`. **(5.16.2+)** Heuristic byte-scan replaced with a proper recursive marshal walker — version-aware CODE-object header decoding (Py 2.7 / 3.4-3.7 / 3.8-3.10 / 3.11+), reads `co_name` from its actual marshal position rather than guessing the first nearby identifier (which previously caught `co_varnames[0]` = `self`/`cls` as false positives). |
-| `cuda-info <file>` | Parse CUDA cubin / fatbin — SM target, kernel symbol names. |
+| `cuda-info <file>` | Parse CUDA cubin / fatbin — SM target, kernel symbol names. **(5.17.0+)** Each kernel promotes to a `BinaryFunction` node (`binary_format=cuda, kind_detail=kernel`) with edge from the parent model — kernels now participate in centrality / meta-path queries the same way java/wasm/dotnet/pyc functions do. |
 
 ### Supply chain / SBOM (5)
 

@@ -57,7 +57,7 @@ struct Finding {
     preview: String,
 }
 
-pub fn secret_scan(graph: &Graph, _target: &str) -> String {
+pub fn secret_scan(graph: &mut Graph, _target: &str) -> String {
     let patterns = vec![
         SecretPattern {
             name: "AWS Access Key",
@@ -148,6 +148,25 @@ pub fn secret_scan(graph: &Graph, _target: &str) -> String {
 
     if findings.is_empty() {
         return "=== Secret Scan ===\nNo hardcoded secrets detected.".to_string();
+    }
+
+    // 5.17.0: promote each finding to a Secret node so secrets become
+    // queryable graph entities. Edge: source-file → secret. Unlocks
+    // `meta-path "source->secret"` and `pagerank --type secret` for
+    // identifying files that concentrate credential risk.
+    use crate::types::EntityKind;
+    for f in &findings {
+        let secret_id = format!("secret:{}::{}::{}", f.file, f.line, f.pattern_name);
+        let line_str = f.line.to_string();
+        graph.ensure_typed_node(&secret_id, EntityKind::Secret, &[
+            ("name", f.pattern_name.as_str()),
+            ("severity", f.severity.as_str()),
+            ("file", f.file.as_str()),
+            ("line", &line_str),
+            ("preview", f.preview.as_str()),
+        ]);
+        graph.ensure_typed_node(&f.file, EntityKind::SourceFile, &[]);
+        graph.add_edge(&f.file, &secret_id);
     }
 
     // Group by severity

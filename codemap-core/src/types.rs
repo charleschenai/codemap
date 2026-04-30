@@ -189,6 +189,13 @@ pub enum EntityKind {
     /// query: meta-path "permission->method" answers "what code
     /// uses CAMERA permission?"
     Permission,
+    /// Hardcoded secret discovered by `secret-scan` (AWS access key,
+    /// GitHub PAT, JWT, private key, connection string, etc.).
+    /// Edges: source → secret. attrs: pattern_name, severity
+    /// (critical/high/medium), line, preview (masked).
+    /// Killer queries: `meta-path "source->secret"` for inventory,
+    /// `pagerank --type secret` for files concentrating risk.
+    Secret,
 }
 
 impl EntityKind {
@@ -223,6 +230,7 @@ impl EntityKind {
             EntityKind::Cert => "cert",
             EntityKind::AndroidPackage => "apk",
             EntityKind::Permission => "permission",
+            EntityKind::Secret => "secret",
         }
     }
 
@@ -259,6 +267,7 @@ impl EntityKind {
             "cert" | "certificate" | "x509" => EntityKind::Cert,
             "apk" | "android" | "androidpackage" => EntityKind::AndroidPackage,
             "permission" | "perm" => EntityKind::Permission,
+            "secret" | "credential" | "leaked" => EntityKind::Secret,
             _ => return None,
         })
     }

@@ -1601,3 +1601,86 @@ unaffected.
 
   Action count: 163 (unchanged — quality fix, not new action).
   EntityKinds: 28 (unchanged).
+
+
+[2026-04-30] feat: 5.17.0 — close graph-integration gaps (#51)
+  source: post-5.16.2 audit Charles requested ("did you power
+  it up with graph") to verify every action across 5.12-5.16
+  actually registers heterogeneous-graph nodes/edges instead of
+  just emitting text. Audit found four gaps in actions that
+  parsed structured data but never wrote to the graph.
+
+  Filled gaps:
+
+  1. Rich header → Compiler nodes (pe_meta.rs).
+     Each unique product_name from the PE Rich header now
+     promotes to a Compiler node with binary→compiler edge.
+     De-duplicated; build_number + object_count aggregated.
+     attrs: name, language=c++, toolchain=msvc, source=rich_header,
+     product_id (hex), build_number, object_count.
+     Unlocks `meta-path "compiler->pe"` for per-version MSVC
+     queries (e.g. "every binary built with VS2019 link"),
+     complementing lang_fp.rs s family-level Compiler nodes.
+
+  2. TLS callbacks → BinaryFunction nodes (pe_meta.rs).
+     Each TLS callback RVA now promotes to a BinaryFunction
+     with kind_detail=tls_persistence + tls_callback=true.
+     Edge: pe → bin_func. TLS callbacks are real functions that
+     run before main() — common malware persistence vector.
+     They now participate in PageRank / centrality and are
+     filterable via attribute search ("every binary in this
+     graph with TLS-callback persistence").
+
+  3. CUDA kernels → BinaryFunction nodes (ml.rs).
+     extract_cuda_kernels_from_elf was already returning kernel
+     names but only for text output. Now each kernel becomes a
+     BinaryFunction with binary_format=cuda, kind_detail=kernel,
+     sm + sm_arch attrs. Edge: model → bin_func. Brings CUDA
+     into the same managed-bytecode story as java/wasm/dotnet/
+     pyc — all of them now expose function-level graph nodes.
+
+  4. Secret EntityKind + secret_scan promotion (security.rs).
+     New EntityKind Secret (28 → 29). secret_scan signature
+     flipped from &Graph to &mut Graph. Every finding from the
+     10 builtin patterns (AWS access/secret keys, GitHub PAT,
+     private keys, JWTs, generic API keys, passwords,
+     connection strings, IP:port pairs) becomes a Secret node
+     with edge from its source file. attrs: name (pattern),
+     severity (critical/high/medium), file, line, preview
+     (masked). Unlocks `meta-path "source->secret"` for
+     credential-leak inventory and `pagerank --type secret`
+     for ranking files by credential-risk concentration.
+     Added Secret arms to graph_theory.rs DOT/Mermaid mappings
+     + exports_format.rs GEXF color palette.
+
+  Tests: 189 passing (was 187). +2 new:
+    - test_secret_scan_promotes_to_graph_nodes — writes a
+      sample .py with AWS + GitHub PAT, runs secret-scan,
+      asserts ≥2 Secret nodes registered with source-file edges.
+    - test_pe_meta_promotes_rich_and_tls_to_graph — smoke test
+      that EntityKind::Secret round-trips via from_str/as_str.
+
+  Audit findings still open (deferred — not blocking):
+
+    - lsp.rs (5 actions): all take &Graph, never write. Symbols/
+      references/calls/diagnostics/types all emit text only.
+      lsp_symbols promotion would unlock LSP-grade Symbol nodes
+      for PageRank, but graph blow-up risk on big repos needs
+      bound design. Defer to its own ship.
+    - reverse/pe.rs pe_resources / pe_debug / pe_sections: each
+      parses structured data (manifest XML, PDB paths, section
+      table) but only emits text. Could promote to attrs on
+      PeBinary at minimum. Modest value alone.
+    - reverse/pe.rs binary_diff: takes &mut Graph but ignores
+      it. Diff results (added/removed/changed funcs) could be
+      diff-edge nodes between two binary versions.
+    - ml.rs gguf/safetensors/onnx: parse tensor lists +
+      operators but only register the parent MlModel. Could
+      register MlTensor / MlOperator sub-nodes for model-
+      architecture analysis as a graph.
+    - security.rs dep_tree / dead_deps / api_surface: all read
+      &Graph. dep_tree may already use existing dep nodes from
+      scan; api_surface could promote exported APIs.
+
+  Action count: 163 (unchanged — quality additions, not new
+  actions). EntityKinds: 28 → 29 (+Secret).

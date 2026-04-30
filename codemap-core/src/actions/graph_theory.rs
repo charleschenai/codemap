@@ -599,6 +599,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         Cert              => "shape=diamond, fillcolor=\"#90caf9\", style=filled, fontsize=10",
         AndroidPackage    => "shape=component, fillcolor=\"#a5d6a7\", style=filled, fontsize=10",
         Permission        => "shape=parallelogram, fillcolor=\"#ffcc80\", style=filled, fontsize=9",
+        Secret            => "shape=doubleoctagon, fillcolor=\"#d32f2f\", style=filled, fontcolor=white, fontsize=10",
     }
 }
 
@@ -747,6 +748,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         Cert              => "cert",
         AndroidPackage    => "apk",
         Permission        => "permission",
+        Secret            => "secret",
     }
 }
 
