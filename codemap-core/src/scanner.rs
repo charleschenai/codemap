@@ -162,7 +162,10 @@ fn load_cache(dir: &str) -> Option<CacheData> {
 fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
     let mut new_endpoints: Vec<(String, String, String)> = Vec::new(); // (src_id, ep_id, url)
     let skip_hosts = ["localhost", "127.0.0.1", "0.0.0.0",
-        "example.com", "example.org", "example.net"];
+        "example.com", "example.org", "example.net",
+        "example.gov", "example.edu", "example.io",
+        // common documentation placeholders
+        "your-domain.com", "yourdomain.com", "your-site.com"];
     // XML namespace prefixes — any URL starting with these is a namespace
     // identifier, not a real endpoint.
     let xml_namespaces = [

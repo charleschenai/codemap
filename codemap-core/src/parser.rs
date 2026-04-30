@@ -168,7 +168,53 @@ pub struct ParseResult {
     pub bridges: Vec<BridgeInfo>,
 }
 
-pub fn parse_file(_path: &str, content: &str, ext: &str) -> ParseResult {
+/// Detect minified-JS-style bundles where the AST is meaningless. Two
+/// signals: filename pattern (.min./.bundle./.chunk./.dist.) AND/OR
+/// avg-line-length > 500 chars (compressed code without newlines).
+fn is_minified(path: &str, content: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower.contains(".min.") || lower.ends_with(".min")
+        || lower.contains(".bundle.") || lower.contains(".chunk.")
+        || lower.contains(".dist.") {
+        return true;
+    }
+    // Average line length check — only for JS/TS/CSS where minification
+    // is common. Skips the check for normal source langs that legitimately
+    // have long-ish lines (tables, big match expressions).
+    if !(lower.ends_with(".js") || lower.ends_with(".ts")
+        || lower.ends_with(".mjs") || lower.ends_with(".cjs")
+        || lower.ends_with(".jsx") || lower.ends_with(".tsx")) {
+        return false;
+    }
+    let nlines = content.lines().count();
+    if nlines == 0 { return false; }
+    let avg = content.len() / nlines.max(1);
+    avg > 500
+}
+
+pub fn parse_file(path: &str, content: &str, ext: &str) -> ParseResult {
+    // Skip minified-JS bundles. Minified files like cosmos.min.js,
+    // d3.v7.min.js, vendor.bundle.js etc. have all their code on one
+    // line — the AST extractor sees one mega-function with cyclomatic
+    // complexity of thousands, plus thousands of irrelevant call sites
+    // that pollute pagerank, dead-functions, hubs, etc.
+    //
+    // Heuristic: filename contains .min./.bundle./.chunk., OR the file's
+    // average line length is > 500 chars. The minified-JS test in
+    // promote_urls_to_endpoints uses a similar heuristic; we're applying
+    // it earlier here (parse stage) so the noise never enters the graph.
+    if is_minified(path, content) {
+        return ParseResult {
+            imports: Vec::new(),
+            exports: Vec::new(),
+            functions: Vec::new(),
+            data_flow: None,
+            urls: extract_urls(content),  // URLs still extracted, but
+                                           // promote_urls filters them
+            bridges: Vec::new(),
+        };
+    }
+
     let grammar = ext_to_grammar(ext);
     if let Some(grammar) = grammar {
         if let Some(tree) = parse_with_treesitter(content, grammar) {

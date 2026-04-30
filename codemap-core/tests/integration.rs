@@ -1004,6 +1004,76 @@ fn test_exports_empty_target_lists_top_files() {
 }
 
 #[test]
+fn test_minified_js_skipped_at_parse_stage() {
+    // 5.7.5: bug 31 from law-sitter-rs e2e test. Minified JS files
+    // (cosmos.min.js etc.) parsed as one mega-function with cyclomatic
+    // complexity in the thousands, polluting complexity / dead-functions
+    // / hubs / pagerank. Skip them at parse_file stage so the noise
+    // never enters the graph.
+    let tmp = std::env::temp_dir().join(format!("codemap-min-skip-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+    // Realistic minified JS — one long line of dense code
+    let minified = format!("var x={{}};{}", "function f(a){return a+1;}".repeat(50));
+    fs::write(tmp.join("vendor.min.js"), &minified).unwrap();
+    fs::write(tmp.join("normal.js"), "function hello() { return 'hi'; }\n".to_string()).unwrap();
+
+    let g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    // The minified node should still be in the graph (file was scanned)
+    // but its functions list must be empty.
+    let min_node = g.nodes.values()
+        .find(|n| n.id.contains("vendor.min.js"))
+        .expect("vendor.min.js should still be a node");
+    assert_eq!(min_node.functions.len(), 0,
+        "minified file's functions should be empty, got {} functions: {:?}",
+        min_node.functions.len(),
+        min_node.functions.iter().map(|f| &f.name).collect::<Vec<_>>());
+    let normal_node = g.nodes.values()
+        .find(|n| n.id.contains("normal.js"))
+        .expect("normal.js should be a node");
+    assert!(!normal_node.functions.is_empty(),
+        "normal file should have parsed functions");
+}
+
+#[test]
+fn test_url_promotion_skips_example_gov_and_friends() {
+    // 5.7.5: extended placeholder filter. example.gov / example.edu /
+    // your-domain.com etc. should be skipped same as example.com.
+    let tmp = std::env::temp_dir().join(format!("codemap-extra-skip-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+    fs::write(tmp.join("a.py"), concat!(
+        "fetch('https://example.gov/path')\n",
+        "fetch('https://example.edu/y')\n",
+        "fetch('https://your-domain.com/x')\n",
+        "fetch('https://real-api.io/users')\n",
+    )).unwrap();
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let result = execute(&mut g, "meta-path", "source->endpoint", false).unwrap();
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert!(result.contains("real-api.io"), "real endpoint missing: {result}");
+    assert!(!result.contains("example.gov"), "example.gov leaked: {result}");
+    assert!(!result.contains("example.edu"), "example.edu leaked: {result}");
+    assert!(!result.contains("your-domain.com"), "your-domain.com leaked: {result}");
+}
+
+#[test]
 fn test_url_promotion_skips_template_and_namespace_urls() {
     // 5.7.1 regression: real-repo testing surfaced 6 URL-promotion bugs.
     // This test pins the filter behavior so a future tightening or
