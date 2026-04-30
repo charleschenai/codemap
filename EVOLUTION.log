@@ -1241,3 +1241,49 @@ unaffected.
 
   Tests: 163 passing (was 150). +13 unit tests (8 license, 5 cve).
   Action count: 150 → 153 (+3).
+
+[2026-04-30] feat: 5.14.1 — SBOM export (SPDX 2.3 + CycloneDX 1.5) (#47)
+  source: 5.15.0 task #47 lifted forward — the prerequisites that
+  matter (License nodes from #44, Cve nodes from #45) are already
+  in 5.14.0. Code signing certs (#46) would enrich the SBOM further
+  but aren't required for either standard's minimum viable doc.
+
+  Two new actions, one new module (~360 LOC), zero new EntityKinds:
+  pure read-side serialization of the heterogeneous graph.
+
+    - to-spdx — emits SPDX 2.3 JSON. Linux Foundation standard,
+      required for US federal procurement (Executive Order 14028).
+      Source files / binaries / DLLs become SPDX packages with
+      `primaryPackagePurpose` mapped from EntityKind. Licenses
+      concluded via outgoing License-node edge or "NOASSERTION".
+      Relationships: source DEPENDS_ON imp, dll DESCRIBES license,
+      dll HAS_ASSOCIATED_VULNERABILITY cve.
+    - to-cyclonedx — emits CycloneDX 1.5 JSON. OWASP standard,
+      richer vulnerability section. Components include CPE refs
+      pulled from cve-import metadata. Vulnerabilities are
+      first-class with CVSS scores + descriptions + affected
+      components. Dependencies section mirrors the heterogeneous
+      graph's import edges.
+
+  Graceful degradation: if no License or Cve nodes were registered,
+  SPDX writes "NOASSERTION" (per the standard) and CycloneDX writes
+  empty `vulnerabilities`. Skeletal SBOMs work; richer ones come
+  from chaining license-scan + cve-import + cve-match first.
+
+  Format compliance:
+    - SPDX 2.3: required fields (spdxVersion, dataLicense, SPDXID,
+      name, documentNamespace, creationInfo, packages,
+      relationships) all populated.
+    - CycloneDX 1.5: required fields (bomFormat, specVersion,
+      serialNumber, version, metadata) all populated. Serial
+      number is FNV-1a-derived UUID for determinism.
+
+  Live verification: SBOM emitted on codemap repo (56 files) is
+  valid JSON, parses cleanly via serde_json, contains all 56 source
+  files as SPDXRef packages with relationships matching the
+  scanner's import graph. Hand-fixture graph with License + Cve
+  nodes round-trips correctly through both formats.
+
+  Tests: 166 passing (was 163). +3 sbom unit tests covering JSON
+  validity + required fields + ISO 8601 timestamp format.
+  Action count: 153 → 155 (+2: to-spdx, to-cyclonedx).

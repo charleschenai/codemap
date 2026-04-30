@@ -28,6 +28,7 @@ pub mod pe_meta;
 pub mod bin_disasm;
 pub mod license;
 pub mod cve;
+pub mod sbom;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -236,6 +237,8 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "license-scan" | "licenses" => Ok(license::license_scan(graph, target)),
         "cve-import"   => Ok(cve::cve_import(graph, target)),
         "cve-match"    => Ok(cve::cve_match(graph, target)),
+        "to-spdx"      => Ok(sbom::to_spdx(graph)),
+        "to-cyclonedx" => Ok(sbom::to_cyclonedx(graph)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
