@@ -1460,10 +1460,308 @@ pub fn wasm_info(graph: &mut Graph, target: &str) -> String {
         Ok(d) => d,
         Err(e) => return e,
     };
+    // Function-level graph augmentation (5.14.0 task #42):
+    // walk the Code section, register a BinaryFunction node per
+    // function body with its call edges. Independent pass from
+    // parse_wasm to avoid disturbing the existing report format.
+    walk_wasm_code_for_graph(graph, target, &data);
     match parse_wasm(&data) {
         Ok(info) => info,
         Err(e) => format!("WASM parse error: {e}"),
     }
+}
+
+/// Walk the WASM module a second time, focused on function-level
+/// graph registration: imports + code bodies become BinaryFunction
+/// nodes, with edges from the WasmModule + intra-module call edges
+/// (`call` opcode 0x10 emits a direct edge to the target function).
+/// Reuses BinaryFunction kind via attrs["binary_format"]="wasm".
+fn walk_wasm_code_for_graph(graph: &mut Graph, target: &str, data: &[u8]) {
+    if data.len() < 8 || &data[..4] != b"\0asm" { return; }
+
+    let module_id = format!("wasm:{target}");
+
+    // Pass 1: walk all sections, build a function-name table and
+    // remember the Code section position. Function index space:
+    //   [0..n_imports)            — imports
+    //   [n_imports..n_imports+n_code) — defined functions
+    let mut imports_func: Vec<String> = Vec::new();   // module.field for each import
+    let mut export_names: Vec<(u32, String)> = Vec::new(); // (funcidx, name)
+    let mut code_section: Option<(usize, usize)> = None;  // (start_offset, size)
+
+    let mut pos = 8usize;
+    while pos < data.len() {
+        let section_id = data[pos];
+        pos += 1;
+        let (sec_size, c) = match decode_leb128(data, pos) { Ok(v) => v, Err(_) => return };
+        pos += c;
+        let sec_start = pos;
+        if pos + sec_size as usize > data.len() { return; }
+        let sec_end = sec_start + sec_size as usize;
+
+        match section_id {
+            2 => { // Import section
+                let mut p = sec_start;
+                let (count, cc) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                p += cc;
+                for _ in 0..count {
+                    if p >= sec_end { break; }
+                    let (mod_len, c1) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                    p += c1;
+                    let mod_end = (p + mod_len as usize).min(sec_end);
+                    let module = String::from_utf8_lossy(&data[p..mod_end]).to_string();
+                    p = mod_end;
+                    let (field_len, c2) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                    p += c2;
+                    let field_end = (p + field_len as usize).min(sec_end);
+                    let field = String::from_utf8_lossy(&data[p..field_end]).to_string();
+                    p = field_end;
+                    if p >= sec_end { break; }
+                    let kind_byte = data[p]; p += 1;
+                    match kind_byte {
+                        0 => {
+                            let (_, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                            p += c;
+                            imports_func.push(format!("{module}.{field}"));
+                        }
+                        1 => {
+                            // table: elem_type byte + limits
+                            p += 1;
+                            let (flags, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                            p += c;
+                            let (_, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                            p += c;
+                            if flags & 0x1 != 0 {
+                                let (_, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                                p += c;
+                            }
+                        }
+                        2 => {
+                            let flags = if p < sec_end { data[p] } else { 0 }; p += 1;
+                            let (_, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                            p += c;
+                            if flags & 0x1 != 0 {
+                                let (_, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                                p += c;
+                            }
+                        }
+                        3 => { p += 2; }  // global: valtype + mutability
+                        _ => break,
+                    }
+                }
+            }
+            7 => { // Export section
+                let mut p = sec_start;
+                let (count, cc) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                p += cc;
+                for _ in 0..count {
+                    if p >= sec_end { break; }
+                    let (name_len, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                    p += c;
+                    let name_end = (p + name_len as usize).min(sec_end);
+                    let name = String::from_utf8_lossy(&data[p..name_end]).to_string();
+                    p = name_end;
+                    if p >= sec_end { break; }
+                    let kind_byte = data[p]; p += 1;
+                    let (idx, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+                    p += c;
+                    if kind_byte == 0 {
+                        // Export of a function — record name for that funcidx
+                        export_names.push((idx as u32, name));
+                    }
+                }
+            }
+            10 => { // Code section
+                code_section = Some((sec_start, sec_size as usize));
+            }
+            _ => {}
+        }
+        pos = sec_end;
+    }
+
+    // Pass 2: register every import as a BinaryFunction (with the
+    // import as both name + linker reference) and walk the code
+    // section to register defined functions + their call edges.
+    for (i, name) in imports_func.iter().enumerate() {
+        let func_id = format!("bin_func:wasm:{target}::imp::{i}");
+        let idx_str = i.to_string();
+        graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+            ("name", name),
+            ("binary_format", "wasm"),
+            ("kind_detail", "import"),
+            ("funcidx", &idx_str),
+        ]);
+        graph.add_edge(&module_id, &func_id);
+    }
+
+    let n_imports = imports_func.len();
+    let mut export_lookup: std::collections::HashMap<u32, String> = export_names.into_iter().collect();
+
+    if let Some((start, size)) = code_section {
+        let end = start + size;
+        let mut p = start;
+        let (count, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => return };
+        p += c;
+        for body_idx in 0..count {
+            if p >= end { break; }
+            let funcidx = (n_imports + body_idx as usize) as u32;
+            let func_name = export_lookup.remove(&funcidx).unwrap_or_else(|| format!("func_{funcidx}"));
+            let (body_size, c) = match decode_leb128(data, p) { Ok(v) => v, Err(_) => break };
+            p += c;
+            let body_start = p;
+            let body_end = (body_start + body_size as usize).min(end);
+            if body_end > data.len() { break; }
+            let body = &data[body_start..body_end];
+            let (instr_count, calls) = scan_wasm_body(body);
+
+            let func_id = format!("bin_func:wasm:{target}::def::{body_idx}");
+            let funcidx_str = funcidx.to_string();
+            let body_size_str = body_size.to_string();
+            let icnt = instr_count.to_string();
+            let cnt = calls.len().to_string();
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", &func_name),
+                ("binary_format", "wasm"),
+                ("kind_detail", "defined"),
+                ("funcidx", &funcidx_str),
+                ("size", &body_size_str),
+                ("instruction_count", &icnt),
+                ("direct_calls", &cnt),
+            ]);
+            graph.add_edge(&module_id, &func_id);
+
+            // Resolve direct call edges. Calls into [0..n_imports)
+            // resolve to import nodes; calls into [n_imports..)
+            // resolve to defined nodes.
+            for callee in &calls {
+                let callee_id = if (*callee as usize) < n_imports {
+                    format!("bin_func:wasm:{target}::imp::{callee}")
+                } else {
+                    let body_i = *callee as usize - n_imports;
+                    format!("bin_func:wasm:{target}::def::{body_i}")
+                };
+                graph.add_edge(&func_id, &callee_id);
+            }
+
+            p = body_end;
+        }
+    }
+}
+
+/// Walk a WASM function body and return (instruction_count,
+/// direct_call_targets). Stops at the terminating 0x0B (end) of the
+/// outermost block. Skips immediates per the WASM 1.0 instruction
+/// catalog. Imports + indirect calls are NOT in the result — only
+/// the `call` opcode 0x10 with its leb128 funcidx.
+fn scan_wasm_body(body: &[u8]) -> (usize, Vec<u32>) {
+    // Skip locals declaration: count + (count, type) pairs
+    let mut p = 0usize;
+    let mut instr_count = 0usize;
+    let mut calls: Vec<u32> = Vec::new();
+    let (n_local_groups, c) = match decode_leb128(body, p) {
+        Ok(v) => v,
+        Err(_) => return (0, calls),
+    };
+    p += c;
+    for _ in 0..n_local_groups {
+        let (_, c1) = match decode_leb128(body, p) { Ok(v) => v, Err(_) => return (0, calls) };
+        p += c1;
+        if p >= body.len() { return (0, calls); }
+        p += 1; // valtype byte
+    }
+
+    let mut depth = 0i32;
+    while p < body.len() {
+        let op = body[p]; p += 1;
+        instr_count += 1;
+        match op {
+            // Control flow with blocktype immediate
+            0x02 | 0x03 | 0x04 => {
+                // block / loop / if + blocktype
+                if p < body.len() {
+                    let bt = body[p];
+                    if bt == 0x40 || (0x7C..=0x7F).contains(&bt) {
+                        p += 1;
+                    } else {
+                        // signed leb128 type index
+                        if let Ok((_, c)) = decode_signed_leb128(body, p) { p += c; }
+                    }
+                }
+                depth += 1;
+            }
+            0x05 => { /* else */ }
+            0x0B => { // end
+                if depth == 0 { break; }
+                depth -= 1;
+            }
+            0x0C | 0x0D => {
+                // br / br_if labelidx
+                if let Ok((_, c)) = decode_leb128(body, p) { p += c; }
+            }
+            0x0E => {
+                // br_table: vec(labelidx) + default
+                let (count, c) = match decode_leb128(body, p) { Ok(v) => v, Err(_) => break };
+                p += c;
+                for _ in 0..=count {
+                    if let Ok((_, cc)) = decode_leb128(body, p) { p += cc; } else { break; }
+                }
+            }
+            0x10 => {
+                // call funcidx
+                let (idx, c) = match decode_leb128(body, p) { Ok(v) => v, Err(_) => break };
+                p += c;
+                calls.push(idx as u32);
+            }
+            0x11 => {
+                // call_indirect typeidx tableidx
+                let (_, c) = match decode_leb128(body, p) { Ok(v) => v, Err(_) => break };
+                p += c;
+                let (_, c) = match decode_leb128(body, p) { Ok(v) => v, Err(_) => break };
+                p += c;
+            }
+            // Variable + memory + numeric ops with one leb128 immediate
+            0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 |
+            0x41 |  // i32.const
+            0x42 => { // i64.const
+                if let Ok((_, c)) = decode_signed_leb128(body, p) { p += c; }
+            }
+            // f32.const (4 bytes) / f64.const (8 bytes)
+            0x43 => p += 4,
+            0x44 => p += 8,
+            // Memory ops with align + offset (two leb128s)
+            0x28..=0x3E => {
+                if let Ok((_, c)) = decode_leb128(body, p) { p += c; }
+                if let Ok((_, c)) = decode_leb128(body, p) { p += c; }
+            }
+            // Memory.grow / memory.size: take 0x00 byte
+            0x3F | 0x40 => { p += 1; }
+            // Single-byte ops (most numeric/bitwise/conversion ops)
+            _ => {}
+        }
+        if instr_count > 1_000_000 { break; }
+    }
+    (instr_count, calls)
+}
+
+fn decode_signed_leb128(data: &[u8], offset: usize) -> Result<(i64, usize), String> {
+    let mut result: i64 = 0;
+    let mut shift = 0u32;
+    let mut consumed = 0;
+    let mut last_byte = 0u8;
+    loop {
+        if offset + consumed >= data.len() { return Err("LEB128 EOF".to_string()); }
+        let b = data[offset + consumed];
+        consumed += 1;
+        last_byte = b;
+        result |= ((b & 0x7F) as i64) << shift;
+        shift += 7;
+        if (b & 0x80) == 0 { break; }
+        if shift > 63 { return Err("LEB128 too long".to_string()); }
+    }
+    if shift < 64 && (last_byte & 0x40) != 0 {
+        result |= !0i64 << shift;
+    }
+    Ok((result, consumed))
 }
 
 fn parse_wasm(data: &[u8]) -> Result<String, String> {

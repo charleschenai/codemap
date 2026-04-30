@@ -1148,3 +1148,40 @@ unaffected.
   validated by the live smoke run on a 6K-function binary).
 
   Action count: 149 → 150 (+1: bin-disasm with `disasm` alias).
+
+[2026-04-30] feat: 5.13.1 — WASM function-level disasm (#42)
+  source: 5.14.0 task #42 lifted forward — WASM is a wonderfully
+  structured format and the function-level extraction follows the
+  same pattern as 5.13.0's iced-x86 work.
+
+  Extends wasm-info to walk the Code section + register a
+  BinaryFunction node per function (import or defined). Reuses the
+  BinaryFunction EntityKind from 5.13.0 with attrs["binary_format"] =
+  "wasm" so users can filter via meta-path / centrality / etc.
+
+  Implementation: walk_wasm_code_for_graph (~200 LOC in binary.rs).
+  Two-pass: first pass walks Import + Export sections to build the
+  function-index → name table; second pass walks the Code section
+  body-by-body, scanning instructions for `call` opcode (0x10) to
+  emit intra-module call edges. `call_indirect` (0x11) bumps an
+  indirect-call counter but doesn't add edges (the table-index
+  resolution is more involved than v1 needs).
+
+  Imports become bin_func nodes with kind_detail="import" and
+  funcidx in [0..n_imports). Defined functions get
+  kind_detail="defined" and funcidx in [n_imports..). Exported
+  function names propagate to attrs["name"] when present, else
+  "func_<funcidx>" placeholder.
+
+  Live verification: hand-crafted 73-byte WASM with 1 import
+  (env.print), 2 defined funcs (add, main where main calls both
+  env.print + add) → meta-path "wasm->bin_func->bin_func" returns
+  exactly the 2 expected paths.
+
+  Pyc method-level (#41) deferred — Python's marshal format is
+  recursive and needs a real walker to do robustly. Will land in
+  a focused future session.
+
+  Tests: 150 passing (no new unit tests; verification is the live
+  smoke run).
+  Action count: 150 (no new actions; wasm-info just got smarter).
