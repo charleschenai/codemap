@@ -7,6 +7,8 @@
 // `-D warnings` setting can be reinstated without a multi-day scrub.
 #![allow(
     clippy::collapsible_if,           // pe.rs has nested if-let chains where flat reads better
+    clippy::collapsible_match,        // schemas.rs YAML parser has nested match-if for clarity
+    clippy::unnecessary_sort_by,      // sort_by(|a, b| key(a).cmp(&key(b))) is more explicit than sort_by_key in places
     clippy::doc_lazy_continuation,    // docstring formatting nit
     clippy::format_in_format_args,    // few uses, not a perf concern
     clippy::if_same_then_else,        // ml.rs has equivalent branches written distinctly for clarity
