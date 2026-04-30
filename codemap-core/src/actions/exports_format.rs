@@ -168,6 +168,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             License           => (197, 225, 165),
             Cve               => (239, 83, 80),
             Cert              => (144, 202, 249),
+            AndroidPackage    => (165, 214, 167),
+            Permission        => (255, 204, 128),
         }
     }
 

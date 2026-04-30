@@ -31,6 +31,7 @@ pub mod cve;
 pub mod sbom;
 pub mod fuzzy;
 pub mod cert;
+pub mod apk;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -244,6 +245,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "fuzzy-hash"   => Ok(fuzzy::fuzzy_hash(graph, target)),
         "fuzzy-match"  => Ok(fuzzy::fuzzy_match(graph, target)),
         "pe-cert" | "verify-sig" | "authenticode" => Ok(cert::pe_cert(graph, target)),
+        "apk-info" | "apk" | "android" => Ok(apk::apk_info(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

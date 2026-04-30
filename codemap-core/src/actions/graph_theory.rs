@@ -597,6 +597,8 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         License           => "shape=box, fillcolor=\"#c5e1a5\", style=\"filled,rounded\", fontsize=10",
         Cve               => "shape=octagon, fillcolor=\"#ef5350\", style=filled, fontcolor=white, fontsize=10",
         Cert              => "shape=diamond, fillcolor=\"#90caf9\", style=filled, fontsize=10",
+        AndroidPackage    => "shape=component, fillcolor=\"#a5d6a7\", style=filled, fontsize=10",
+        Permission        => "shape=parallelogram, fillcolor=\"#ffcc80\", style=filled, fontsize=9",
     }
 }
 
@@ -743,6 +745,8 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         License           => "license",
         Cve               => "cve",
         Cert              => "cert",
+        AndroidPackage    => "apk",
+        Permission        => "permission",
     }
 }
 

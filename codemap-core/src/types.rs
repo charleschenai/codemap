@@ -178,6 +178,17 @@ pub enum EntityKind {
     /// valid_to. Lets you ask "who signed this?" / "are all our
     /// vendors using current certs?" / "find the chain root."
     Cert,
+    /// Android APK package — the top-level container holding
+    /// classes.dex + AndroidManifest.xml + resources. Edges:
+    /// apk → permission (declared in manifest), apk → bin_func
+    /// (DEX methods). attrs: package, version, min_sdk, target_sdk.
+    AndroidPackage,
+    /// Android permission declared by an APK (CAMERA, INTERNET,
+    /// READ_CONTACTS, etc.). Edges: apk → permission, method →
+    /// permission (when methods use the permission). Killer
+    /// query: meta-path "permission->method" answers "what code
+    /// uses CAMERA permission?"
+    Permission,
 }
 
 impl EntityKind {
@@ -210,6 +221,8 @@ impl EntityKind {
             EntityKind::License => "license",
             EntityKind::Cve => "cve",
             EntityKind::Cert => "cert",
+            EntityKind::AndroidPackage => "apk",
+            EntityKind::Permission => "permission",
         }
     }
 
@@ -244,6 +257,8 @@ impl EntityKind {
             "license" | "spdx" => EntityKind::License,
             "cve" | "vuln" => EntityKind::Cve,
             "cert" | "certificate" | "x509" => EntityKind::Cert,
+            "apk" | "android" | "androidpackage" => EntityKind::AndroidPackage,
+            "permission" | "perm" => EntityKind::Permission,
             _ => return None,
         })
     }

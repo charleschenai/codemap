@@ -1436,3 +1436,60 @@ unaffected.
 
   Action count: 158 (no new actions; java-class and dotnet-meta
   just register more nodes now).
+
+[2026-04-30] feat: 5.15.3 — APK / Android analysis (v1) (#43)
+  source: 5.14.0 task #43, deferred until last because of scope.
+  Shipped here as a focused v1 covering structure + permissions
+  but deferring DEX bytecode disasm.
+
+  Two new EntityKinds:
+    - AndroidPackage (kind: "apk") — APK package node. Edges:
+      apk → permission (declared in manifest), apk → bin_func (DEX
+      methods, when DEX disasm lands).
+    - Permission (kind: "permission") — Android permission. Killer
+      query target: meta-path "permission->method" answers "what
+      code uses CAMERA permission?" (when DEX bytecode method
+      extraction ships).
+
+  New module: src/actions/apk.rs (~330 LOC). New action:
+  apk-info <apk-file> (aliases: apk, android).
+
+  Implementation:
+    - Walk ZIP local-file headers (PK\x03\x04). No actual inflate
+      — we list entry names, only extract uncompressed entries
+      verbatim. Real APKs deflate-compress AndroidManifest.xml so
+      permission extraction gracefully degrades when manifest is
+      compressed.
+    - Categorize entries: DEX files (classes*.dex), manifest,
+      resources.arsc, native libs (lib/**/*.so), signing files
+      (META-INF/*.RSA / *.SF).
+    - Best-effort permission extraction: pattern-scan the manifest
+      bytes for "android.permission." prefixes in both UTF-8 and
+      UTF-16 encodings. Catches permissions when manifest is
+      stored uncompressed (rare but happens) and skips otherwise.
+    - Flag dangerous permissions (CAMERA, READ_SMS, FINE_LOCATION,
+      etc.) with ⚠ in the report.
+
+  v1 limits (intentional):
+    - No deflate decompression (would need flate2 dep). Compressed
+      manifest ⇒ no permissions extracted; structure still listed.
+    - No DEX bytecode disasm. Permission → method edges deferred
+      until a follow-up adds Dalvik opcode parsing.
+    - No binary AXML schema parser. Real AXML is a length-prefixed
+      string-pool format; pattern-scanning catches the common case
+      but misses obfuscated namespaces.
+
+  Tests: 180 passing (was 177). +3 apk unit tests covering ZIP
+  magic detection, dangerous permission lookup, UTF-8 permission
+  pattern extraction.
+
+  Action count: 158 → 159 (+1: apk-info).
+  Total EntityKinds: 28 (up from 20 at session start).
+
+  ── End of 17-task supply-chain + RE expansion ──
+  Shipped this session: 12 releases (5.12.0 → 5.15.3) closing 17
+  backlog tasks from #32 through #48. Total LOC across new modules:
+  ~9000. Tests grew from 114 → 180 (+66). Action count from 145 →
+  159 (+14). EntityKinds from 20 → 28. iced-x86 added as the only
+  new dep (pure Rust, no system libs). Default scan invariant
+  preserved across all 12 releases.
