@@ -1,6 +1,38 @@
 use std::fs;
 use std::path::PathBuf;
 use codemap_core::{scan, execute, ScanOptions};
+use codemap_core::types::{Graph, GraphNode, EntityKind};
+use std::collections::HashMap;
+
+/// Helper: build a small synthetic heterogeneous graph for centrality /
+/// meta-path tests. Topology:
+///   src1.py ─→ ep_get_users    (HttpEndpoint)
+///   src1.py ─→ ep_post_orders  (HttpEndpoint)
+///   src2.py ─→ ep_get_users
+///   ep_get_users ─→ users      (SchemaTable)
+///   ep_post_orders ─→ orders   (SchemaTable)
+///   orders ─→ users           (FK relationship — common)
+fn synthetic_hetero_graph() -> Graph {
+    let mut g = Graph {
+        nodes: HashMap::new(),
+        scan_dir: ".".to_string(),
+        cpg: None,
+    };
+    g.ensure_typed_node("file:src1.py",   EntityKind::SourceFile,   &[]);
+    g.ensure_typed_node("file:src2.py",   EntityKind::SourceFile,   &[]);
+    g.ensure_typed_node("ep:GET:users",   EntityKind::HttpEndpoint, &[]);
+    g.ensure_typed_node("ep:POST:orders", EntityKind::HttpEndpoint, &[]);
+    g.ensure_typed_node("table:users",    EntityKind::SchemaTable,  &[]);
+    g.ensure_typed_node("table:orders",   EntityKind::SchemaTable,  &[]);
+
+    g.add_edge("file:src1.py",   "ep:GET:users");
+    g.add_edge("file:src1.py",   "ep:POST:orders");
+    g.add_edge("file:src2.py",   "ep:GET:users");
+    g.add_edge("ep:GET:users",   "table:users");
+    g.add_edge("ep:POST:orders", "table:orders");
+    g.add_edge("table:orders",   "table:users");
+    g
+}
 
 fn scan_self() -> codemap_core::types::Graph {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -458,6 +490,106 @@ fn test_skip_dirs_exclude_dep_trees() {
     assert_eq!(user_hits, 1, "expected user_code.py to be scanned (found paths: {:?})", scanned);
     assert_eq!(vendored_hits, 0, "expected zero vendored/cache files in graph (found: {:?})",
         scanned.iter().filter(|p| !p.contains("user_code.py")).collect::<Vec<_>>());
+}
+
+// ── Heterogeneous graph + new centrality measures (5.2.0) ──────────
+
+#[test]
+fn test_meta_path_traverses_typed_edges() {
+    let g = synthetic_hetero_graph();
+    let paths = g.meta_path(&[
+        EntityKind::SourceFile, EntityKind::HttpEndpoint, EntityKind::SchemaTable,
+    ], 100);
+    assert_eq!(paths.len(), 3, "expected 3 source→endpoint→table paths, got {paths:?}");
+    for p in &paths {
+        assert_eq!(p.len(), 3);
+        assert!(p[0].starts_with("file:"));
+        assert!(p[1].starts_with("ep:"));
+        assert!(p[2].starts_with("table:"));
+    }
+
+    let paths2 = g.meta_path(&[
+        EntityKind::SourceFile, EntityKind::HttpEndpoint,
+    ], 100);
+    assert_eq!(paths2.len(), 3);
+}
+
+#[test]
+fn test_meta_path_action_via_dispatch() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "meta-path", "source->endpoint->table", false).unwrap();
+    assert!(result.contains("Meta-Path:"), "missing header: {result}");
+    assert!(result.contains("Paths: 3"), "expected 3 paths in output: {result}");
+}
+
+#[test]
+fn test_betweenness_finds_chokepoints() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "betweenness", "", false).unwrap();
+    assert!(result.contains("Betweenness Centrality"));
+    assert!(result.contains("ep:GET:users"), "ep:GET:users should be high-betweenness, got: {result}");
+}
+
+#[test]
+fn test_eigenvector_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "eigenvector", "", false).unwrap();
+    assert!(result.contains("Eigenvector Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_katz_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "katz", "", false).unwrap();
+    assert!(result.contains("Katz Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_closeness_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "closeness", "", false).unwrap();
+    assert!(result.contains("Closeness Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_kind_filter_restricts_centrality() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "betweenness", "table", false).unwrap();
+    assert!(result.contains("Filter: table"), "filter not echoed: {result}");
+    assert!(!result.contains("ep:GET:users"), "endpoint leaked into table-only filter: {result}");
+}
+
+#[test]
+fn test_ensure_typed_node_is_idempotent() {
+    let mut g = synthetic_hetero_graph();
+    let n_before = g.nodes.len();
+    g.ensure_typed_node("file:src1.py", EntityKind::SourceFile, &[("x", "y")]);
+    let n_after = g.nodes.len();
+    assert_eq!(n_before, n_after, "ensure_typed_node should be idempotent on existing id");
+    assert_eq!(g.nodes.get("file:src1.py").unwrap().attrs.get("x"), Some(&"y".to_string()));
+}
+
+#[test]
+fn test_add_edge_idempotent_and_bidirectional() {
+    let mut g = synthetic_hetero_graph();
+    let users_imported_by_initial = g.nodes.get("table:users").unwrap().imported_by.len();
+    g.add_edge("ep:GET:users", "table:users");
+    g.add_edge("ep:GET:users", "table:users");
+    let after = g.nodes.get("table:users").unwrap().imported_by.len();
+    assert_eq!(users_imported_by_initial, after, "duplicate edges leaked");
+    let users = g.nodes.get("table:users").unwrap();
+    assert!(users.imported_by.iter().any(|s| s == "ep:GET:users"));
+}
+
+#[test]
+fn test_entity_kind_from_str_round_trip() {
+    for k in [
+        EntityKind::SourceFile, EntityKind::PeBinary, EntityKind::ElfBinary,
+        EntityKind::SchemaTable, EntityKind::HttpEndpoint, EntityKind::MlModel,
+    ] {
+        let s = k.as_str();
+        assert_eq!(EntityKind::from_str(s), Some(k), "round-trip failed for {s}");
+    }
 }
 
 // ── web-dom truncated-tag regression ──────────────────────────────

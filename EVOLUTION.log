@@ -287,3 +287,84 @@ unaffected.
   <table>/<nav> with no closes) and asserts web-dom returns Ok rather
   than panicking. 54 tests passing (was 53).
 
+[2026-04-30] feat: 5.2.0 — heterogeneous graph + 5 new graph algorithms
+  source: Charles asked "did we add the graphs to the reverse engineering
+  thing" — exposing that every RE action's signature was `_graph: &Graph`
+  (underscore = unused), meaning PE imports / web-blueprint API maps /
+  schema tables / etc. produced text reports but never participated in the
+  graph that pagerank/hubs/bridges operated on. Charles followed up with
+  "is there better ways to graph more up to date stuff" + "search arxiv" —
+  led to the right architecture by reviewing GitHub stack-graphs,
+  petgraph, NetworkX, and Joern source.
+
+  Architecture (informed by stack-graphs Node enum + Joern pass-based CPG):
+    - EntityKind enum on every GraphNode — 20 variants spanning source
+      files, PE/ELF/Mach-O/Java/WASM binaries, DLLs, symbols, HTTP
+      endpoints, web forms, schema tables/fields, proto messages,
+      GraphQL types, OpenAPI paths, Docker services, Terraform resources,
+      ML model files, .NET assemblies/types.
+    - Each RE action signature flipped from `_graph: &Graph -> String`
+      to `graph: &mut Graph -> String`; each is now a Joern-style "pass"
+      that mutates the shared graph by registering kind-tagged nodes
+      and edges.
+    - Cache version 8 → 9 (existing source-file nodes default-tag,
+      backwards compat via serde defaults).
+    - Graph helpers added: ensure_typed_node, add_edge, nodes_by_kind,
+      meta_path.
+
+  Pass coverage (every RE action now registers typed nodes):
+    pe-imports/exports → PeBinary + Dll + Symbol with edges
+    pe-strings/resources/debug/sections → PeBinary
+    dotnet-meta → PeBinary + DotnetAssembly
+    elf/macho/java/wasm → respective binary kinds
+    clarion-schema → SchemaTable + SchemaField with field edges
+    sql-extract → SchemaTable per detected table + join edges
+    dbf-schema → SchemaTable for the file
+    web-api / web-blueprint / js-api-extract → HttpEndpoint per call,
+      with edges from source files (cross-domain "meta-path source->endpoint")
+    web-dom → WebForm per form action
+    web-sitemap → page nodes + internal-link edges
+    proto/openapi/graphql/docker/terraform → kind-tagged schema source
+    gguf/safetensors/onnx/pyc/cuda → MlModel with format attrs
+
+  New algorithms (cribbed from NetworkX catalog — they ship 17, we add 4):
+    betweenness — Brandes' O(VE) chokepoint algorithm. Continuous score
+      complementing the binary `bridges` action.
+    eigenvector — power-iteration centrality. PageRank without damping.
+    katz — eigenvector + attenuation factor (α=0.1, β=1.0 default).
+    closeness — 1 / Σ shortest-path distance.
+
+  Heterogeneous-only:
+    meta-path <kindA>-><kindB>[->kindC] — DFS through typed edges
+      following a kind sequence. The killer feature for cross-domain
+      analysis. Defaults capped at 200 paths.
+    `--type kind1,kind2` filter on every centrality measure (target
+      doubles as the kind list).
+
+  Visualization:
+    dot — kind-aware shapes/colors. SourceFile=box (default), PeBinary=
+      component+blue, ElfBinary=component+green, Dll=folder, Symbol=oval,
+      HttpEndpoint=oval+green, WebForm=parallelogram, SchemaTable=cylinder,
+      SchemaField=note, ProtoMessage=tab, DockerService=box3d,
+      TerraformResource=box3d+purple, MlModel=note+orange.
+    mermaid — classDef declarations matching the dot palette.
+
+  Tests: 64 passing (was 54). 10 new heterogeneous-graph tests including
+  meta-path traversal, betweenness chokepoint detection, type filter
+  isolation, idempotency of ensure_typed_node + add_edge, EntityKind
+  round-trip parsing.
+
+  Intentionally deferred to 5.2.x / 5.3:
+    - Leiden community detection (wiki strongly endorses; current `clusters`
+      uses LPA which is functional but inferior). Faithful Leiden impl
+      with refinement step is 500-800 LOC of careful code; queued.
+    - Per-resource node registration for OpenAPI paths, Proto messages,
+      GraphQL types, Docker services, Terraform resources (currently they
+      register only the schema source). Each adds 30-100 LOC to the
+      respective parse function.
+    - Trait-based graph algorithm interface (petgraph pattern) so
+      algorithms work over arbitrary graph structures, not concrete
+      Graph type. Bigger refactor; not in 5.2.0 scope.
+    - Group / load / harmonic / percolation / current-flow centrality
+      measures (NetworkX has these; we shipped the 4 most useful).
+

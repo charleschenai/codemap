@@ -4,13 +4,17 @@ use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "codemap", version, about = "Codebase dependency analysis (96 actions, multi-repo)", after_help = "\
+#[command(name = "codemap", version, about = "Codebase dependency analysis (101 actions, heterogeneous graph, multi-repo)", after_help = "\
 Actions:
   Analysis:     stats, trace, blast-radius, phone-home, coupling, dead-files,
                 circular, exports/functions, callers, hotspots, size, layers, diff,
                 orphan-exports, health, summary, decorators, rename, context
   Navigation:   why, paths, subgraph, similar, structure
   Graph Theory: pagerank, hubs, bridges, clusters, islands, dot, mermaid
+  Centrality:   betweenness, eigenvector, katz, closeness
+                  (target = comma-separated kind filter, e.g. \"table,field\")
+  Heterogeneous: meta-path <kindA>-><kindB>[-><kindC>]
+                  e.g. \"meta-path source->endpoint\" finds source files calling APIs
   Functions:    call-graph, dead-functions, fn-info, diff-functions, complexity,
                 import-cost, churn, api-diff, clones, git-coupling, risk,
                 diff-impact, entry-points
@@ -27,6 +31,9 @@ Actions:
   Schemas:      proto-schema, openapi-schema, graphql-schema, docker-map, terraform-map
   ML/AI:        gguf-info, safetensors-info, onnx-info, pyc-info, cuda-info
   Composite:    validate, changeset, handoff
+
+Entity kinds (heterogeneous graph): source pe elf macho jclass wasm dll symbol
+  endpoint form table field proto gql oapi docker tf model asm
 
 Languages: TS/JS, Python, Rust, Go, Java, Ruby, PHP, C/C++, CUDA, Bash/Shell, C#, Kotlin, Lua, SQL")]
 struct Cli {

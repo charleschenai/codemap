@@ -13,6 +13,8 @@ pub mod lsp;
 pub mod schemas;
 pub mod ml;
 pub mod composite;
+pub mod centrality;
+pub mod meta_path;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -131,6 +133,15 @@ pub fn dispatch(graph: &mut Graph, action: &str, target: &str, tree_mode: bool) 
         "validate" => Ok(composite::validate(graph, target)),
         "changeset" => Ok(composite::changeset(graph, target)),
         "handoff" => Ok(composite::handoff(graph, target)),
+        // Centrality (4) — modern measures from NetworkX catalog. `target`
+        // doubles as a comma-separated kind filter ("table,field").
+        "betweenness" => Ok(centrality::betweenness(graph, &centrality::parse_kinds(target))),
+        "eigenvector" => Ok(centrality::eigenvector(graph, &centrality::parse_kinds(target))),
+        "katz"        => Ok(centrality::katz(graph, &centrality::parse_kinds(target))),
+        "closeness"   => Ok(centrality::closeness(graph, &centrality::parse_kinds(target))),
+        // Meta-Path (1) — heterogeneous graph traversal. Target is the
+        // arrow-separated kind sequence: "source->endpoint" etc.
+        "meta-path" | "metapath" => Ok(meta_path::meta_path(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

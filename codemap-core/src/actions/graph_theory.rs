@@ -518,6 +518,18 @@ pub fn dot(graph: &Graph, target: &str) -> String {
         "  node [shape=box, fontsize=10];".to_string(),
         String::new(),
     ];
+
+    // Kind-aware shapes/colors so heterogeneous graphs are readable.
+    // Source files inherit the default (box). Other kinds get distinct
+    // shapes consistent with stack-graphs / Joern visual conventions.
+    for (id, node) in &nodes {
+        let shape_color = dot_kind_attrs(node.kind);
+        if !shape_color.is_empty() {
+            lines.push(format!("  {} [{}];", dot_id(id), shape_color));
+        }
+    }
+    lines.push(String::new());
+
     for (id, node) in &nodes {
         for imp in &node.imports {
             if nodes.contains_key(imp) {
@@ -527,6 +539,32 @@ pub fn dot(graph: &Graph, target: &str) -> String {
     }
     lines.push("}".to_string());
     lines.join("\n")
+}
+
+fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
+    use crate::types::EntityKind::*;
+    match kind {
+        SourceFile        => "",
+        PeBinary          => "shape=component, fillcolor=\"#e3f2fd\", style=filled",
+        ElfBinary         => "shape=component, fillcolor=\"#e8f5e9\", style=filled",
+        MachoBinary       => "shape=component, fillcolor=\"#fff3e0\", style=filled",
+        JavaClass         => "shape=component, fillcolor=\"#fbe9e7\", style=filled",
+        WasmModule        => "shape=component, fillcolor=\"#f3e5f5\", style=filled",
+        Dll               => "shape=folder, fillcolor=\"#cfd8dc\", style=filled",
+        Symbol            => "shape=oval, fillcolor=\"#fff9c4\", style=filled, fontsize=8",
+        HttpEndpoint      => "shape=oval, fillcolor=\"#c8e6c9\", style=filled",
+        WebForm           => "shape=parallelogram, fillcolor=\"#dcedc8\", style=filled",
+        SchemaTable       => "shape=cylinder, fillcolor=\"#ffe0b2\", style=filled",
+        SchemaField       => "shape=note, fillcolor=\"#fff8e1\", style=filled, fontsize=8",
+        ProtoMessage      => "shape=tab, fillcolor=\"#e1bee7\", style=filled",
+        GraphqlType       => "shape=tab, fillcolor=\"#d1c4e9\", style=filled",
+        OpenApiPath       => "shape=oval, fillcolor=\"#b2dfdb\", style=filled",
+        DockerService     => "shape=box3d, fillcolor=\"#bbdefb\", style=filled",
+        TerraformResource => "shape=box3d, fillcolor=\"#b39ddb\", style=filled",
+        MlModel           => "shape=note, fillcolor=\"#ffccbc\", style=filled",
+        DotnetAssembly    => "shape=component, fillcolor=\"#e1f5fe\", style=filled",
+        DotnetType        => "shape=record, fillcolor=\"#e0f7fa\", style=filled, fontsize=8",
+    }
 }
 
 /// Mermaid flowchart: renders dependency graph in Mermaid syntax for GitHub/docs embedding.
@@ -592,13 +630,40 @@ pub fn mermaid(graph: &Graph, target: &str) -> String {
         "graph LR".to_string(),
     ];
 
-    // Emit node declarations with labels
+    // Emit kind-aware classDef declarations once at the top so the diagram
+    // colors match the dot output.
+    lines.push("    classDef pe       fill:#e3f2fd,stroke:#1976d2".to_string());
+    lines.push("    classDef elf      fill:#e8f5e9,stroke:#388e3c".to_string());
+    lines.push("    classDef macho    fill:#fff3e0,stroke:#f57c00".to_string());
+    lines.push("    classDef dll      fill:#cfd8dc,stroke:#455a64".to_string());
+    lines.push("    classDef symbol   fill:#fff9c4,stroke:#fbc02d".to_string());
+    lines.push("    classDef endpoint fill:#c8e6c9,stroke:#388e3c".to_string());
+    lines.push("    classDef form     fill:#dcedc8,stroke:#689f38".to_string());
+    lines.push("    classDef table    fill:#ffe0b2,stroke:#ef6c00".to_string());
+    lines.push("    classDef field    fill:#fff8e1,stroke:#f9a825".to_string());
+    lines.push("    classDef model    fill:#ffccbc,stroke:#bf360c".to_string());
+    lines.push("    classDef proto    fill:#e1bee7,stroke:#6a1b9a".to_string());
+    lines.push("    classDef gql      fill:#d1c4e9,stroke:#4527a0".to_string());
+    lines.push("    classDef docker   fill:#bbdefb,stroke:#1565c0".to_string());
+    lines.push("    classDef tf       fill:#b39ddb,stroke:#4527a0".to_string());
+
+    // Emit node declarations with labels (and class assignments per kind)
     let mut sorted_ids: Vec<&&String> = nodes.keys().collect();
     sorted_ids.sort();
+    let mut class_assignments: Vec<String> = Vec::new();
     for id in &sorted_ids {
         let label = short_label(id);
-        lines.push(format!("    {}[{}]", mermaid_id(id), label));
+        let mid = mermaid_id(id);
+        lines.push(format!("    {}[{}]", mid, label));
+        if let Some(node) = nodes.get(*id) {
+            let cls = mermaid_kind_class(node.kind);
+            if !cls.is_empty() {
+                class_assignments.push(format!("    class {} {}", mid, cls));
+            }
+        }
     }
+    lines.push(String::new());
+    lines.extend(class_assignments);
     lines.push(String::new());
 
     // Emit edges
@@ -613,4 +678,30 @@ pub fn mermaid(graph: &Graph, target: &str) -> String {
     }
 
     lines.join("\n")
+}
+
+fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
+    use crate::types::EntityKind::*;
+    match kind {
+        SourceFile        => "",
+        PeBinary          => "pe",
+        ElfBinary         => "elf",
+        MachoBinary       => "macho",
+        JavaClass         => "elf",
+        WasmModule        => "macho",
+        Dll               => "dll",
+        Symbol            => "symbol",
+        HttpEndpoint      => "endpoint",
+        WebForm           => "form",
+        SchemaTable       => "table",
+        SchemaField       => "field",
+        ProtoMessage      => "proto",
+        GraphqlType       => "gql",
+        OpenApiPath       => "endpoint",
+        DockerService     => "docker",
+        TerraformResource => "tf",
+        MlModel           => "model",
+        DotnetAssembly    => "pe",
+        DotnetType        => "field",
+    }
 }
