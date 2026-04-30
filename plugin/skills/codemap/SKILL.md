@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Analyze codebase structure with 145 actions on a heterogeneous graph (source files, binaries, schema tables, HTTP endpoints, ML models, IaC resources — all in one graph). 17 NetworkX centrality measures (PageRank, betweenness, eigenvector, katz, closeness, harmonic, load, brokers, voterank, group, percolation, current-flow, subgraph-centrality, second-order, dispersion, reaching, trophic, current-flow-closeness), Leiden community detection + 4 more (k-core, k-clique, modularity-max, divisive), classical algorithms (Bellman-Ford, A*, Floyd-Warshall, MST, max-flow, k-shortest, Tarjan SCC, topological sort, Cooper-Harvey-Kennedy dominator tree, Steiner tree, VF2 subgraph isomorphism, feedback arc set, cliques, diameter), link prediction (common-neighbors, jaccard, adamic-adar), temporal graph evolution (node-lifespan, edge-churn, community-evolution from git history without checkouts), spectral analysis (Fiedler bisection, Shi-Malik spectral clustering, eigengap heuristic via self-contained Lanczos eigensolver), graph exports (JSON, GraphML for yEd/Cytoscape/NetworkX, GEXF for Gephi), meta-path queries across kinds, audit composite report, kind-aware dot/mermaid viz, AST-powered call graphs, binary reverse engineering (PE/ELF/Mach-O/Java/WASM with library deps as graph nodes), ML model analysis (GGUF/SafeTensors/ONNX/CUDA), schema parsing, security scanning, web scraper blueprinting, LSP integration, composite CI checks. TRIGGER when asked to understand code structure, run an architectural audit, find load-bearing files, trace cross-domain dependencies (source→endpoint, binary→dll), find graph bottlenecks (Fiedler), bisect or k-cluster a codebase spectrally, surface young hotspots / vestigial imports / cluster-evolution events from git history, find missing-import bugs via link prediction, recommend a community count via the eigengap heuristic, reverse engineer binaries, map APIs, scan for secrets, or prepare for refactoring.
+description: Heterogeneous-graph codebase analysis with 163 actions. ONE graph spans source files, PE/ELF/Mach-O binaries, DLL/symbol/function nodes, HTTP endpoints, schema tables, ML models, IaC resources, licenses, CVEs, certificates, Android packages, permissions — every graph algorithm (PageRank, Leiden, Fiedler, betweenness) runs uniformly across kinds. 17 NetworkX centrality measures, Leiden community detection, classical algorithms (Bellman-Ford / A* / Floyd-Warshall / SCC / dominator-tree / Steiner / VF2), spectral analysis (Fiedler bisection / Shi-Malik clustering / eigengap), temporal graph evolution from git history, link prediction, AST-powered call graphs across 15 languages, x86/x64 binary disassembly with intra-binary call graphs, supply-chain analysis (license-scan + offline CVE matching + SPDX/CycloneDX SBOM export + fuzzy hashing + Authenticode cert nodes), recon-artifact parsers (robots/sitemap/Wappalyzer-fingerprint/crt.sh). Pure static analyzer — consumes captured artifacts; never makes network requests. TRIGGER when asked to understand code structure, run an architectural audit, find load-bearing files, trace cross-domain dependencies (source→endpoint, binary→dll→cve), find graph bottlenecks (Fiedler), reverse engineer binaries, map APIs, scan for secrets, surface git-history hotspots, generate SBOMs, or parse recon artifacts (robots.txt, sitemap, crt.sh dumps).
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -10,335 +10,417 @@ allowed-tools:
   - Grep
 ---
 
-# /codemap — Heterogeneous-Graph Codebase Analysis & Reverse Engineering (145 actions)
+# /codemap — Heterogeneous-Graph Codebase Analysis (163 actions)
 
-Single Rust binary. **One graph, many node types**: source files share a graph with PE/ELF/Mach-O binaries + their imported DLLs + symbol tables, HTTP endpoints (auto-promoted from URL strings), schema tables (Clarion/SQL/dBASE), GraphQL/Proto/OpenAPI types, Docker services, Terraform resources, ML model files. All graph algorithms (PageRank, Leiden, betweenness, Fiedler, etc.) run uniformly across mixed kinds.
+Single Rust binary. **One graph, many node types** (28 EntityKinds): source files coexist with PE/ELF/Mach-O binaries + their disassembled functions, DLLs, imported symbols, HTTP endpoints, web forms, schema tables, Protobuf/GraphQL/OpenAPI types, Docker/Terraform resources, ML model files, compilers, string literals, overlays, certificates, CVEs, licenses, Android packages, and permissions. Every graph algorithm runs uniformly across kinds — `pagerank --type bin_func` ranks functions inside binaries; `meta-path "source->dll->cve"` traces vulnerable transitive deps.
 
-15 languages via tree-sitter AST. Rayon parallel. Bincode cache (typed-node mutations persist across CLI runs). No external services.
+15 languages via tree-sitter AST. Pure static analyzer — codemap **never makes network requests**. Consumes captured artifacts (files you name explicitly).
+
+---
 
 ## Quick Start
 
 ```bash
 codemap [--dir <path>] <action> [target]
-codemap --dir ~/project stats              # overview
 codemap --dir ~/project audit              # one-page architectural risk overview
-codemap --dir ~/project fiedler            # find bottleneck / natural bisection
-codemap --dir ~/project node-lifespan      # find young hotspots from git history
-codemap --dir . pe-imports /path/to.exe    # reverse engineer a binary
+codemap --dir ~/project fiedler            # bottleneck / natural bisection
+codemap --dir . pe-imports /path/to.exe    # reverse-engineer a binary
+codemap --dir ~/project license-scan       # compliance scan
 ```
 
-Options: `--json` (JSON envelope with ok/error), `--tree` (ASCII tree for data-flow), `--no-cache`, `--watch [secs]`, `-q` (quiet), `--dir` (repeatable for multi-repo), `--include-path` (C/C++ includes).
+Options: `--json` (JSON envelope), `--tree` (ASCII tree for data-flow), `--no-cache`, `--watch [secs]`, `-q` (quiet), `--dir` (repeatable for multi-repo), `--include-path` (C/C++ includes).
 
 ---
 
-## When to Use Each Action
+## Tier 1 — If you only know 10 actions, know these
 
-### "I need an architectural risk overview" (start here for unfamiliar code)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| One-page audit before refactoring | `audit` | `codemap --dir src audit` → chokepoints + brokers + 🚨 dual-risk + clusters + per-kind census |
-| Find chokepoints (continuous score) | `betweenness` | Brandes 2001. Files that lie on many shortest paths. |
-| Find integration brokers | `brokers` (alias `structural-holes`) | Burt 1992. Files that bridge otherwise-disconnected groups. |
-| Find core nodes by importance | `pagerank` / `eigenvector` / `katz` | Random-walk / spectral / attenuated-walk variants. |
-| Distance-based importance | `closeness` / `harmonic` | Use `harmonic` if graph is disconnected (Marchiori-Latora 2000). |
-| Edge-traffic-based load | `load` | Newman 2001. Like betweenness but counts dependent paths, not just shortest. |
-| Influence/diffusion ranking | `voterank` | Zhang 2016. Top-k spreaders if you had to "infect" the codebase. |
-| Group centrality (kind-filtered) | `group <kind>` | Importance of a whole kind class as a group. |
-| Endpoint criticality under attack | `percolation` | Piraveenan 2013. Removal-resilience scoring. |
-| Random-walk-flow betweenness | `current-flow` | Newman 2005. Like betweenness but counts every random walk, not just shortest paths. |
-| Random-walk closeness | `current-flow-closeness` | Closeness analog of current-flow. |
-| **NEW (5.8+) — extra centrality** | | |
-| Walk-based centrality with eigenvalue weighting | `subgraph-centrality` | Estrada-Rodriguez-Velazquez. Counts closed walks weighted by length. |
-| Second-order centrality | `second-order` | Kermarrec et al. — variance of cover time, finds nodes "off the beaten path." |
-| Triadic embeddedness | `dispersion` | Backstrom-Kleinberg. How spread out a node's connections are. |
-| Reach (downstream coverage) | `reaching` | "What fraction of files does X reach via outgoing edges?" entry-point detector. |
-| Trophic level (DAG depth) | `trophic` | Levine 1980 — "how deep is this in the abstraction stack?" |
-| Detect modules (Leiden default) | `clusters [leiden\|lpa]` | Traag-Waltman-van Eck 2019. Auto-named by path prefix. |
-| Hub vs authority ranking | `hubs` | Kleinberg HITS. Two-axis importance. |
-| Critical single-points-of-failure | `bridges` | Tarjan articulation-point algorithm. |
+These cover ~80% of typical codemap workflows. When in doubt, reach for one of these first:
 
-### "I need to find graph bottlenecks / natural partitions" (NEW 5.11 — spectral)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Algebraic connectivity + best bisection | `fiedler` | Computes λ₂ + Fiedler vector, sign-cuts the graph. λ₂ ≈ 0 ⇒ disconnected; λ₂ < 0.05 ⇒ near-bottleneck. Approximates Cheeger min-cut. |
-| K-way clustering different from Leiden | `spectral-cluster [k=8]` | Shi-Malik 2000 normalized-cut. Top-k smallest eigenvectors of L_sym, row-normalized, then k-means. Captures structure modularity-based methods (Leiden/LPA) miss. |
-| Auto-recommend a community count | `spectral-gap` | von Luxburg 2007 eigengap heuristic. Top-25 eigenvalues + finds the largest gap → suggests k. |
+| Action | When to use it | Output |
+|---|---|---|
+| `audit` | First look at any unfamiliar codebase. One-page architectural risk overview. | Chokepoints + brokers + 🚨 dual-risk nodes + clusters + per-kind census |
+| `pagerank` | "Which files matter most?" | Top 30 by importance |
+| `fiedler` | "Where's the bottleneck?" / "What's the natural fault line?" | λ₂ + sign-cut bisection |
+| `blast-radius <file>` | "What breaks if I change X?" | BFS over importers |
+| `meta-path "<a>-><b>"` | Cross-domain queries (source→endpoint, elf→dll→cve, apk→permission) | Typed paths through the graph |
+| `taint <source> <sink>` | Security: trace user input to a sensitive call | CPG-backed interprocedural taint paths |
+| `bin-disasm <binary>` | RE: x86/x64 binary → BinaryFunction graph | Function list + intra-binary call graph |
+| `license-scan` | Compliance check on the current repo | License nodes + leaky-permission flags |
+| `cve-match` | Supply chain: link DLLs to imported CVE feed | dll → cve edges |
+| `web-fingerprint <html-or-bundle>` | "What stack is this site running?" | Wappalyzer-style framework / CMS / CDN identification |
 
-Capped at 5000 nodes; 2000-node graphs eigendecompose in < 1 s.
-
-### "I need git-history-aware structural analysis" (NEW 5.10 — temporal)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Per-file age + commit velocity | `node-lifespan` | First-seen / last-modified / commit count from one `git log --name-status -M` pass. Surfaces young hotspots (< 1y old, high commits/day), active veterans, ancient stable. |
-| Detect vestigial imports | `edge-churn [N=500]` | Per-edge co-change count across last N commits. Zero co-change with both files in history = likely dead structural import. |
-| Track cluster evolution over time | `community-evolution [N=4]` | LPA at N evenly-spaced snapshots (filtering each to nodes that existed by then). Detects BIRTH / DEATH / SPLIT / MERGE events via Jaccard. No git checkouts. |
-
-### "I need cross-domain queries (heterogeneous graph)"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Find source files that hit APIs | `meta-path "source->endpoint"` | URL strings auto-promote to HttpEndpoint nodes. |
-| Trace binary→DLL→symbol chains | `meta-path "pe->dll->symbol"` | PE/ELF/Mach-O imports become real graph edges. |
-| Find code that touches schema tables | `meta-path "source->table"` | SQL/Clarion/dBASE schemas become typed nodes. |
-| Filter centrality by kind | any centrality action with `<kind>` target | `codemap --dir src betweenness table` |
-| Run multiple actions in one process | `pipeline` | `codemap pipeline "js-api-extract:src/,meta-path:source->endpoint"` |
-
-Entity kinds: `source pe elf macho jclass wasm dll symbol endpoint form table field proto gql oapi docker tf model asm`. Auto-classified during scan: `.exe/.dll/.so/.dylib → binary`, `.gguf/.safetensors/.onnx/.pyc → model`, `.proto/.tf/.clw/.dbf → schema`. URL strings in source code → HttpEndpoint nodes (filtered to drop test/template/credential/xmlns URLs).
-
-### "I need to understand this codebase" (orientation)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| First look at a project | `stats` | File count, line count, edges, URLs, exports, extension breakdown. |
-| Quick dashboard | `summary` | Box-drawn project health card. |
-| Health check / code quality | `health` | 0-100 score with letter grade. |
-| What does this file do? | `trace <file>` | Imports / importers / URLs / exports for one file. |
-| What are the main files? | `pagerank` | Top 30 by importance. |
-| What are the layers? | `layers` | BFS depth → entry / orchestration / service / utility / leaf. Flags cross-layer violations. |
-| Build an LLM context map | `context [budget]` | `codemap --dir src context 8k` — fits in a prompt. |
-| Directory overview with functions | `structure` | Tree view per directory with function lists. |
-| Detect entry points | `entry-points` | Files with no incoming imports + main/index/cli basenames. |
-| Find decorators/attributes by pattern | `decorators <pattern>` | `decorators test` finds all @test/#[test]/@pytest decorations. |
-
-### "I need shortest paths / classical graph algorithms" (NEW 5.8-5.9)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Negative-weight shortest paths | `bellman-ford <file>` | Detects negative cycles. |
-| Heuristic shortest path A→B | `astar <A> <B>` | A* with admissible heuristic. |
-| All-pairs shortest paths | `floyd-warshall` | O(V³). Caps for large graphs. |
-| Graph diameter | `diameter` | Longest shortest path. |
-| Minimum spanning tree | `mst` | Kruskal across the union edge set. |
-| Find max cliques | `cliques` | Bron-Kerbosch with pivoting. Top-20 by size. |
-| Top-K shortest paths A→B | `kshortest <A> <B>` | Yen's algorithm. |
-| Min-cut / max-flow | `max-flow <S> <T>` | Edmonds-Karp BFS Ford-Fulkerson. |
-| Break dependency cycles | `feedback-arc` (alias `feedback-arc-set`) | Greedy heuristic. Suggests edges to break to make graph acyclic. |
-| Strongly-connected components | `scc` | Tarjan iterative. Reports cyclic-dep clusters by size. |
-| Topological sort | `topo-sort` (alias `topological-sort`) | Kahn's. Errors if cyclic with pointer to `scc`. |
-| Dominator tree | `dominator-tree [entry]` | Cooper-Harvey-Kennedy. Auto-detects entry by max-fanout if not given. |
-| Min-edge subgraph connecting N nodes | `steiner <a,b,c,...>` | MST 2-approximation heuristic. |
-| Find pattern instances in graph | `subgraph-iso "<kind1>-><kind2>->..."` | VF2-style matching. Capped at 100 matches. |
-
-### "I need to find missing imports / link prediction" (NEW 5.8)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Files that share neighbors but don't import each other | `common-neighbors` | Top-30 unconnected pairs. |
-| Same, normalized for degree | `jaccard` | |shared| / |union|. |
-| Hub-discounted neighbor overlap | `adamic-adar` | Σ 1/log(degree(shared)). |
-
-Useful for: "should A import B?" "what file is X probably missing an import to?"
-
-### "I need to detect communities" (Leiden + 4 more, NEW 5.8)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Default community detection (modularity) | `clusters` (= `leiden`) | Auto-named by path prefix or kind. |
-| Legacy label-propagation variant | `clusters lpa` | Faster, slightly noisier. |
-| Find dense skeleton (peeling) | `k-core <k>` | Iteratively remove nodes with degree < k. |
-| Overlapping communities | `k-clique <k>` | Palla et al. 2005 k-clique percolation. |
-| Greedy modularity maximization | `modularity-max` | Clauset-Newman-Moore. |
-| Edge-betweenness divisive clustering | `divisive` | Girvan-Newman. Refuses on n > 500. |
-
-### "What happens if I change X?"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| What breaks if I touch this file? | `blast-radius <file>` | BFS over imported_by. |
-| Is this PR risky? | `risk <ref>` | 0-100 score combining churn × coupling. |
-| Full diff impact analysis | `diff-impact <ref>` | Changed files + transitive impact. |
-| What changed + blast radius | `diff <ref>` | git diff intersected with graph. |
-| Functions changed since ref | `diff-functions <ref>` | Symbol-level diff. |
-| Exports changed since ref | `api-diff <ref>` | What public surface changed. |
-| Preview a rename | `rename <old> <new>` | Shows everywhere a symbol would change. |
-| How connected is a file? | `import-cost <file>` | Recursive import weight. |
-| Hidden git coupling | `git-coupling [N=200]` | Files that change together but don't import. |
-| Per-file churn risk | `churn <ref>` | Recent changes × coupling = risk score. |
-
-### "How does A connect to B?"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Shortest path between files | `why <A> <B>` | Single path. |
-| ALL paths between files | `paths <A> <B>` | Up to 100 paths. |
-| Everything connected to X | `subgraph <pattern>` | Filtered by name pattern. |
-| Files with similar imports | `similar <file>` | Ranked by import-set Jaccard. |
-| Who calls this function? | `callers <name>` | Word-boundary cross-file regex. |
-| Function call graph | `call-graph [file]` | AST-resolved cross-file call edges. |
-| Function details | `fn-info <file>` | Functions, params, lines, call sites. |
-| List a file's exported symbols | `exports <file>` (alias `functions`) | Public-API surface of one file. |
-| Find duplicate code | `clones [file]` | Token-shingle clone detection. |
-| Find complex functions | `complexity [file]` | Cyclomatic complexity per function. Skips minified JS. |
-
-### "I need to clean up this codebase"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Find unused files | `dead-files` | Zero importers + not main/index/cli basenames. |
-| Find unused functions | `dead-functions` | Exported but never called. |
-| Find unused exports | `orphan-exports` | Exports not imported anywhere. |
-| Find unused dependencies | `dead-deps` | Manifest entries not referenced in imports. |
-| Find circular imports | `circular` | DFS cycle detection with rotation dedup. |
-| Most coupled files | `hotspots` | Top 30 by imports + imported_by. |
-| Largest files | `size` | Top 30 by line count + % of codebase. |
-| Files importing a package | `coupling <pattern>` | `coupling lodash` → all files using it. |
-| Files phoning home (URLs) | `phone-home` | URL extraction grouped by host. |
-
-### "I need to trace data flow / find security issues"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Trace user input to database (interprocedural) | `taint <source> <sink>` | `taint req.body db.query`. CPG-backed, follows cross-file calls. |
-| What feeds this line? (backward slice) | `slice <file>:<line>` | Backward def-use BFS. |
-| Where does this value go? (forward) | `trace-value <f>:<l>:<n>` | Forward use-chain. |
-| Find all sink points | `sinks [file]` | Built-in sink list (db.query, fs.write, exec, etc.) + custom via `.codemap/dataflow.json`. |
-| Data flow for a function | `data-flow <file> [fn]` | Per-fn def/use/call summary. |
-| Scan for hardcoded secrets | `secret-scan` | AWS keys, GitHub PATs, JWTs, passwords, conn strings, with masking + severity. |
-| Map the public API surface | `api-surface` | All exported symbols, grouped. |
-
-### "I need to reverse engineer a compiled binary"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| **Windows PE/DLL** | | |
-| What DLLs and APIs does it call? | `pe-imports <file>` | Adds DllNode + SymbolNode to graph. |
-| Extract SQL / strings from binary | `pe-strings <file>` | UTF-8 + UTF-16 + length filter. |
-| Smart SQL mining + table map | `sql-extract <file\|dir>` | Categorizes by SELECT/INSERT/UPDATE/DDL. |
-| Version info, manifests, UI strings | `pe-resources <file>` | RT_STRING, RT_VERSION, RT_DIALOG. |
-| DLL export table | `pe-exports <file>` | Adds SymbolNode entries. |
-| PDB paths, build date, compiler | `pe-debug <file>` | DEBUG_DIRECTORY parsing. |
-| Section entropy (packed?) | `pe-sections <file>` | UPX / packed-binary detector. |
-| .NET types, methods, assemblies | `dotnet-meta <file>` | CLR metadata stream parsing. |
-| Compare two binary versions | `binary-diff <f1> <f2>` | Section + import/export delta. |
-| **Linux ELF** | | |
-| ELF sections, symbols, deps | `elf-info <file>` | DT_NEEDED entries become DllNode edges. |
-| **macOS Mach-O** | | |
-| Mach-O load commands, dylibs | `macho-info <file>` | LC_LOAD_DYLIB → DllNode edges. Fat/universal binaries supported. |
-| **Java** | | |
-| Class file / JAR analysis | `java-class <file>` | Magic + classfile structure + main-class. |
-| **WebAssembly** | | |
-| WASM imports, exports, sections | `wasm-info <file>` | Module structure. |
-
-### "I need to parse a legacy database schema"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Clarion .CLW DDL file | `clarion-schema <file>` | Files / Records / Fields → schema nodes. |
-| dBASE/FoxPro .DBF file | `dbf-schema <file>` | Header + field descriptors. |
-
-### "I need to map a web application" (scraper blueprint)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Map API from HAR capture | `web-api <har>` | Endpoint / method / params / status / auth detection. |
-| Analyze saved HTML page | `web-dom <html>` | Forms / tables / nav / click handlers / inline JS API calls. |
-| Build sitemap from HTML files | `web-sitemap <dir>` | Page graph + hubs + dead ends. |
-| Full scraper blueprint | `web-blueprint <har> [html]` | Auth recipe + endpoints + pagination + rate-limit hints. |
-| Find APIs in JS bundles | `js-api-extract <file\|dir>` | fetch / axios / XHR / `apiUrl: '...'` constants. |
-
-### "I need to understand infrastructure / API specs"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Protobuf service definitions | `proto-schema <file>` | Messages + RPC services. |
-| OpenAPI/Swagger spec | `openapi-schema <file>` | Paths + schemas. JSON or YAML. |
-| GraphQL schema | `graphql-schema <file>` | Types + resolvers. |
-| Docker Compose services | `docker-map <file>` | Service graph + topo startup order. |
-| Terraform resources | `terraform-map <file>` | Resources + module references. |
-
-### "I need to check dependencies"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Show dependency tree | `dep-tree [manifest]` | 8 manifest formats (Cargo / npm / pip / go.mod / etc.). |
-| Find unused dependencies | `dead-deps` | Manifest entries vs actual imports. |
-| Files importing a package | `coupling <pattern>` | `coupling react` → all React-using files. |
-
-### "I need cross-language bridge analysis"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| All cross-lang bridges | `lang-bridges` | PyO3 / pybind11 / TORCH_LIBRARY / Triton / CUDA / monkey-patches. |
-| GPU kernel inventory | `gpu-functions` | Triton + CUDA __global__ + launches. |
-| Python monkey-patches | `monkey-patches` | `module.Class = Replacement` patterns. |
-| Backend dispatch tables | `dispatch-map` | YAML native_functions.yaml-style op→kernel maps. |
-
-### "I need to use LSP for deeper analysis"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Extract symbols from file | `lsp-symbols <server> <file>` | `lsp-symbols rust-analyzer src/main.rs` |
-| Find all references | `lsp-references <server> <f:l:c>` | Cursor-position-based. |
-| Call hierarchy | `lsp-calls <server> <f:l:c>` | Incoming + outgoing. |
-| Get diagnostics | `lsp-diagnostics <server> <file>` | Errors + warnings from the LSP. |
-| Get type info | `lsp-types <server> <file>` | Inferred types per symbol. |
-
-Works with: rust-analyzer, pylsp, typescript-language-server, clangd, gopls — any LSP-compliant server.
-
-### "I need a diagram"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Graphviz DOT (kind-aware shapes) | `dot [target]` | `codemap --dir src dot parser > graph.dot` |
-| Mermaid (GitHub-native) | `mermaid [target]` | Matching classDef per kind. |
-
-### "I need to export the graph for an external tool" (NEW 5.9)
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Codemap-native JSON dump | `to-json` | Round-trip-safe full graph. |
-| GraphML for yEd / Cytoscape / NetworkX | `to-graphml` | Standard XML graph format. |
-| GEXF for Gephi | `to-gexf` | Per-EntityKind viz colors included. |
-
-### "I need to compare repos / refs / binaries"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Compare two repos | `compare <dir>` | Two-graph diff. |
-| Functions changed since ref | `diff-functions <ref>` | Symbol-level. |
-| Exports changed since ref | `api-diff <ref>` | Public surface delta. |
-| Compare two binaries | `binary-diff <f1> <f2>` | Sections + imports + exports. |
-| Detect entry points | `entry-points` | Multi-criteria entry detection. |
-| Disconnected components | `islands` | CCs sorted by size. |
-
-### "I need to analyze an ML model file"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| GGUF model (llama.cpp) | `gguf-info <file>` | Tensor shapes + metadata + quantization. |
-| SafeTensors weights | `safetensors-info <file>` | Header + tensor list. |
-| ONNX model | `onnx-info <file>` | Graph + ops + inputs/outputs. |
-| Python bytecode | `pyc-info <file>` | Magic + module + co_consts. |
-| CUDA kernels (cubin/fatbin) | `cuda-info <file>` | SM target + kernel names. |
-
-### "I need a quick CI check or project briefing"
-| Trigger | Action | Example |
-|---------|--------|---------|
-| Pass/fail health check for CI | `validate` | Exit code reflects health threshold. |
-| Full PR/change analysis | `changeset <ref>` | Diff + risk + impact in one report. |
-| Context-switching briefing | `handoff [budget]` | Resume-where-you-left-off summary. |
-| One-page architectural risk overview | `audit` | Chokepoints + brokers + dual-risk + clusters + per-kind census. |
-| Chain multiple actions in one process | `pipeline "act1:t1,act2:t2,..."` | `pipeline "web-blueprint:capture.har,meta-path:source->endpoint"` |
+If none of those fit — keep reading.
 
 ---
 
-## Picking the right action when faced with ambiguity
+## Tier 2 — What am I trying to do?
 
-| You want… | Best fit |
-|-----------|----------|
-| "What's the most important file" | `pagerank` (default) or `betweenness` (chokepoints) |
-| "What's most likely to break" | `risk <ref>` or `audit` (dual-risk nodes) |
-| "Where do I start refactoring" | `audit` first, then `fiedler` for natural bisection lines |
-| "What's actually used in this PR" | `diff-impact <ref>` |
-| "Is this codebase modular?" | `clusters` for module count; `spectral-gap` for the eigengap heuristic; `fiedler` for whether λ₂ is small (bottleneck) or large (well-connected) |
-| "Which imports are vestigial" | `edge-churn` (zero co-change with both files in history) |
-| "What changed last week" | `node-lifespan` (young hotspots) + `churn HEAD~50` |
-| "Which files should know about each other but don't" | `common-neighbors` / `jaccard` / `adamic-adar` |
-| "How do I cluster differently from Leiden?" | `spectral-cluster <k>` (captures bottleneck-shaped structure) |
-| "Where are the cyclic deps?" | `scc` (typed components) or `circular` (file-level cycles) |
-| "What's the entry point?" | `entry-points` or `dominator-tree` (auto-detects) or `reaching` (top-1 reach) |
-| "Which file connects everything?" | `betweenness` (top-1) or `bridges` (articulation points) |
-| "Cluster of code that grew together" | `community-evolution` then `audit` cluster summary |
+Intent → action lookup. Most codebase questions resolve to one of these:
+
+### Understanding code
+
+| You want to know… | Reach for | Why |
+|---|---|---|
+| "What does this codebase do" | `stats` → `summary` → `audit` | Ladder from facts to architecture in 3 calls |
+| "What are the layers" | `layers` | BFS depth → entry / orchestration / service / leaf, flags cross-layer violations |
+| "What does this file do" | `trace <file>` | Imports + importers + URLs + exports |
+| "What are the modules" | `clusters` (Leiden) or `spectral-cluster <k>` | Modularity-based vs cut-based clustering |
+| "Make a context map for an LLM" | `context [budget]` | Fits in a prompt |
+| "Score this codebase 0-100" | `health` | Letter grade with breakdown |
+
+### Change risk / impact
+
+| You want to know… | Reach for |
+|---|---|
+| "What breaks if I touch this file" | `blast-radius <file>` |
+| "Is this PR risky" | `risk <ref>` (0-100) |
+| "What changed + transitive impact" | `diff-impact <ref>` |
+| "What public API changed" | `api-diff <ref>` |
+| "Which functions changed" | `diff-functions <ref>` |
+| "Preview a rename" | `rename <old> <new>` |
+| "How recently was this churned" | `churn <ref>` (per-file) |
+| "What files change together" | `git-coupling [N]` (hidden coupling) |
+
+### Connecting things
+
+| You want to know… | Reach for |
+|---|---|
+| "Shortest path A → B" | `why <A> <B>` |
+| "Every path A → B" | `paths <A> <B>` |
+| "Who calls this function" | `callers <name>` |
+| "All files connected to X" | `subgraph <pattern>` |
+| "Files with similar import sets" | `similar <file>` |
+| "Functions inside a binary" | `bin-disasm <bin>` then `pagerank bin_func` |
+
+### Finding bottlenecks / centrality
+
+| You want to know… | Reach for |
+|---|---|
+| "What's load-bearing" | `audit` (dual-risk = chokepoint AND broker) |
+| "What's a chokepoint" | `betweenness` (continuous) or `bridges` (binary) |
+| "What brokers between groups" | `brokers` (alias `structural-holes`) |
+| "What's the natural bisection" | `fiedler` |
+| "How many communities" | `spectral-gap` (eigengap heuristic) |
+| "Top spreaders" | `voterank` |
+| "Asymmetric reach" | `reaching` |
+
+### Heterogeneous / cross-domain
+
+| You want to know… | Reach for |
+|---|---|
+| "Which source files hit APIs" | `meta-path "source->endpoint"` |
+| "Which binary uses what DLL" | `meta-path "pe->dll"` or `"elf->dll"` |
+| "Which code touches schema tables" | `meta-path "source->table"` |
+| "Vulnerable transitive deps" | `meta-path "source->binary->dll->cve"` (after `cve-match`) |
+| "What functions reference this string" | `meta-path "elf->bin_func->string"` (after `bin-disasm`) |
+| "What permissions does this APK use" | `meta-path "apk->permission"` |
+| "Filter centrality by kind" | any centrality action with `<kind>` arg: `pagerank bin_func`, `betweenness endpoint` |
+
+### Cleanup / dead code
+
+| You want to know… | Reach for |
+|---|---|
+| "Unused files" | `dead-files` |
+| "Unused functions" | `dead-functions` |
+| "Unused exports" | `orphan-exports` |
+| "Unused dependencies" | `dead-deps` |
+| "Vestigial imports" | `edge-churn` (zero co-change with both files in history) |
+| "Circular imports" | `circular` |
+| "Dead structural couplings" | `edge-churn` |
+| "Should files A and B import each other" | `jaccard` / `adamic-adar` (link prediction) |
+
+### Security / data flow
+
+| You want to know… | Reach for |
+|---|---|
+| "Trace user input to DB" | `taint <source> <sink>` |
+| "What feeds this line" | `slice <file>:<line>` (backward) |
+| "Where does this value go" | `trace-value <file>:<line>:<name>` (forward) |
+| "Hardcoded secrets" | `secret-scan` |
+| "All sink points" | `sinks [file]` |
+| "Public API surface" | `api-surface` |
+| "Files phoning home" | `phone-home` |
+
+### Reverse engineering
+
+| You want to know… | Reach for |
+|---|---|
+| "Decode a Windows binary" | `pe-imports` + `pe-exports` + `pe-strings` + `pe-meta` (Rich + TLS + entry) |
+| "Disassemble x86/x64" | `bin-disasm <file>` then `pagerank bin_func` |
+| "What language is this binary" | `lang-fingerprint <file>` (Go / Rust / .NET / Delphi / PyInstaller / etc.) |
+| "Is this binary signed" | `pe-cert <file>` (PE Authenticode → Cert nodes) |
+| "Has this been packed" | `overlay-info <file>` (entropy + NSIS/Inno/PyInstaller/ZIP detection) |
+| "C++/Rust mangled names" | already auto-applied — `pe-exports` / `elf-info` show demangled names + raw `attrs[mangled]` |
+| "Linux binary" | `elf-info` |
+| "Mac binary" | `macho-info` |
+| ".NET assembly" | `dotnet-meta` |
+| "JVM .class / JAR" | `java-class` |
+| "WebAssembly" | `wasm-info` |
+| "Python .pyc" | `pyc-info` |
+| "Android APK" | `apk-info` |
+| "ML model file" | `gguf-info` / `safetensors-info` / `onnx-info` / `cuda-info` |
+| "Compare two binaries" | `binary-diff <a> <b>` or `fuzzy-hash` + `fuzzy-match` |
+
+### Supply chain / SBOM
+
+| You want to know… | Reach for |
+|---|---|
+| "What licenses are in this repo" | `license-scan` |
+| "Are deps vulnerable" | `cve-import <nvd.json>` then `cve-match` then `meta-path "source->dll->cve"` |
+| "Generate SBOM" | `to-spdx` (SPDX 2.3) or `to-cyclonedx` (CycloneDX 1.5) |
+| "Who signed this binary" | `pe-cert <file>` |
+| "Find binary variants in a fleet" | `fuzzy-hash` per binary then `fuzzy-match` |
+
+### Git-history aware (temporal)
+
+| You want to know… | Reach for |
+|---|---|
+| "Young hotspots" | `node-lifespan` (< 1y old, high commits/day) |
+| "Active veterans" | `node-lifespan` (> 1y old AND touched < 30d ago) |
+| "Vestigial imports" | `edge-churn` (zero co-change) |
+| "How clusters formed over time" | `community-evolution [N=4]` (BIRTH / DEATH / SPLIT / MERGE events) |
+
+### Recon-artifact parsing (5.16.0+ — pure static, file-only)
+
+| You have… | Reach for |
+|---|---|
+| `robots.txt` you curled | `robots-parse` (classifies + flags leaky paths) |
+| `sitemap.xml` (or .gz, gunzipped first) | `web-sitemap-parse` (auto-detects ID-enumeration patterns like `/lawyer/{ID}`) |
+| Saved HTML / HAR / JS bundle | `web-fingerprint` (50+ Wappalyzer-style sigs) |
+| crt.sh JSON dump | `crt-parse` (subdomain harvest → Cert nodes per issuer) |
+
+### Diagrams / export
+
+| You want… | Reach for |
+|---|---|
+| GraphViz DOT (kind-aware shapes) | `dot [target]` |
+| Mermaid (GitHub-native) | `mermaid [target]` |
+| yEd / Cytoscape / NetworkX import | `to-graphml` |
+| Gephi import | `to-gexf` |
+| Codemap-native JSON | `to-json` |
+
+### CI / handoff
+
+| You want… | Reach for |
+|---|---|
+| Pass/fail health check | `validate` |
+| Full PR analysis | `changeset <ref>` |
+| Resume context for another session | `handoff [budget]` |
+| Chain multiple actions | `pipeline "act1:t1,act2:t2"` |
 
 ---
 
-## Supported Languages (15 + 4 regex)
+## Tier 3 — Full action catalog by category
+
+163 actions total. Tier 1+2 above covers the questions you'll actually ask. The rest of this section is a reference index.
+
+### Analysis (14)
+`stats` `trace` `blast-radius` `phone-home` `coupling` `dead-files` `circular` `exports`/`functions` `callers` `hotspots` `size` `layers` `diff` `orphan-exports`
+
+### Insights (5)
+`health` `summary` `decorators` `rename` `context`
+
+### Navigation (5)
+`why` `paths` `subgraph` `similar` `structure`
+
+### Graph theory (7)
+`pagerank` `hubs` `bridges` `clusters [leiden\|lpa]` `islands` `dot` `mermaid`
+
+### Function-level (13)
+`call-graph` `dead-functions` `fn-info` `diff-functions` `complexity` `import-cost` `churn` `api-diff` `clones` `git-coupling` `risk` `diff-impact` `entry-points`
+
+### Data flow (5) — interprocedural via CPG
+`data-flow` `taint` `slice` `trace-value` `sinks`
+
+### Centrality (17 NetworkX measures)
+`pagerank` `hubs` (HITS) `betweenness` `eigenvector` `katz` `closeness` `harmonic` `load` `brokers`/`structural-holes` `voterank` `group <kind>` `percolation` `current-flow` `subgraph-centrality` `second-order` `dispersion` `reaching` `trophic` `current-flow-closeness`
+
+### Classical algorithms (14)
+`bellman-ford` `astar` `floyd-warshall` `diameter` `mst` `cliques` `kshortest` `max-flow` `feedback-arc` `scc` (Tarjan) `topo-sort` (Kahn) `dominator-tree` (CHK) `steiner` `subgraph-iso` (VF2)
+
+### Link prediction (3)
+`common-neighbors` `jaccard` `adamic-adar`
+
+### Community detection (5)
+`clusters [leiden\|lpa]` `k-core` `k-clique` `modularity-max` `divisive` (Girvan-Newman)
+
+### Spectral (3)
+`fiedler` `spectral-cluster <k>` `spectral-gap` (eigengap heuristic)
+
+### Temporal (3) — git-history aware
+`node-lifespan` `edge-churn` `community-evolution`
+
+### Reverse engineering — Windows (11)
+`pe-imports` `pe-exports` `pe-strings` `pe-resources` `pe-debug` `pe-sections` `pe-meta` (Rich + TLS + entry-point) `pe-cert` (Authenticode → Cert nodes) `dotnet-meta` `clarion-schema` `dbf-schema` `sql-extract` `binary-diff`
+
+### Reverse engineering — disassembly (1) — x86/x64 only
+`bin-disasm` (registers BinaryFunction nodes + intra-binary call graph + xrefs)
+
+### Reverse engineering — non-PE (4)
+`elf-info` (demangled symbols + DT_NEEDED → Dll edges + free-form string promotion) `macho-info` (LC_LOAD_DYLIB) `java-class` (constant pool + methods) `wasm-info` (function-level call graph)
+
+### Binary triage / fingerprinting (4)
+`lang-fingerprint` (compiler / runtime detection) `overlay-info` (NSIS/Inno/PyInstaller/ZIP/entropy classification) `fuzzy-hash` (TLSH + ssdeep) `fuzzy-match` (similarity edges)
+
+### Schemas (5)
+`proto-schema` `openapi-schema` `graphql-schema` `docker-map` `terraform-map`
+
+### Web / scraper blueprinting (5)
+`web-api` (HAR) `web-dom` (HTML) `web-sitemap` (HTML dir) `web-blueprint` (HAR + HTML) `js-api-extract`
+
+### Recon-artifact parsers (4) — pure static, file-only
+`robots-parse` `web-sitemap-parse` `web-fingerprint` `crt-parse`
+
+### ML model files (5)
+`gguf-info` `safetensors-info` `onnx-info` `pyc-info` `cuda-info`
+
+### Schema / dependency / security (4)
+`secret-scan` `dep-tree` `dead-deps` `api-surface`
+
+### Cross-language bridges (4)
+`lang-bridges` (PyO3 / pybind11 / TORCH_LIBRARY / Triton / CUDA) `gpu-functions` `monkey-patches` `dispatch-map`
+
+### LSP integration (5)
+`lsp-symbols` `lsp-references` `lsp-calls` `lsp-diagnostics` `lsp-types`
+
+### Android (1)
+`apk-info` (ZIP walk + permission scan + dangerous-perm flag)
+
+### Compliance / SBOM (5)
+`license-scan` `cve-import <nvd.json>` `cve-match` `to-spdx` `to-cyclonedx`
+
+### Heterogeneous graph traversal (1)
+`meta-path "<kind1>-><kind2>->..."` (e.g. `"source->endpoint"`, `"pe->dll->symbol"`, `"apk->permission"`, `"elf->dll->cve"`)
+
+### Graph export (3)
+`to-json` `to-graphml` (yEd/Cytoscape/NetworkX) `to-gexf` (Gephi)
+
+### Composite (5)
+`audit` (one-page architectural risk overview) `validate` `changeset <ref>` `handoff [budget]` `pipeline "a:t,b:t"`
+
+### Comparison (1)
+`compare <other-dir>`
+
+---
+
+## Tier 4 — Composing actions (recipes)
+
+Common multi-step patterns. These compose Tier 1 actions for higher-leverage workflows.
+
+### "I just inherited this codebase"
+
+```bash
+codemap --dir . stats        # facts
+codemap --dir . audit        # architectural overview + dual-risk nodes
+codemap --dir . layers       # BFS depth + cross-layer violations
+codemap --dir . health       # 0-100 score
+```
+
+### "Is this PR shippable"
+
+```bash
+codemap --dir . diff-impact HEAD~1   # change + transitive impact
+codemap --dir . risk HEAD~1          # 0-100 risk score
+codemap --dir . api-diff HEAD~1      # public surface delta
+codemap --dir . changeset HEAD~1     # all of the above + dead-function check
+```
+
+### "Reverse engineer this Windows binary"
+
+```bash
+codemap lang-fingerprint app.exe              # compiler / language / runtime
+codemap pe-meta app.exe                       # Rich header + TLS + entry
+codemap pe-imports app.exe                    # DLL deps
+codemap pe-strings app.exe                    # SQL / URLs / paths / etc.
+codemap pe-cert app.exe                       # who signed it
+codemap overlay-info app.exe                  # packer / installer detection
+codemap bin-disasm app.exe                    # x86/x64 functions + call graph
+codemap pagerank bin_func                     # rank functions by intra-binary centrality
+```
+
+### "Audit a foreign repo for refactor"
+
+```bash
+codemap --dir . audit                         # dual-risk + brokers + clusters
+codemap --dir . fiedler                       # natural bisection lines
+codemap --dir . dead-files                    # cleanup candidates
+codemap --dir . dead-functions                # more cleanup
+codemap --dir . orphan-exports                # API surface cleanup
+codemap --dir . circular                      # cycle detection
+codemap --dir . hotspots                      # most-coupled files
+codemap --dir . churn HEAD~50                 # recently-churned high-coupling files
+```
+
+### "Find vulnerable transitive deps"
+
+```bash
+# Given a captured NVD feed (offline JSON dump)
+codemap --dir . elf-info /usr/local/bin/myapp        # registers DLL nodes
+codemap cve-import /path/to/nvd.json                  # registers Cve nodes
+codemap cve-match                                     # adds dll → cve edges
+codemap meta-path "source->elf->dll->cve"            # the trace
+codemap to-cyclonedx                                  # ship as CycloneDX 1.5
+```
+
+### "Recon analysis from captured artifacts"
+
+```bash
+# User does the curls themselves; codemap parses the results.
+codemap robots-parse robots.txt                       # classify + flag leaky
+codemap web-sitemap-parse sitemap.xml                 # detect ID-enumeration patterns
+codemap web-fingerprint vendor.bundle.js              # framework / CMS / CDN
+codemap crt-parse crt-sh.json                         # subdomain harvest
+codemap meta-path "endpoint->endpoint"                # what's reachable from what
+```
+
+### "What changed last week and is it scary"
+
+```bash
+codemap --dir . node-lifespan                # young hotspots + active veterans
+codemap --dir . edge-churn 200               # vestigial imports + true coupling
+codemap --dir . community-evolution 4        # BIRTH/DEATH/SPLIT/MERGE events
+codemap --dir . churn HEAD~30                # per-file recent churn
+```
+
+---
+
+## Picking when actions overlap
+
+When two actions could answer the same question, the disambiguation:
+
+| Question | Best fit | Why |
+|---|---|---|
+| "Most important file" | `pagerank` | Random-walk importance, default for general "what matters" |
+| "What's a chokepoint" | `betweenness` | Continuous score (vs `bridges` which is binary articulation-point) |
+| "Is this codebase modular" | `clusters` (Leiden) for module count; `spectral-gap` for the eigengap heuristic; `fiedler` for whether it has a bottleneck | Three different angles on "modularity" |
+| "Cluster differently than Leiden" | `spectral-cluster k` | Captures bottleneck-shaped structure modularity-based methods miss |
+| "Cyclic deps" | `scc` (typed components) or `circular` (file-level) | `scc` works on the heterogeneous graph; `circular` is source-file-only |
+| "Entry point" | `entry-points` (multi-criteria) or `dominator-tree` (auto-detects) or `reaching` (top-1 reach) | Three different entry-detection heuristics |
+| "Connects everything" | `betweenness` (top-1) or `bridges` (articulation points) | Continuous vs binary |
+| "Group of files that grew together" | `community-evolution` then `audit` cluster summary | Temporal modularity |
+
+---
+
+## Supported languages (15 + 4 regex)
 
 **Tree-sitter AST:** TypeScript, TSX, JavaScript, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA, Bash/Shell, C#, Lua
 **Regex fallback:** Kotlin, SQL, YAML, CMake
 
-## Key Behaviors
+## EntityKinds (28)
 
-- `--dir` defaults to current directory. **Always pass `--dir <small_path>`** — without it, codemap scans CWD recursively (a `--dir ~` from home can balloon to 50 GB heap and OOM-kill its tmux scope).
-- Repeat `--dir` for multi-repo scans. Imports crossing repos become real edges in the merged graph.
-- Target arguments are joined with spaces: `codemap why a.rs b.rs` works.
-- `->` separator is stripped: `codemap why a.rs -> b.rs` works.
-- **Quote arrow patterns** for `meta-path` and `subgraph-iso`: `meta-path "source->endpoint"` (bash treats unquoted `>` as redirection).
-- Reverse engineering actions (`pe-*`, `elf-*`, `macho-*`, `java-class`, `wasm-info`, `clarion-schema`, `dbf-schema`, schema actions, ML actions, web actions) take absolute file paths — they don't use the scan directory.
+`source` (default) `pe` `elf` `macho` `jclass` `wasm` `dll` `symbol` `bin_func` (5.13+) `endpoint` `form` `table` `field` `proto` `gql` `oapi` `docker` `tf` `model` `asm` (.NET) `type` (.NET) `compiler` (5.12+) `string` (5.12+) `overlay` (5.12+) `license` (5.14+) `cve` (5.14+) `cert` (5.15+) `apk` (5.15+) `permission` (5.15+)
+
+## Hard rules / behaviors
+
+- `--dir` defaults to current dir. **Always pass `--dir <small_path>`** — without it, codemap scans CWD recursively (a `--dir ~` from home can balloon to 50 GB heap).
+- Repeat `--dir` for multi-repo scans. Cross-repo imports become real edges.
+- **Quote arrow patterns** for `meta-path` and `subgraph-iso`: `meta-path "source->endpoint"` (bash treats `>` as redirection).
+- Reverse engineering + recon-parser actions take **absolute file paths** — they don't use the scan directory.
 - `--json` wraps output in `{"action", "target", "files", "result", "ok", "error"}`.
 - `--tree` gives ASCII tree rendering for `taint`, `slice`, `trace-value`.
-- File size limit: 256MB for binaries, 10MB for source files.
-- Cache at `.codemap/cache.bincode` — delete the directory or pass `--no-cache` to force a fresh scan. RE-action mutations (PE imports → DLL nodes, URL strings → endpoints) persist across CLI runs.
-- Custom sinks/sources via `.codemap/dataflow.json`.
+- File size limit: 256 MB for binaries, 10 MB for source files.
+- Cache at `.codemap/cache.bincode` — delete or pass `--no-cache` to force fresh. RE-action mutations (PE imports → DLL nodes, URL strings → endpoints) persist across CLI runs.
 - Spectral analysis caps at 5000 nodes; larger graphs return a clear error suggesting `clusters leiden` instead.
-- Temporal actions need a git repo. They run on a single `git log --name-status -M` pass — no checkouts, fast even on large histories.
+- Temporal actions need a git repo. They run on a single `git log --name-status -M` pass — no checkouts.
+- Recon parsers consume **named artifacts only** — codemap never makes network requests. User does the curl / playwright / nuclei / etc. and feeds the result here. Active recon belongs in separate tools (nuclei, subfinder, gobuster).
+- Custom sinks/sources via `.codemap/dataflow.json`.
