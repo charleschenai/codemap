@@ -2,6 +2,9 @@
 name = "codemap-cli"
 version = "5.16.1"
 edition = "2021"
+license = "MIT"
+description = "CLI for codemap — heterogeneous-graph codebase analysis with 163 actions"
+repository = "https://github.com/charleschenai/codemap"
 
 [[bin]]
 name = "codemap"

@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.16.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.16.1 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -36,7 +36,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **163 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
-- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, and ML model files — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 20 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
+- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, and ML model files — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 28 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
 - **11 centrality measures (5.2.0+).** PageRank, HITS, betweenness (Brandes 2001), eigenvector, Katz, closeness, harmonic (Marchiori-Latora 2000, handles disconnected graphs), load (Newman 2001), structural-holes / brokers (Burt 1992 — finds nodes that broker between groups), VoteRank (Zhang 2016 — top-k spreaders), group centrality, percolation (Piraveenan 2013), current-flow betweenness (Newman 2005). Each accepts a kind filter for slicing the heterogeneous graph.
 
@@ -257,23 +257,25 @@ Pass `--tree` to `taint` / `slice` / `trace-value` for ASCII-tree rendering inst
 |--------|-------------|
 | `compare <other-dir>` | Re-scans `<other-dir>` as a second graph and diffs the two — file add/remove, line delta, coupling changes per common file, new / removed external URLs. |
 
-### Reverse engineering (11)
+### Reverse engineering (13)
 
-For analyzing compiled binaries, legacy databases, and applications without source code. Built from studying [goblin](https://github.com/m4b/goblin), [Ghidra](https://github.com/NationalSecurityAgency/ghidra), [Falcon](https://github.com/falconre/falcon), and [pe-parse](https://github.com/trailofbits/pe-parse) source code.
+For analyzing compiled binaries, legacy databases, and applications without source code. Built from studying [goblin](https://github.com/m4b/goblin), [Ghidra](https://github.com/NationalSecurityAgency/ghidra), [Falcon](https://github.com/falconre/falcon), and [pe-parse](https://github.com/trailofbits/pe-parse) source code. Symbol demangling (Itanium C++ / MSVC C++ / Rust legacy + v0) is auto-applied to PE exports / imports + ELF dynamic symbols — raw mangled names retained as `attrs["mangled"]`.
 
 | Action | What it does |
 |--------|-------------|
 | `clarion-schema <file>` | Parse Clarion `.CLW` DDL files into tables, keys, fields, and inferred FK relationships. Handles ISO-8859-1 encoding from Windows servers. |
-| `pe-strings <file>` | Extract and categorize ASCII strings from PE binaries — SQL statements, `dbo.*` table references, URLs, file paths, identifiers. |
-| `pe-exports <file>` | Parse the PE export directory table. Falls back to heuristic name extraction if no export table. |
-| `pe-imports <file>` | Parse the PE import table — every DLL dependency and every API function called. Categorizes imports by type: Database/SQL, Network, Registry, File I/O, Crypto, COM/OLE. |
-| `pe-resources <file>` | Parse the PE resource directory — version info (company, description, file/product version), embedded manifests, string tables, and resource type counts (dialogs, menus, icons, bitmaps). |
-| `pe-debug <file>` | Parse the PE debug directory — PDB file paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, VC Feature counters, POGO data. |
-| `pe-sections <file>` | Dump the PE section table with Shannon entropy analysis per section. Flags high-entropy sections (>7.0) as potentially packed or encrypted. Shows section characteristics (CODE, EXEC, READ, WRITE, etc.). |
-| `dbf-schema <file>` | Parse dBASE III/IV/FoxPro `.DBF` file headers — version, last update date, record count, and full field descriptors (name, type, size, decimal count). |
-| `dotnet-meta <file>` | Parse .NET CLR metadata from PE binaries — runtime version, CLR flags, metadata streams (#~, #Strings, #US, #GUID, #Blob), TypeDef/MethodDef/TypeRef/AssemblyRef tables, and user string literals. |
-| `sql-extract <file\|dir>` | Smart SQL extraction from binaries. Parses operation types (SELECT/INSERT/UPDATE/DELETE/CREATE/ALTER/EXEC), builds a table-to-operation access matrix, extracts JOIN relationships. In directory mode, produces per-binary table usage maps. |
-| `binary-diff <file1> <file2>` | Compare two PE binaries — diff imports (added/removed DLLs and functions), diff strings (new/removed SQL statements and table references), compare version info. |
+| `pe-strings <file>` | Extract ASCII strings from PE binaries. Each string becomes a `StringLiteral` graph node classified by intent (url / sql / path / registry / guid / base64 / hex / format-string / error-msg / email / envvar / user-agent). URL-classified strings auto-promote to `HttpEndpoint` so `meta-path "pe->string->endpoint"` works. |
+| `pe-exports <file>` | Parse the PE export directory table. Demangled names register as `Symbol` nodes; raw mangled saved as `attrs["mangled"]`. |
+| `pe-imports <file>` | Parse the PE import table — every DLL dependency + API call. Adds `Dll` nodes + `Symbol` nodes with edges. |
+| `pe-resources <file>` | Parse the PE resource directory — version info, manifests, string tables, resource counts. |
+| `pe-debug <file>` | PDB paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, POGO data. |
+| `pe-sections <file>` | Section table with per-section Shannon entropy. Auto-flags packed binaries (any section H > 7.0) via `attrs["packed"]=true`. Detects + registers overlay (data past EOS) as `Overlay` node with `kind` classification (NSIS / Inno / PyInstaller / ZIP self-extract / Authenticode / high-entropy / generic). |
+| `pe-meta <file>` | **(5.12.2+)** Combined PE metadata triage: Rich header parse (Microsoft toolchain fingerprint — VS6 → VS2022 cl.exe / link.exe versions), TLS callback enumeration (run-before-main, common malware persistence), entry-point RVA. |
+| `pe-cert <file>` | **(5.15.0+)** PE Authenticode parsing. Walks the certificate-table data directory, decodes WIN_CERTIFICATE / PKCS#7 / X.509 DER, extracts subject CN + issuer CN + serial + validity per cert. Each becomes a `Cert` node with binary→cert edge. Recognizes Authenticode signatures as a benign overlay rather than misflagging. |
+| `dbf-schema <file>` | Parse dBASE III/IV/FoxPro `.DBF` file headers — version, last-update date, record count, full field descriptors. |
+| `dotnet-meta <file>` | .NET CLR metadata parser. **(5.15.2+)** Each MethodDef row registers as a `BinaryFunction` node with `attrs["binary_format"]=dotnet, kind_detail=method, rva=...` hanging off the `DotnetAssembly`. |
+| `sql-extract <file\|dir>` | Smart SQL extraction. Parses operation types (SELECT/INSERT/UPDATE/DELETE/CREATE/ALTER/EXEC), builds a table-to-operation access matrix, extracts JOIN relationships. |
+| `binary-diff <file1> <file2>` | Compare two PE binaries — imports / strings / version-info delta. |
 
 ### LSP (5)
 
@@ -289,14 +291,31 @@ Connect to any Language Server Protocol server to extract semantic analysis data
 
 ### Binary formats (4)
 
-For analyzing compiled binaries across platforms — ELF (Linux), Mach-O (macOS), Java bytecode, and WebAssembly.
+For analyzing compiled binaries across platforms — ELF (Linux), Mach-O (macOS), Java bytecode, and WebAssembly. Each registers typed graph nodes in the heterogeneous graph (binaries link to DLL nodes; bytecode methods become BinaryFunction nodes).
 
 | Action | What it does |
 |--------|-------------|
-| `elf-info <file>` | ELF binary analysis — sections with entropy, dynamic linking (NEEDED), imported/exported symbols. Supports 32/64-bit, LE/BE. |
-| `macho-info <file>` | Mach-O binary analysis — load commands, segments, dylib dependencies, rpaths, UUID, symbols. Handles fat/universal binaries. |
-| `java-class <file>` | Java .class file analysis — constant pool, class hierarchy, fields, methods with access flags, Java version detection. Handles .jar/.war/.ear (ZIP) with package listing. |
-| `wasm-info <file>` | WebAssembly module analysis — sections with entropy, imports (module.name), exports, type/function/code counts. LEB128 decoding. |
+| `elf-info <file>` | ELF analysis — sections + entropy, DT_NEEDED → `Dll` edges, demangled symbols. **(5.12.1+)** Free-form strings extracted from `.rodata` / `.data` register as `StringLiteral` nodes (capped 5000/binary); URL-classified strings auto-promote to `HttpEndpoint`. |
+| `macho-info <file>` | Mach-O analysis — load commands, segments, dylib deps via LC_LOAD_DYLIB → `Dll` edges, rpaths, UUID, symbols. Handles fat/universal binaries. |
+| `java-class <file>` | Java .class / .jar analysis — constant pool, class hierarchy, fields, methods. **(5.15.2+)** Each method registers as a `BinaryFunction` node with `attrs["binary_format"]=jvm, kind_detail=method`. JAR files unpack to per-class summaries. |
+| `wasm-info <file>` | WebAssembly module analysis — sections + entropy, imports/exports, type/function counts. **(5.13.1+)** Walks the Code section: each function (import or defined) becomes a `BinaryFunction` node with intra-module call edges via the `call` opcode (0x10). `meta-path "wasm->bin_func->bin_func"` traces module-internal call graphs. |
+
+### Binary disassembly (1) — x86 / x86-64
+
+| Action | What it does |
+|--------|-------------|
+| `bin-disasm <file>` | **(5.13.0+)** Full disassembly of PE / ELF x86 / x86-64 binaries via [iced-x86](https://github.com/icedland/iced) (pure Rust, no system libs). Symbol-table-driven function boundary detection — each function becomes a `BinaryFunction` node with name (auto-demangled), address, size, instruction count, indirect-call count, is_entry flag. Direct call targets emit `bin_func → bin_func` edges (intra-binary call graph). After running, every graph algorithm — PageRank / Leiden / Fiedler / betweenness / spectral-cluster — works at the function-within-binary level. Cached across CLI runs via the bincode cache. ARM / MIPS deferred to future releases. |
+
+### Binary triage / fingerprinting (4)
+
+Lightweight first-pass triage that doesn't need disasm.
+
+| Action | What it does |
+|--------|-------------|
+| `lang-fingerprint <file>` | **(5.12.0+)** Detect compiler / language / runtime via section names + signature strings. Recognizes Go (`runtime.morestack` / `.gopclntab`), Rust (`__rust_alloc` / `RUST_BACKTRACE`), .NET (`BSJB` / `mscorlib`), PyInstaller (`_MEIPASS`), Nuitka, Electron, Delphi, MinGW vs MSVC vs GCC, Swift, JNI. Registers a `Compiler` node with binary→compiler edge. Confidence 0–100 based on anchor count. Scans up to 64 MB to catch signatures in `.rodata`. |
+| `overlay-info <file>` | **(5.12.1+)** Detect data appended past the official end of a PE / ELF binary. Format-aware (recognizes Authenticode signatures as benign rather than misflagging). Classifier: `nsis_installer`, `inno_setup`, `pyinstaller`, `py2exe`, `self_extract` (PK / 7z), `authenticode_sig`, `high_entropy_blob`, `generic`. Registers `Overlay` node + binary→overlay edge with offset / size / entropy / kind. |
+| `fuzzy-hash <file>` | **(5.14.2+)** Compute TLSH (Trend Locality-Sensitive Hash) + ssdeep (CTPH) for a binary. Stores both as `attrs["tlsh"]` / `attrs["ssdeep"]` on the binary node. Pure Rust, no deps. |
+| `fuzzy-match [tlsh-threshold=70]` | **(5.14.2+)** Walk every binary node with fuzzy hashes, compute pairwise TLSH distance + ssdeep similarity. Adds symmetric `similar_binary` edges for pairs with TLSH ≤ threshold OR ssdeep ≥ 50. PageRank / Leiden then auto-cluster variants — useful for finding repackaged or slightly-modified malware across a fleet. |
 
 ### Schemas (5)
 
@@ -352,6 +371,144 @@ Eigenstructure of the graph Laplacian. Self-contained Lanczos solver — no LAPA
 | `fiedler` | Algebraic connectivity λ₂ + Fiedler vector. Sign-cut bisection (Fiedler 1973, Pothen-Simon-Liou 1990) approximates min-cut. λ₂ ≈ 0 ⇒ disconnected; small λ₂ ⇒ bottleneck. Reports λ₁/λ₂, the cut size, and top files on each side ranked by Fiedler magnitude. |
 | `spectral-cluster [k=8]` | Shi-Malik 2000 normalized-cut spectral clustering. Projects nodes via top-k smallest eigenvectors of the symmetric normalized Laplacian, row-normalizes (Ng-Jordan-Weiss 2002), then k-means. Captures community structure that modularity-based methods (Leiden / LPA) sometimes miss. |
 | `spectral-gap` | Top-25 eigenvalues of L. Applies von Luxburg's eigengap heuristic to recommend a community count automatically — the k where λ_{k+1} − λ_k is largest. Also reports the connected-component count from λ₁ multiplicity. |
+
+### Centrality (17)
+
+Full NetworkX coverage. Every measure accepts a kind filter as its target — e.g. `pagerank bin_func` ranks functions inside disassembled binaries, `betweenness endpoint` chokepoints among HTTP endpoints.
+
+| Action | What it does |
+|--------|-------------|
+| `pagerank` | Classical PageRank with damping. Default top-30. |
+| `hubs` | Kleinberg HITS — two-axis (hub + authority) ranking. |
+| `betweenness` | Brandes' O(VE) algorithm. Continuous chokepoint score (vs binary `bridges`). |
+| `eigenvector` | Power iteration. PageRank without damping. |
+| `katz` | Eigenvector + attenuation factor (α=0.1, β=1.0). |
+| `closeness` | 1 / Σ shortest-path distance. Disconnected graphs return 0 for unreachable. |
+| `harmonic` | Marchiori-Latora 2000. Σ 1/distance — handles disconnected graphs cleanly. |
+| `load` | Newman 2001. Like betweenness but counts dependent paths, not just shortest. |
+| `brokers` (alias `structural-holes`) | Burt 1992. Files that bridge otherwise-disconnected groups. |
+| `voterank` | Zhang 2016 top-k spreaders. |
+| `group <kind>` | Group centrality — importance of an entire kind class as a unit. |
+| `percolation` | Piraveenan 2013. Removal-resilience scoring. |
+| `current-flow` | Newman 2005. Random-walk-flow betweenness. |
+| `subgraph-centrality` | Estrada-Rodriguez-Velazquez 2005. exp(A) diagonal — counts closed walks. |
+| `second-order` | Kermarrec et al. 2011. Variance of cover time — finds nodes "off the beaten path." |
+| `dispersion` | Lou-Strogatz triadic embeddedness. How spread out a node's connections are. |
+| `reaching` | Asymmetric forward-reach. "What fraction of files does X reach?" entry-point detector. |
+| `trophic` | Levine 1980 food-web hierarchy. 1 = entry, higher = deeper utility. |
+| `current-flow-closeness` | Brandes-Fleischer random-walk closeness. |
+
+### Classical algorithms (14)
+
+petgraph parity for general graph algorithms, all running on the heterogeneous graph.
+
+| Action | What it does |
+|--------|-------------|
+| `bellman-ford <src>` | Single-source shortest paths. Detects negative cycles. |
+| `astar <src> <tgt>` | A* with binary heap. |
+| `floyd-warshall` | All-pairs shortest paths. Capped at n > 2000. |
+| `diameter` | Longest shortest path via BFS-from-each-node. |
+| `mst` | Minimum spanning tree (Kruskal + union-find). |
+| `cliques` | Maximum cliques (Bron-Kerbosch with pivoting). Top 20 by size. |
+| `kshortest <src> <tgt> [k]` | Yen's k-shortest paths (default k=5). |
+| `max-flow <src> <sink>` | Edmonds-Karp BFS Ford-Fulkerson. |
+| `feedback-arc` | DFS-based feedback arc set heuristic. Suggests edges to break to make graph acyclic. |
+| `scc` | Tarjan's strongly-connected components — iterative form to avoid stack overflow on deep graphs. Reports cyclic-dependency clusters by size. |
+| `topo-sort` | Kahn's algorithm. Errors with helpful pointer to `scc` if graph isn't acyclic. |
+| `dominator-tree [entry]` | Cooper-Harvey-Kennedy iterative dominator algorithm. Auto-detects entry node by max-fanout, or accepts a target. |
+| `steiner <a,b,c,...>` | Minimum-edge subgraph connecting N terminal nodes. MST 2-approximation heuristic. |
+| `subgraph-iso "<k1>-><k2>->..."` | VF2-style subgraph isomorphism for kind-sequence patterns. Capped at 100 matches. |
+
+### Link prediction (3)
+
+For finding *missing* edges — files that should know about each other but don't.
+
+| Action | What it does |
+|--------|-------------|
+| `common-neighbors` | \|N(u) ∩ N(v)\| for unconnected pairs. Top 30. |
+| `jaccard` | Common-neighbors normalized for degree: \|shared\| / \|union\|. |
+| `adamic-adar` | Hub-discounted: Σ 1 / log(degree(shared neighbor)). |
+
+### Community detection (5)
+
+`clusters` is the umbrella; `[leiden\|lpa]` selects the algorithm. The other four are standalone.
+
+| Action | What it does |
+|--------|-------------|
+| `clusters [leiden\|lpa]` | Default `leiden` — Traag-Waltman-van Eck 2019 with refinement step (guarantees well-connected communities, fixes Louvain's disconnection bug). `lpa` for fast label-propagation. Auto-named clusters via path prefix or homogeneous kind. |
+| `k-core <k>` | Iteratively remove nodes with degree < k. Find the dense skeleton. |
+| `k-clique <k>` | Palla et al. 2005 k-clique percolation. Overlapping communities. |
+| `modularity-max` | Clauset-Newman-Moore greedy modularity maximization. |
+| `divisive` | Girvan-Newman edge-betweenness. Refuses on n > 500 (cubic cost). |
+
+### Meta-path (1) — heterogeneous graph traversal
+
+| Action | What it does |
+|--------|-------------|
+| `meta-path "<k1>-><k2>->..."` | DFS through typed edges following a kind sequence. The killer feature: cross-domain queries spanning every EntityKind. Examples: `"source->endpoint"` (which code calls APIs), `"pe->dll->symbol"` (binary-internal call resolution), `"source->binary->dll->cve"` (vulnerable transitive deps after `cve-match`), `"apk->permission"` (Android attack surface), `"elf->bin_func->string"` (function-to-string xrefs after `bin-disasm`). Capped at 200 paths. **Quote the arrow** in bash to avoid `>` redirection. |
+
+### Composite (5)
+
+Higher-level workflows that chain multiple actions.
+
+| Action | What it does |
+|--------|-------------|
+| `audit` | One-page architectural risk overview. Top chokepoints (betweenness) + top brokers + 🚨 dual-risk nodes (chokepoint AND broker = "load-bearing walls") + Leiden cluster summary + per-EntityKind census. The first action to run on any unfamiliar codebase. |
+| `validate` | Pass/fail health check for CI. Exits non-zero if health < threshold. |
+| `changeset <ref>` | Full PR/change analysis. Diff + risk + impact + dead-function check in one report. |
+| `handoff [budget]` | Resume-where-you-left-off summary fitted to a token budget. |
+| `pipeline "act1:t1,act2:t2,..."` | Chain multiple actions in a single CLI invocation. e.g. `pipeline "web-blueprint:capture.har,meta-path:source->endpoint"`. |
+
+### Graph export (3)
+
+Round-trip the heterogeneous graph into dedicated viz / analysis tools.
+
+| Action | What it does |
+|--------|-------------|
+| `to-json` | Codemap-native JSON dump. Round-trip-safe full graph. |
+| `to-graphml` | XML for **yEd / Cytoscape / NetworkX** (`networkx.read_graphml`). Standard graph-export format. |
+| `to-gexf` | Gephi format with **per-EntityKind viz colors** included. Force-directed layouts + interactive filtering + time-series. |
+
+### ML / model files (5)
+
+Read-only metadata extraction from common ML model file formats. No GPU, no inference — pure file structure.
+
+| Action | What it does |
+|--------|-------------|
+| `gguf-info <file>` | Parse GGUF (llama.cpp / GGML) — metadata key-value, tensor shapes, quantization scheme, context length. |
+| `safetensors-info <file>` | Parse SafeTensors header — tensor list with shapes + dtype, total parameter count. |
+| `onnx-info <file>` | Parse ONNX protobuf — graph operators, inputs / outputs, opset version. |
+| `pyc-info <file>` | Parse Python `.pyc` — magic + version (Python 2.7 → 3.14), marshal-stream string extraction (URLs / SQL / paths from constants). **(5.15.1+)** Heuristic code-object scan registers each found function as a `BinaryFunction` node with `binary_format=pyc`. |
+| `cuda-info <file>` | Parse CUDA cubin / fatbin — SM target, kernel symbol names. |
+
+### Supply chain / SBOM (5)
+
+Compliance + vulnerability + signing — the supply-chain dimension. Pairs with the `Cve` + `License` + `Cert` EntityKinds to enable `meta-path "source->binary->dll->cve"` queries.
+
+| Action | What it does |
+|--------|-------------|
+| `license-scan` | **(5.14.0+)** Scan the directory for SPDX-License-Identifier comments in source headers, license fields in 7 manifest formats (Cargo.toml, package.json, pyproject.toml, pom.xml, go.mod, gemspec, composer.json), and LICENSE / COPYING / NOTICE files matched against 15 known-license templates (MIT, Apache-2.0, GPL family, MPL-2.0, BSD-2/3, ISC, Unlicense, 0BSD, EPL-2.0, BSL-1.0, CC0-1.0, etc.). Each detection registers a `License` node with `family` classification (permissive / weak_copyleft / strong_copyleft / proprietary / unknown) + edges from each declaring source. Flags strong-copyleft + proprietary licenses with ⚠. |
+| `cve-import <nvd.json>` | **(5.14.0+)** Parse an offline NVD JSON dump (1.1 or 2.0 schema, auto-detected). Each CVE record registers as a `Cve` node with id / severity (CRITICAL/HIGH/MEDIUM/LOW) / CVSS / year / CWE / description / CPE products. **No network — strictly offline.** |
+| `cve-match` | **(5.14.0+)** Walk every Dll node in the graph, normalize its name (strip `lib` prefix + extension + version), match against each Cve's CPE products. Adds `dll → cve` edges on match. Together with the existing `source → binary → dll` edges, enables the killer query `meta-path "source->binary->dll->cve"`. |
+| `to-spdx` | **(5.14.1+)** Emit SPDX 2.3 JSON. Linux Foundation standard, required for US federal procurement (Executive Order 14028). Source files / binaries / DLLs become packages with `primaryPackagePurpose` per EntityKind. License nodes populate `licenseConcluded`; Cve edges become `HAS_ASSOCIATED_VULNERABILITY` relationships. Graceful degradation — writes `NOASSERTION` if no License/Cve nodes present. |
+| `to-cyclonedx` | **(5.14.1+)** Emit CycloneDX 1.5 JSON. OWASP standard. Components include CPE refs; vulnerabilities are first-class with CVSS + affected components; dependencies section mirrors the heterogeneous graph's import edges. |
+
+### Android (1)
+
+| Action | What it does |
+|--------|-------------|
+| `apk-info <apk>` | **(5.15.3+)** APK structure walker — parses ZIP local file headers (no inflate dep), categorizes entries (DEX files, manifest, resources, native libs, signing files), best-effort permission extraction via pattern-scanning `AndroidManifest.xml` bytes for `android.permission.*` prefixes (UTF-8 + UTF-16). Registers `AndroidPackage` + `Permission` nodes with apk → permission edges. Flags dangerous permissions (CAMERA, READ_SMS, FINE_LOCATION, etc.) with ⚠. DEX bytecode disasm deferred to follow-up. |
+
+### Recon-artifact parsers (4)
+
+Pure-static parsers consuming captured artifacts. **Codemap never makes network requests.** The user does the curl / playwright / nuclei / etc. and feeds the result here. Same line `wget` draws — codemap parses one named file at a time; no crawling, no recursion, no scope expansion. Active recon belongs in separate tools (nuclei / subfinder / gobuster / Burp).
+
+| Action | What it does |
+|--------|-------------|
+| `robots-parse <robots.txt>` | **(5.16.0+)** Classify each Disallow / Allow rule (admin / sensitive / api / auth / search / asset / generic). Promote each path to an `HttpEndpoint` node with `attrs["discovered_via"]=robots, category=...`. **Flag leaky rules** that advertise sensitive paths (admin / sensitive / api categories). Sitemap directives captured separately. |
+| `web-sitemap-parse <sitemap.xml>` | **(5.16.0+)** Extract every `<loc>` entry, promote to `HttpEndpoint` nodes, group URLs by path pattern with `{ID}` substitution for numeric / UUID segments. **Auto-detects ID-enumerable patterns** — the killer "this sitemap exposes a complete enumeration" finding. (Gunzip first if `.xml.gz`.) |
+| `web-fingerprint <html-or-bundle>` | **(5.16.0+)** Wappalyzer-style tech detection via 50+ signature rules covering CMSes (WordPress, Drupal, Ghost, Sanity, Strapi, Contentful), backend frameworks (JHipster, Spring Boot, Django, Rails, Laravel, ASP.NET, FastAPI, Phoenix), frontend (Next.js, React, Vue, Angular, Svelte, Nuxt, Gatsby, Remix), servers (nginx / Apache / IIS / Caddy / OpenResty), CDNs (Cloudflare / CloudFront / Fastly / Akamai / Vercel / Netlify), libs (jQuery, lodash, Bootstrap, Tailwind, Algolia, Elasticsearch), analytics (GA, Segment, Mixpanel). Each match registers a `Compiler` node with category + anchor count + confidence (25–100). |
+| `crt-parse <crt.sh-json>` | **(5.16.0+)** Parse a `crt.sh ?output=json` response. Extract subdomains from `name_value` fields (split on `\n`, strip wildcards). Track earliest `not_before` per host. Register `HttpEndpoint` per host + `Cert` per issuer. Subdomain-harvest from Certificate Transparency logs without ever touching the target. |
 
 ---
 
