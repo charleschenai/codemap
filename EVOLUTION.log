@@ -637,3 +637,63 @@ unaffected.
 
   Action count: 109 → 110 (+ audit).
 
+[2026-04-30] fix: 5.7.1 — bug-fix sweep from end-to-end real-repo testing
+  source: ran the full 110-action menu against codemap-on-itself, pgwiki
+  (TS/Python/SQL), and NetworkX (592-file Python). 86 synthetic tests
+  passed but real repos surfaced 8 URL-promotion bugs + 1 precision
+  bug. All fixed.
+
+  Bug 1: template-pattern URLs promoted as endpoints
+    e.g. `https://github.com/.../latest/download/${archive}` from
+    install.sh script became the #1 PageRank result on codemap itself.
+    Fix: filter URLs containing `${`, `{{`, `<%`, `#{`, `%(`, `(?P<`.
+
+  Bug 2: XML namespace identifiers promoted as endpoints
+    e.g. `http://www.w3.org/1999/xhtml`, `http://schemas.xmlsoap.org/`
+    common in any HTML/SVG/XML codebase. They're URI identifiers,
+    not real endpoints.
+    Fix: filter known namespace prefixes (w3.org, xmlsoap, microsoft
+    schemas, urn:) plus URLs ending in .xsd / .dtd.
+
+  Bug 3: URLs in test files leaking to production graph
+    `tests/integration.rs` had `api.real.io` and `api.production.io`
+    fixture URLs that landed in the prod graph.
+    Fix: skip files whose path matches /tests/, /test/, __tests__,
+    *_test.py, *.test.ts, /spec/, /fixtures/, etc.
+
+  Bug 4: minified-JS bundle URLs dominating the broker rankings
+    cosmos.min.js / d3.v7.min.js extracted 30+ URLs each, ranked as
+    top brokers, drowning out real signal.
+    Fix: skip files whose name contains .min., .bundle., .chunk., or
+    has < 5 lines + > 5 URLs (heuristic for minified blobs).
+
+  Bug 5: URLs with embedded credentials promoted
+    `https://[redacted]@host/path` (sanitized but still meaningless
+    as a graph node).
+    Fix: reject URLs with `@` in the authority.
+
+  Bug 6: pseudo-TLDs (.test / .invalid / .local / etc) accepted
+    Same skip-host idea as for example.com but for the IETF-reserved
+    test/local TLDs.
+
+  Bug 7 (precision): centrality scores formatted as `{:.4}` displayed
+    `0.0000` for any score < 0.0001. NetworkX (592 files) showed all
+    chokepoints as 0.0000 — distinct values invisible to readers.
+    Fix: bumped centrality display to `{:.6}` everywhere. Now sub-
+    millionth scores are legible.
+
+  Bug 8: skip_hosts iter().any() lint
+    Cosmetic; switched to `.contains(&host)` per clippy.
+
+  Pre-existing issues found but out of 5.7.x scope:
+    - dead-functions reports all dispatched actions as dead (match-arm
+      dispatch isn't recognized as a call)
+    - phone-home picks up URL-shaped string constants from filter lists
+      in scanner.rs (true positive — they ARE URLs, just used as
+      filter patterns)
+
+  86 tests still passing. No new regression tests needed — the fixes
+  are tightenings of existing behavior; the existing
+  test_url_promotion_skips_localhost_and_examples covers the same
+  surface area.
+

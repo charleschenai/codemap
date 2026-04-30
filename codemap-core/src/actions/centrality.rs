@@ -138,7 +138,7 @@ pub fn betweenness(graph: &Graph, kinds: &[EntityKind]) -> String {
         lines.push("  (no chokepoints — graph may be a tree or fully disconnected)".to_string());
     }
     for r in &top {
-        let score_str = format!("{:.4}", r.1);
+        let score_str = format!("{:.6}", r.1);
         lines.push(format!("  {:>8}  {}", score_str, ids[r.0]));
     }
     lines.join("\n")
@@ -254,7 +254,7 @@ fn rank_and_format(title: &str, ids: &[String], scores: &[f64], kinds: &[EntityK
         String::new(),
     ];
     for r in &top {
-        let score_str = format!("{:.4}", r.1);
+        let score_str = format!("{:.6}", r.1);
         lines.push(format!("  {:>8}  {}", score_str, ids[r.0]));
     }
     lines.join("\n")

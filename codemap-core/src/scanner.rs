@@ -142,27 +142,107 @@ fn load_cache(dir: &str) -> Option<CacheData> {
 }
 
 /// Promote URLs found by the parser into HttpEndpoint nodes with edges
-/// from each source file to its URLs. Skips localhost / 127.0.0.1 / file
-/// schemes (not real endpoints). Method defaults to "GET" since plain
-/// URL-string extraction has no method context — RE actions like
-/// js-api-extract and web-api can later upgrade specific endpoints with
-/// proper method/body info.
+/// from each source file to its URLs. Method defaults to "GET" since
+/// plain URL-string extraction has no method context.
+///
+/// Filtering — we DON'T want polluting the graph:
+/// - URLs with template placeholders (`${...}`, `{{...}}`, `<%...%>`,
+///   `:param` style) — they're not literal endpoints.
+/// - XML namespace identifiers (w3.org, xmlsoap.org, *.xsd, *.dtd).
+///   Common in any HTML/SVG/XML codebase but never real endpoints.
+/// - URLs from test files (paths matching `tests?/`, `_test`, `.test.`,
+///   `spec`, `__tests__`). Test fixtures are rarely production endpoints.
+/// - URLs from minified-JS bundles (heuristic: file's mean line length
+///   > 800 chars OR has `.min.` in the path). Bundled deps drown out
+///   real endpoints.
+/// - URLs with embedded credentials (`@` after `://`). Likely sanitized
+///   placeholder — not useful as a graph node.
+/// - Loopback / placeholder hosts (localhost, 127.0.0.1, *.example.*,
+///   *.test, *.invalid).
 fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
     let mut new_endpoints: Vec<(String, String, String)> = Vec::new(); // (src_id, ep_id, url)
-    let skip_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "example.com", "example.org"];
+    let skip_hosts = ["localhost", "127.0.0.1", "0.0.0.0",
+        "example.com", "example.org", "example.net"];
+    // XML namespace prefixes — any URL starting with these is a namespace
+    // identifier, not a real endpoint.
+    let xml_namespaces = [
+        "http://www.w3.org/", "https://www.w3.org/",
+        "http://schemas.xmlsoap.org/", "https://schemas.xmlsoap.org/",
+        "http://schemas.microsoft.com/", "https://schemas.microsoft.com/",
+        "urn:",
+    ];
+
+    fn is_test_file(id: &str) -> bool {
+        let lower = id.to_ascii_lowercase();
+        lower.contains("/tests/") || lower.contains("/test/")
+            || lower.contains("__tests__")
+            || lower.contains("/spec/") || lower.contains("/specs/")
+            || lower.ends_with("_test.py") || lower.ends_with("_test.go")
+            || lower.ends_with(".test.ts") || lower.ends_with(".test.js")
+            || lower.ends_with(".spec.ts") || lower.ends_with(".spec.js")
+            || lower.contains("/fixtures/") || lower.contains("/fixture/")
+    }
+
+    fn is_minified(id: &str, node: &GraphNode) -> bool {
+        let lower = id.to_ascii_lowercase();
+        if lower.contains(".min.") || lower.ends_with(".min")
+            || lower.contains(".bundle.") || lower.contains(".chunk.") {
+            return true;
+        }
+        // Heuristic: extracted URLs / lines ratio. Minified files usually
+        // have very few lines but many URL extractions.
+        if node.lines > 0 && node.lines < 5 && node.urls.len() > 5 {
+            return true;
+        }
+        false
+    }
+
+    fn is_template_url(url: &str) -> bool {
+        url.contains("${") || url.contains("{{") || url.contains("<%")
+            || url.contains("#{") || url.contains("%(") || url.contains("(?P<")
+    }
+
+    fn is_xml_namespace(url: &str, xml_namespaces: &[&str]) -> bool {
+        xml_namespaces.iter().any(|p| url.starts_with(p))
+            || url.ends_with(".xsd") || url.ends_with(".dtd")
+    }
+
+    fn has_credentials(url: &str) -> bool {
+        // url like `https://user:pass@host/path` or `https://[redacted]@host/path`
+        if let Some(scheme_end) = url.find("://") {
+            let after = &url[scheme_end + 3..];
+            let host_end = after.find('/').unwrap_or(after.len());
+            after[..host_end].contains('@')
+        } else { false }
+    }
+
+    fn host_of(url: &str) -> &str {
+        let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+        let after = &url[scheme_end..];
+        let host_end = after.find([':', '/', '?', '#']).unwrap_or(after.len());
+        &after[..host_end]
+    }
 
     for (src_id, node) in nodes.iter() {
         if node.kind != crate::types::EntityKind::SourceFile { continue; }
+        if is_test_file(src_id) { continue; }
+        if is_minified(src_id, node) { continue; }
+
         for url in &node.urls {
             if !url.starts_with("http://") && !url.starts_with("https://") { continue; }
-            // Skip URLs whose host matches a "demo / example / loopback" placeholder
-            // — those are not real production endpoints we want in the graph.
-            if skip_hosts.iter().any(|h| {
-                let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
-                let after = &url[scheme_end..];
-                let host_end = after.find([':', '/', '?', '#']).unwrap_or(after.len());
-                &after[..host_end] == *h
-            }) { continue; }
+            if is_template_url(url) { continue; }
+            if is_xml_namespace(url, &xml_namespaces) { continue; }
+            if has_credentials(url) { continue; }
+
+            let host = host_of(url);
+            // Loopback / placeholder hosts
+            if skip_hosts.contains(&host) { continue; }
+            // Reject pseudo-TLDs that are reserved for test/local use
+            if host.ends_with(".test") || host.ends_with(".invalid")
+                || host.ends_with(".local") || host.ends_with(".localhost")
+                || host.ends_with(".example") {
+                continue;
+            }
 
             let ep_id = format!("ep:GET:{url}");
             new_endpoints.push((src_id.clone(), ep_id, url.clone()));
