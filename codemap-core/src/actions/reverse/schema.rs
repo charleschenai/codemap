@@ -196,14 +196,14 @@ fn parse_clarion_ddl(content: &str) -> Vec<ClarionTable> {
 
 fn try_parse_table_start(line: &str) -> Option<ClarionTable> {
     // Pattern: word  file,pre(XXX),name('dbo.XXX'),...
-    let lower = line.to_lowercase();
+    let lower = line.to_ascii_lowercase();
     let parts: Vec<&str> = line.splitn(2, |c: char| c.is_whitespace()).collect();
     if parts.len() < 2 {
         return None;
     }
 
     let rest = parts[1].trim();
-    if !rest.to_lowercase().starts_with("file,") && !rest.to_lowercase().starts_with("file ") {
+    if !rest.to_ascii_lowercase().starts_with("file,") && !rest.to_ascii_lowercase().starts_with("file ") {
         return None;
     }
 
@@ -235,8 +235,8 @@ fn extract_paren_value(line: &str, prefix: &str) -> String {
 }
 
 fn extract_quoted_paren_value(line: &str, prefix: &str) -> String {
-    let lower = line.to_lowercase();
-    if let Some(start) = lower.find(&prefix.to_lowercase()) {
+    let lower = line.to_ascii_lowercase();
+    if let Some(start) = lower.find(&prefix.to_ascii_lowercase()) {
         let after = &line[start + prefix.len()..];
         // Look for quoted value: 'xxx'
         if let Some(q1) = after.find('\'') {
@@ -260,7 +260,7 @@ fn try_parse_key(line: &str, _prefix: &str) -> Option<ClarionKey> {
         return None;
     }
 
-    let rest = parts[1].trim().to_lowercase();
+    let rest = parts[1].trim().to_ascii_lowercase();
     if !rest.starts_with("key(") {
         return None;
     }
@@ -299,7 +299,7 @@ fn is_record_start(line: &str) -> bool {
     if parts.len() < 2 {
         return false;
     }
-    parts[1].trim().to_lowercase().starts_with("record")
+    parts[1].trim().to_ascii_lowercase().starts_with("record")
 }
 
 fn is_record_end(line: &str) -> bool {
@@ -318,7 +318,7 @@ fn try_parse_field(line: &str) -> Option<ClarionField> {
     }
 
     let name = parts[0].to_string();
-    let type_str = parts[1].trim().to_lowercase();
+    let type_str = parts[1].trim().to_ascii_lowercase();
 
     // Known Clarion types
     let known_types = [
@@ -346,19 +346,19 @@ fn infer_relationships(tables: &[ClarionTable]) -> Vec<String> {
 
     // Build a map of table names (lowercased) to their key fields
     let mut table_keys: HashMap<String, Vec<String>> = HashMap::new();
-    let table_names: Vec<String> = tables.iter().map(|t| t.name.to_lowercase()).collect();
+    let table_names: Vec<String> = tables.iter().map(|t| t.name.to_ascii_lowercase()).collect();
 
     for table in tables {
         let key_fields: Vec<String> = table.keys.iter()
             .flat_map(|k| k.fields.clone())
             .collect();
-        table_keys.insert(table.name.to_lowercase(), key_fields);
+        table_keys.insert(table.name.to_ascii_lowercase(), key_fields);
     }
 
     // For each table, look at fields that might reference another table
     for table in tables {
         for field in &table.fields {
-            let fname = field.name.to_lowercase();
+            let fname = field.name.to_ascii_lowercase();
 
             // Pattern: field ends with _id or _key or _code
             let suffixes = ["_id", "_key", "_code", "_no", "_num"];
@@ -367,7 +367,7 @@ fn infer_relationships(tables: &[ClarionTable]) -> Vec<String> {
                     let potential_table = &fname[..fname.len() - suffix.len()];
                     // Check if a table with this name or similar exists
                     for tname in &table_names {
-                        if tname == &table.name.to_lowercase() {
+                        if tname == &table.name.to_ascii_lowercase() {
                             continue;
                         }
                         // Match: vendor_id -> vendor table, cust_id -> customer table
@@ -375,7 +375,7 @@ fn infer_relationships(tables: &[ClarionTable]) -> Vec<String> {
                             // Verify the target table has a key on this field
                             if let Some(keys) = table_keys.get(tname) {
                                 let has_matching_key = keys.iter().any(|k| {
-                                    let kl = k.to_lowercase();
+                                    let kl = k.to_ascii_lowercase();
                                     kl == fname || kl.ends_with(&fname) || fname.ends_with(&kl)
                                 });
                                 if has_matching_key {
@@ -757,7 +757,7 @@ fn extract_tables_after_keyword(upper: &str, keyword: &str, tables: &mut BTreeSe
                     table_name
                 };
                 if !clean.is_empty() {
-                    tables.insert(clean.to_lowercase());
+                    tables.insert(clean.to_ascii_lowercase());
                 }
             }
 
@@ -810,11 +810,11 @@ fn extract_join_pairs(upper: &str) -> Vec<(String, String)> {
                         .collect();
 
                     for t in &on_tables {
-                        let clean_t = t.trim_matches(|c: char| c == '[' || c == ']').to_lowercase();
+                        let clean_t = t.trim_matches(|c: char| c == '[' || c == ']').to_ascii_lowercase();
                         let clean_join = if let Some(dot) = join_table.rfind('.') {
-                            join_table[dot + 1..].to_lowercase()
+                            join_table[dot + 1..].to_ascii_lowercase()
                         } else {
-                            join_table.to_lowercase()
+                            join_table.to_ascii_lowercase()
                         };
 
                         if clean_t != clean_join && !clean_t.is_empty() {
@@ -917,7 +917,7 @@ fn sql_extract_directory(dir: &Path) -> String {
         let ext = path.extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
-            .to_lowercase();
+            .to_ascii_lowercase();
 
         if ext != "exe" && ext != "dll" {
             continue;

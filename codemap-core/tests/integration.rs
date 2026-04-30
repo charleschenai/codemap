@@ -459,3 +459,52 @@ fn test_skip_dirs_exclude_dep_trees() {
     assert_eq!(vendored_hits, 0, "expected zero vendored/cache files in graph (found: {:?})",
         scanned.iter().filter(|p| !p.contains("user_code.py")).collect::<Vec<_>>());
 }
+
+// ── web-dom truncated-tag regression ──────────────────────────────
+//
+// 5.1.4: extract_buttons/forms/tables/navs in actions/reverse/web.rs used
+// `unwrap_or(content.len())` as a fallback when the closing tag was missing.
+// On the next loop iteration `pos = close + 1` would equal `content.len() + 1`
+// and the slice `lower[pos..]` would panic with "byte index N is out of bounds".
+// Reproduced on legislature.maine.gov 2026-04-30. Fix: treat a missing close
+// tag as end-of-document and break out of the scan loop.
+
+#[test]
+fn test_web_dom_handles_truncated_tags_without_panic() {
+    let tmp = std::env::temp_dir().join(format!("codemap-trunc-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    // Each fragment opens a tag and never closes it. Pre-fix any of these
+    // would panic in extract_{buttons,forms,tables,navs} because the loop
+    // would index past content.len().
+    let cases = [
+        ("trunc_button.html", "<html><body><button>click me"),
+        ("trunc_form.html",   "<html><body><form action=\"/x\"><input name=\"a\">"),
+        ("trunc_table.html",  "<html><body><table><tr><th>col"),
+        ("trunc_nav.html",    "<html><body><nav><a href=\"/x\">link"),
+    ];
+    for (name, body) in cases.iter() {
+        fs::write(tmp.join(name), body).unwrap();
+    }
+
+    let graph = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+    let mut graph = graph;
+
+    for (name, _) in cases.iter() {
+        let path = tmp.join(name).to_string_lossy().to_string();
+        let result = execute(&mut graph, "web-dom", &path, false);
+        assert!(
+            result.is_ok(),
+            "web-dom on {} should not panic; got error: {:?}",
+            name, result
+        );
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}

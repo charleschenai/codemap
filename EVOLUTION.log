@@ -257,3 +257,33 @@ unaffected.
   No source change. Tests untouched (still 53 passing). Binary identical
   to 5.1.2.
 
+[2026-04-30] fix: 5.1.4 — web-dom panic on truncated/missing close tags
+  source: real bug report from main2's state-statute scraper grind —
+  `codemap web-dom` panicked on legislature.maine.gov index with
+  "byte index 17379 is out of bounds of `<!doctype html ...`" at
+  codemap-core/src/actions/reverse/web.rs:891:34. The 17378-byte HTML
+  is truncated mid-document (no closing </button>). Pre-fix
+  extract_buttons fell back to `unwrap_or(content.len())` when the
+  closing tag was missing, then `pos = close + 1` made the next
+  iteration's `lower[pos..]` slice OOB.
+
+  Same antipattern lived in extract_forms, extract_tables (outer +
+  inner <th>), extract_navs, and extract_buttons — five sites total.
+  Fix in all five: replace the `unwrap_or(content.len())` fallback
+  with `let Some(...) = ... else { break };` — a missing close tag
+  means the document is truncated, which is end-of-scan, not a body
+  that extends to EOF. Loops also gained a `pos < lower.len()` guard
+  before slicing.
+
+  Defense in depth: also swept `actions/reverse/{web,schema,pe}.rs`
+  to convert all 58 `to_lowercase()` calls to `to_ascii_lowercase()`.
+  HTML/URL/header data is ASCII, and `to_ascii_lowercase()` preserves
+  byte length — so even existing index-into-other-string usages stay
+  sound under Unicode input. Smaller, faster, and immune to a class
+  of latent bugs from the same shape.
+
+  New regression test test_web_dom_handles_truncated_tags_without_panic
+  materializes four truncated HTML fragments (open <button>/<form>/
+  <table>/<nav> with no closes) and asserts web-dom returns Ok rather
+  than panicking. 54 tests passing (was 53).
+

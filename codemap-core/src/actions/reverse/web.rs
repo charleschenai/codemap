@@ -73,12 +73,12 @@ pub fn web_api(_graph: &Graph, target: &str) -> String {
         // Check for auth headers
         if let Some(headers) = request.get("headers").and_then(|h| h.as_array()) {
             for header in headers {
-                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
+                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_ascii_lowercase();
                 if name == "authorization" {
                     let val = header.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                    if val.to_lowercase().starts_with("bearer") {
+                    if val.to_ascii_lowercase().starts_with("bearer") {
                         auth_headers.insert("Bearer token in Authorization header".to_string());
-                    } else if val.to_lowercase().starts_with("basic") {
+                    } else if val.to_ascii_lowercase().starts_with("basic") {
                         auth_headers.insert("Basic auth in Authorization header".to_string());
                     } else {
                         auth_headers.insert("Authorization header".to_string());
@@ -95,7 +95,7 @@ pub fn web_api(_graph: &Graph, target: &str) -> String {
         }
 
         // Check if this is a static asset
-        let path_lower = path_str.to_lowercase();
+        let path_lower = path_str.to_ascii_lowercase();
         let is_static = static_extensions.iter().any(|ext| path_lower.ends_with(ext));
 
         if is_static {
@@ -266,7 +266,7 @@ pub fn web_api(_graph: &Graph, target: &str) -> String {
     if !resources.is_empty() {
         out.push_str("  CRUD coverage:\n");
         let mut res_vec: Vec<(&String, &[bool; 4])> = resources.iter().collect();
-        res_vec.sort_by_key(|(name, _)| name.to_lowercase());
+        res_vec.sort_by_key(|(name, _)| name.to_ascii_lowercase());
         let max_name_len = res_vec.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
         for (name, crud) in &res_vec {
             let c = if crud[0] { "\u{2713}" } else { "\u{2717}" };
@@ -634,7 +634,7 @@ fn count_html_tags(content: &str, tag_counts: &mut HashMap<String, usize>) -> us
                 end += 1;
             }
             if end > start {
-                let tag = content[start..end].to_lowercase();
+                let tag = content[start..end].to_ascii_lowercase();
                 if tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && tag.len() <= 20 {
                     *tag_counts.entry(tag).or_insert(0) += 1;
                     total += 1;
@@ -649,7 +649,7 @@ fn count_html_tags(content: &str, tag_counts: &mut HashMap<String, usize>) -> us
 
 fn extract_forms(content: &str) -> Vec<HtmlForm> {
     let mut forms = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut search_from = 0;
 
     while let Some(form_start) = lower[search_from..].find("<form") {
@@ -667,8 +667,11 @@ fn extract_forms(content: &str) -> Vec<HtmlForm> {
         let method = extract_attr_value(form_tag, "method");
         let method = if method.is_empty() { "GET".to_string() } else { method };
 
-        // Find form end
-        let form_end = lower[form_tag_end..].find("</form").map(|e| form_tag_end + e).unwrap_or(content.len());
+        // No closing </form> means a malformed tag — stop scanning rather than
+        // pretend the rest of the document is the form body (which would also
+        // make `search_from = form_end + 1` exceed `lower.len()` next iteration).
+        let Some(form_end_off) = lower[form_tag_end..].find("</form") else { break };
+        let form_end = form_tag_end + form_end_off;
         let form_body = &content[form_tag_end..form_end];
 
         let fields = extract_form_fields(form_body);
@@ -689,7 +692,7 @@ fn extract_forms(content: &str) -> Vec<HtmlForm> {
 
 fn extract_form_fields(body: &str) -> Vec<HtmlFormField> {
     let mut fields = Vec::new();
-    let lower = body.to_lowercase();
+    let lower = body.to_ascii_lowercase();
 
     // Find <input> elements
     let mut pos = 0;
@@ -704,7 +707,7 @@ fn extract_form_fields(body: &str) -> Vec<HtmlFormField> {
         let field_type = extract_attr_value(tag, "type");
         let field_type = if field_type.is_empty() { "text".to_string() } else { field_type };
         let placeholder = extract_attr_value(tag, "placeholder");
-        let required = tag.to_lowercase().contains("required");
+        let required = tag.to_ascii_lowercase().contains("required");
 
         if !name.is_empty() || !field_type.is_empty() {
             fields.push(HtmlFormField {
@@ -727,7 +730,7 @@ fn extract_form_fields(body: &str) -> Vec<HtmlFormField> {
         };
         let tag = &body[abs_start..=tag_end];
         let name = extract_attr_value(tag, "name");
-        let required = tag.to_lowercase().contains("required");
+        let required = tag.to_ascii_lowercase().contains("required");
 
         fields.push(HtmlFormField {
             name: if name.is_empty() { "(unnamed)".to_string() } else { name },
@@ -749,7 +752,7 @@ fn extract_form_fields(body: &str) -> Vec<HtmlFormField> {
         let tag = &body[abs_start..=tag_end];
         let name = extract_attr_value(tag, "name");
         let placeholder = extract_attr_value(tag, "placeholder");
-        let required = tag.to_lowercase().contains("required");
+        let required = tag.to_ascii_lowercase().contains("required");
 
         fields.push(HtmlFormField {
             name: if name.is_empty() { "(unnamed)".to_string() } else { name },
@@ -764,7 +767,7 @@ fn extract_form_fields(body: &str) -> Vec<HtmlFormField> {
 }
 
 fn extract_attr_value(tag: &str, attr: &str) -> String {
-    let lower = tag.to_lowercase();
+    let lower = tag.to_ascii_lowercase();
     // Try: attr="value" or attr='value'
     for quote in ['"', '\''] {
         let pattern = format!("{attr}={quote}");
@@ -795,7 +798,7 @@ fn extract_attr_value(tag: &str, attr: &str) -> String {
 
 fn extract_tables(content: &str) -> Vec<HtmlTable> {
     let mut tables = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut search_from = 0;
 
     while let Some(table_start) = lower[search_from..].find("<table") {
@@ -809,21 +812,24 @@ fn extract_tables(content: &str) -> Vec<HtmlTable> {
         let id = extract_attr_value(table_tag, "id");
         let class = extract_attr_value(table_tag, "class");
 
-        // Find table end
-        let table_end = lower[tag_end..].find("</table").map(|e| tag_end + e).unwrap_or(content.len());
+        // No closing </table> means a malformed tag — stop scanning.
+        let Some(table_end_off) = lower[tag_end..].find("</table") else { break };
+        let table_end = tag_end + table_end_off;
         let table_body = &content[tag_end..table_end];
 
         // Extract <th> headers
         let mut headers = Vec::new();
-        let table_lower = table_body.to_lowercase();
+        let table_lower = table_body.to_ascii_lowercase();
         let mut th_pos = 0;
-        while let Some(th_start) = table_lower[th_pos..].find("<th") {
+        while th_pos < table_lower.len() {
+            let Some(th_start) = table_lower[th_pos..].find("<th") else { break };
             let abs_th = th_pos + th_start;
             let th_tag_end = match table_lower[abs_th..].find('>') {
                 Some(e) => abs_th + e + 1,
                 None => break,
             };
-            let th_close = table_lower[th_tag_end..].find("</th").map(|e| th_tag_end + e).unwrap_or(table_body.len());
+            let Some(th_close_off) = table_lower[th_tag_end..].find("</th") else { break };
+            let th_close = th_tag_end + th_close_off;
             let header_text = strip_html_tags(&table_body[th_tag_end..th_close]).trim().to_string();
             if !header_text.is_empty() {
                 headers.push(header_text);
@@ -856,7 +862,7 @@ fn strip_html_tags(s: &str) -> String {
 
 fn extract_navs(content: &str) -> Vec<HtmlNav> {
     let mut navs = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut search_from = 0;
 
     while let Some(nav_start) = lower[search_from..].find("<nav") {
@@ -870,7 +876,9 @@ fn extract_navs(content: &str) -> Vec<HtmlNav> {
         let id = extract_attr_value(nav_tag, "id");
         let class = extract_attr_value(nav_tag, "class");
 
-        let nav_end = lower[tag_end..].find("</nav").map(|e| tag_end + e).unwrap_or(content.len());
+        // No closing </nav> means a malformed tag — stop scanning.
+        let Some(nav_end_off) = lower[tag_end..].find("</nav") else { break };
+        let nav_end = tag_end + nav_end_off;
         let nav_body = &content[tag_end..nav_end];
 
         let links = extract_links(nav_body);
@@ -885,16 +893,20 @@ fn extract_navs(content: &str) -> Vec<HtmlNav> {
 
 fn extract_buttons(content: &str) -> Vec<String> {
     let mut buttons = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut pos = 0;
 
-    while let Some(start) = lower[pos..].find("<button") {
+    while pos < lower.len() {
+        let Some(start) = lower[pos..].find("<button") else { break };
         let abs_start = pos + start;
         let tag_end = match lower[abs_start..].find('>') {
             Some(e) => abs_start + e + 1,
             None => break,
         };
-        let close = lower[tag_end..].find("</button").map(|e| tag_end + e).unwrap_or(content.len());
+        // No closing </button> means a malformed tag — stop scanning rather than
+        // pretend the rest of the document is the button body.
+        let Some(close_off) = lower[tag_end..].find("</button") else { break };
+        let close = tag_end + close_off;
         let text = strip_html_tags(&content[tag_end..close]).trim().to_string();
         if !text.is_empty() {
             buttons.push(text);
@@ -906,13 +918,13 @@ fn extract_buttons(content: &str) -> Vec<String> {
 }
 
 fn count_click_handlers(content: &str) -> usize {
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let patterns = ["onclick=", "@click=", "v-on:click=", "(click)="];
     patterns.iter().map(|p| lower.matches(p).count()).sum()
 }
 
 fn count_component_patterns(content: &str, patterns: &[&str]) -> usize {
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut count = 0usize;
     for pat in patterns {
         // Look for class="...modal..." or id="...modal..." etc.
@@ -934,7 +946,7 @@ fn count_component_patterns(content: &str, patterns: &[&str]) -> usize {
 
 fn extract_script_srcs(content: &str) -> Vec<String> {
     let mut srcs = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut pos = 0;
 
     while let Some(start) = lower[pos..].find("<script") {
@@ -956,7 +968,7 @@ fn extract_script_srcs(content: &str) -> Vec<String> {
 
 fn extract_iframes(content: &str) -> Vec<String> {
     let mut iframes = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut pos = 0;
 
     while let Some(start) = lower[pos..].find("<iframe") {
@@ -1049,7 +1061,7 @@ fn extract_data_attributes(content: &str) -> BTreeSet<String> {
 
 fn extract_links(content: &str) -> Vec<(String, String)> {
     let mut links = Vec::new();
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     let mut pos = 0;
 
     while let Some(start) = lower[pos..].find("<a ") {
@@ -1197,7 +1209,7 @@ pub fn web_sitemap(_graph: &Graph, target: &str) -> String {
     // Site structure: build tree from paths
     out.push_str("── Site Structure ──\n");
     let mut sorted_pages: Vec<(&String, &SitemapPage)> = pages.iter().collect();
-    sorted_pages.sort_by_key(|(path, _)| path.to_lowercase());
+    sorted_pages.sort_by_key(|(path, _)| path.to_ascii_lowercase());
 
     for (page_path, page) in &sorted_pages {
         let depth = page_path.matches('/').count().saturating_sub(1);
@@ -1291,7 +1303,7 @@ fn collect_html_files(dir: &Path) -> Vec<std::path::PathBuf> {
             if path.is_dir() {
                 files.extend(collect_html_files(&path));
             } else if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
+                let ext = ext.to_string_lossy().to_ascii_lowercase();
                 if ext == "html" || ext == "htm" {
                     files.push(path);
                 }
@@ -1302,7 +1314,7 @@ fn collect_html_files(dir: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn extract_title(content: &str) -> String {
-    let lower = content.to_lowercase();
+    let lower = content.to_ascii_lowercase();
     if let Some(start) = lower.find("<title") {
         if let Some(tag_end) = lower[start..].find('>') {
             let after = start + tag_end + 1;
@@ -1410,13 +1422,13 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
         // Check for auth headers in request
         if let Some(headers) = request.get("headers").and_then(|h| h.as_array()) {
             for header in headers {
-                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
+                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_ascii_lowercase();
                 let val = header.get("value").and_then(|v| v.as_str()).unwrap_or("");
                 if name == "authorization" {
-                    if val.to_lowercase().starts_with("bearer") {
+                    if val.to_ascii_lowercase().starts_with("bearer") {
                         auth_method = Some("Bearer Token".to_string());
                         token_header = Some("Authorization: Bearer <token>".to_string());
-                    } else if val.to_lowercase().starts_with("basic") {
+                    } else if val.to_ascii_lowercase().starts_with("basic") {
                         auth_method = Some("Basic Auth".to_string());
                         token_header = Some("Authorization: Basic <credentials>".to_string());
                     }
@@ -1438,7 +1450,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
         // Check for rate limit headers in response
         if let Some(headers) = response.get("headers").and_then(|h| h.as_array()) {
             for header in headers {
-                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
+                let name = header.get("name").and_then(|n| n.as_str()).unwrap_or("").to_ascii_lowercase();
                 let val = header.get("value").and_then(|v| v.as_str()).unwrap_or("");
                 if name == "x-ratelimit-limit" {
                     rate_limit_header = Some(format!("X-RateLimit-Limit: {val}"));
@@ -1447,7 +1459,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
                 }
                 // Detect Set-Cookie for session
                 if name == "set-cookie" {
-                    let cookie_lower = val.to_lowercase();
+                    let cookie_lower = val.to_ascii_lowercase();
                     if cookie_lower.contains("session") || cookie_lower.contains("token") || cookie_lower.contains("auth") {
                         if session_cookie.is_none() {
                             let cookie_name = val.split('=').next().unwrap_or("session").to_string();
@@ -1459,7 +1471,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
         }
 
         // Static asset tracking
-        let path_lower = path_str.to_lowercase();
+        let path_lower = path_str.to_ascii_lowercase();
         let is_static = static_extensions.iter().any(|ext| path_lower.ends_with(ext));
 
         if is_static {
@@ -1492,7 +1504,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
 
         // Detect login endpoint
         if method == "POST" {
-            let path_l = normalized.to_lowercase();
+            let path_l = normalized.to_ascii_lowercase();
             if path_l.contains("login") || path_l.contains("auth") || path_l.contains("signin") || path_l.contains("sign-in") {
                 login_endpoint = Some(format!("POST {normalized}"));
                 // Extract login fields from body
@@ -1526,7 +1538,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
                 if let Some(name) = param.get("name").and_then(|n| n.as_str()) {
                     ep.query_params.insert(name.to_string());
                     // Track pagination params
-                    let name_lower = name.to_lowercase();
+                    let name_lower = name.to_ascii_lowercase();
                     if name_lower == "page" || name_lower == "offset" || name_lower == "cursor" || name_lower == "limit" || name_lower == "skip" {
                         let value = param.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         pagination_params.entry(name.to_string()).or_default().push(value);
@@ -1630,7 +1642,7 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
                 }
 
                 // Detect pagination selectors
-                let lower = content.to_lowercase();
+                let lower = content.to_ascii_lowercase();
                 let pag_patterns = ["next-page", "load-more", "pagination", "pager", "page-link"];
                 for pat in &pag_patterns {
                     if lower.contains(pat) {
@@ -1925,7 +1937,7 @@ pub fn js_api_extract(_graph: &Graph, target: &str) -> String {
                 headers.insert(format!("Content-Type: {}", &ct_caps[1]));
             }
             // Look for auth patterns
-            let header_lower = header_block.to_lowercase();
+            let header_lower = header_block.to_ascii_lowercase();
             if header_lower.contains("bearer") {
                 auth_patterns.insert("Bearer token authentication".to_string());
                 headers.insert("Authorization: Bearer ${token}".to_string());
@@ -2016,7 +2028,7 @@ fn collect_js_files(dir: &Path) -> Vec<std::path::PathBuf> {
             if path.is_dir() {
                 files.extend(collect_js_files(&path));
             } else if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
+                let ext = ext.to_string_lossy().to_ascii_lowercase();
                 if ext == "js" || ext == "mjs" || ext == "cjs" || ext == "jsx" {
                     files.push(path);
                 }

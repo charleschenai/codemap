@@ -351,7 +351,7 @@ fn format_pe_imports_result(dlls: &[ImportedDll]) -> String {
     let mut com_imports: Vec<(String, Vec<String>)> = Vec::new();
 
     for dll in dlls {
-        let dll_lower = dll.name.to_lowercase();
+        let dll_lower = dll.name.to_ascii_lowercase();
 
         // Database/SQL
         if dll_lower == "odbc32.dll"
@@ -2064,8 +2064,8 @@ pub fn binary_diff(_graph: &Graph, target: &str) -> String {
 
     out.push_str("\u{2500}\u{2500} Import Changes \u{2500}\u{2500}\n");
     if let (Ok(imp1), Ok(imp2)) = (&imports1, &imports2) {
-        let dlls1: BTreeSet<String> = imp1.iter().map(|d| d.name.to_lowercase()).collect();
-        let dlls2: BTreeSet<String> = imp2.iter().map(|d| d.name.to_lowercase()).collect();
+        let dlls1: BTreeSet<String> = imp1.iter().map(|d| d.name.to_ascii_lowercase()).collect();
+        let dlls2: BTreeSet<String> = imp2.iter().map(|d| d.name.to_ascii_lowercase()).collect();
 
         let added_dlls: Vec<&String> = dlls2.difference(&dlls1).collect();
         let removed_dlls: Vec<&String> = dlls1.difference(&dlls2).collect();
@@ -2083,10 +2083,10 @@ pub fn binary_diff(_graph: &Graph, target: &str) -> String {
 
         // Compare functions
         let all_funcs1: BTreeSet<String> = imp1.iter()
-            .flat_map(|d| d.functions.iter().map(|f| format!("{}!{}", d.name.to_lowercase(), f)))
+            .flat_map(|d| d.functions.iter().map(|f| format!("{}!{}", d.name.to_ascii_lowercase(), f)))
             .collect();
         let all_funcs2: BTreeSet<String> = imp2.iter()
-            .flat_map(|d| d.functions.iter().map(|f| format!("{}!{}", d.name.to_lowercase(), f)))
+            .flat_map(|d| d.functions.iter().map(|f| format!("{}!{}", d.name.to_ascii_lowercase(), f)))
             .collect();
 
         let added_funcs: usize = all_funcs2.difference(&all_funcs1).count();
@@ -2306,7 +2306,7 @@ fn collect_table_names(strings: &BTreeSet<String>) -> BTreeSet<String> {
                     if let Some(dot_pos) = clean.rfind('.') {
                         let tname = &clean[dot_pos + 1..];
                         if !tname.is_empty() {
-                            tables.insert(tname.to_lowercase());
+                            tables.insert(tname.to_ascii_lowercase());
                         }
                     }
                 }
