@@ -31,11 +31,10 @@ jobs:
             archive_os: Darwin
             archive_arch: arm64
             napi_name: codemap.darwin-arm64.node
-          - target: x86_64-apple-darwin
-            runner: macos-13
-            archive_os: Darwin
-            archive_arch: x86_64
-            napi_name: codemap.darwin-x64.node
+          # x86_64-apple-darwin (Intel Mac) intentionally omitted — fleet
+          # has no Intel Macs, and GitHub-hosted macos-13 runners are
+          # scarce/queued for hours. Add back if a user with an Intel Mac
+          # ever needs prebuilds.
     steps:
       - uses: actions/checkout@v4
 
