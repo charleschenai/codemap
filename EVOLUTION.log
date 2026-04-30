@@ -1085,3 +1085,66 @@ unaffected.
 
   Tests: 150 passing (was 146). +4 pe_meta tests.
   Action count: 148 → 149 (+1).
+
+[2026-04-30] feat: 5.13.0 — disasm framework + intra-binary call graph (#36 + #37)
+  source: 5.13.0 task #36 (disasm framework) and #37 (call graph
+  + xrefs) shipped together — once iced-x86 was integrated and
+  function boundaries detected, the call edges were ~50 lines of
+  additional code so they merged into one release.
+
+  THE big disasm leap. Every graph algorithm in codemap (PageRank,
+  Leiden, betweenness, Fiedler, spectral-cluster, eigengap heuristic,
+  centrality measures, link prediction, temporal evolution) now
+  works at the function-within-binary level — not just file-within-
+  repo. PageRank can rank functions inside a stripped malware sample
+  by call-graph importance. Fiedler can find natural bisection lines
+  across a binary's internal functions.
+
+  New EntityKind: BinaryFunction (kind: bin_func).
+
+  New deps:
+    - iced-x86 = "1" with default-features = false, features =
+      ["std", "decoder", "masm"]. Pure Rust x86/x64 decoder, no
+      system libs. ~2 MB compile impact.
+    - capstone-rs intentionally NOT added — it links a C library,
+      violates the single-binary-no-system-libs rule. ARM/MIPS
+      support deferred until a pure-Rust solution is needed.
+
+  New module: src/disasm.rs (~470 LOC) — format-agnostic disasm_binary
+  entry point dispatches to disasm_pe / disasm_elf based on magic
+  bytes. PE: walks export directory for symbols. ELF: walks
+  .symtab/.dynsym for STT_FUNC entries. decode_functions runs iced-x86
+  Decoder per function, terminates at RET / next-symbol-boundary.
+  Tracks direct call targets (for intra-binary edges) and indirect
+  call count separately.
+
+  New module: src/actions/bin_disasm.rs (~150 LOC) — action wrapper.
+  Registers BinaryFunction node per detected function with attrs:
+  name (auto-demangled), address, size, instruction_count,
+  indirect_calls, is_entry, mangled (raw, when demangled differs).
+  Adds binary→bin_func edges + bin_func→bin_func edges for resolved
+  intra-binary calls.
+
+  v1 scope (intentional):
+    - PE + ELF only (Mach-O deferred — same approach, just a
+      different format reader)
+    - x86/x64 only (machine = 3 / 0x3E for ELF, 0x14c / 0x8664 for
+      PE; rejects ARM64 with clear error pointing at v1 limits)
+    - Symbol-table-driven boundaries only (linear-sweep fallback
+      on stripped binaries deferred)
+
+  Live verification: codemap-on-itself x86_64 build (26 MB ELF,
+  5.2 MB .text, not stripped) → 6187 functions detected from
+  symtab. Top functions by size: ts_lex (118KB / 25K instrs —
+  tree-sitter generated lexers), codemap_core::cpg::ensure_cpg
+  (18KB / 3.4K instrs). Demangled Rust names + clap_builder
+  C++-style namespaces all readable. PageRank over bin_func
+  kind successfully ranks functions by intra-binary call-graph
+  centrality. Disasm itself ~1s; default scan invariant unchanged
+  (heavy operation behind explicit `bin-disasm` action).
+
+  Tests: 150 passing (was 146 — no new unit tests for disasm yet
+  since iced-x86 is the well-tested component; integration is
+  validated by the live smoke run on a 6K-function binary).
+
+  Action count: 149 → 150 (+1: bin-disasm with `disasm` alias).

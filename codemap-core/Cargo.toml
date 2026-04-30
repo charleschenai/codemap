@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.12.2"
+version = "5.13.0"
 edition = "2021"
 
 [dependencies]
@@ -24,3 +24,6 @@ walkdir = "2"
 regex = "1"
 tree-sitter-c-sharp = "0.23.5"
 tree-sitter-lua = "0.5.0"
+# Disasm — pure Rust x86/x64 decoder (no system libs). Default feature
+# set is heavy; pull only what we need: decoder + masm-style formatter.
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "masm"] }

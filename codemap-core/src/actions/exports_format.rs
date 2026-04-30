@@ -164,6 +164,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             Compiler          => (252, 228, 236),
             StringLiteral     => (245, 245, 245),
             Overlay           => (239, 154, 154),
+            BinaryFunction    => (255, 249, 196),
         }
     }
 

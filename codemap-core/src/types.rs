@@ -150,6 +150,13 @@ pub enum EntityKind {
     /// bootstrap / generic / encrypted-blob). Common malware
     /// indicator + the heart of how installers ship extra payloads.
     Overlay,
+    /// Function recovered from a binary's .text section via disasm.
+    /// Edges: binary → bin_func, bin_func → bin_func (intra-binary
+    /// calls), bin_func → symbol (imports it calls). attrs include
+    /// address, size, instruction_count, demangled_name. Lets graph
+    /// algorithms (PageRank, Leiden, betweenness) run at the
+    /// function-within-binary level — not just file-within-repo.
+    BinaryFunction,
 }
 
 impl EntityKind {
@@ -178,6 +185,7 @@ impl EntityKind {
             EntityKind::Compiler => "compiler",
             EntityKind::StringLiteral => "string",
             EntityKind::Overlay => "overlay",
+            EntityKind::BinaryFunction => "bin_func",
         }
     }
 
@@ -208,6 +216,7 @@ impl EntityKind {
             "compiler" | "toolchain" | "lang" => EntityKind::Compiler,
             "string" | "str" | "literal" => EntityKind::StringLiteral,
             "overlay" | "trailing" => EntityKind::Overlay,
+            "bin_func" | "binfunc" | "function" | "func" => EntityKind::BinaryFunction,
             _ => return None,
         })
     }

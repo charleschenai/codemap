@@ -593,6 +593,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         Compiler          => "shape=hexagon, fillcolor=\"#fce4ec\", style=filled, fontsize=10",
         StringLiteral     => "shape=note, fillcolor=\"#f5f5f5\", style=filled, fontsize=8",
         Overlay           => "shape=cds, fillcolor=\"#ef9a9a\", style=filled, fontsize=9",
+        BinaryFunction    => "shape=ellipse, fillcolor=\"#fff9c4\", style=filled, fontsize=9",
     }
 }
 
@@ -735,6 +736,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         Compiler          => "compiler",
         StringLiteral     => "string",
         Overlay           => "overlay",
+        BinaryFunction    => "bin_func",
     }
 }
 
