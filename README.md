@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 88 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 96 analysis actions — PageRank, HITS, articulation points, community detection, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.1.1 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.1.2 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -34,7 +34,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **88 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **96 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
 - **Binary reverse engineering.** 11 actions for cracking compiled Windows binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
 
@@ -74,7 +74,18 @@ git clone https://github.com/charleschenai/codemap.git \
   && bash ~/.claude/plugins/marketplaces/codemap/install.sh
 ```
 
-The installer clones the repo, verifies the plugin structure, merges entries into `~/.claude/settings.json` (non-destructive, requires python3), then builds the `codemap` binary with `cargo build --release` and drops it into `~/bin/codemap` (or `/usr/local/bin/codemap` if running as root). Requires a Rust toolchain.
+The installer clones the repo, verifies the plugin structure, merges entries into `~/.claude/settings.json` (non-destructive, requires python3), then auto-detects the host platform via `uname -s -m` and **downloads a pre-built binary** from the latest GitHub Release. Falls back to `cargo build --release` only if no matching pre-built archive exists or `CODEMAP_BUILD_FROM_SOURCE=1` is set. Drops the binary into `~/bin/codemap` (or `/usr/local/bin/codemap` if running as root).
+
+Pre-built artifacts are produced by `.github/workflows/release.yml` on each `v*` tag for:
+
+| Target                     | Runner             | Tarball                          | napi addon                       |
+|----------------------------|--------------------|----------------------------------|----------------------------------|
+| `x86_64-unknown-linux-gnu` | `ubuntu-latest`    | `codemap-Linux-x86_64.tar.gz`    | `codemap.linux-x64-gnu.node`     |
+| `aarch64-unknown-linux-gnu`| `ubuntu-24.04-arm` | `codemap-Linux-aarch64.tar.gz`   | `codemap.linux-arm64-gnu.node`   |
+| `aarch64-apple-darwin`     | `macos-14`         | `codemap-Darwin-arm64.tar.gz`    | `codemap.darwin-arm64.node`      |
+| `x86_64-apple-darwin`      | `macos-13`         | `codemap-Darwin-x86_64.tar.gz`   | `codemap.darwin-x64.node`        |
+
+Cross-host binary copying is no longer the right move — the auto-detect path eliminates the "Exec format error" trap when a binary built on one architecture lands on another.
 
 ### From source (CLI only)
 
@@ -136,7 +147,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 88 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 96 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -578,7 +589,7 @@ codemap/
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) -> String (88 actions)
+│           ├── mod.rs             # dispatch(action, target) -> String (96 actions)
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure
@@ -645,7 +656,9 @@ Measurable from the code and `EVOLUTION.log`:
 - **Regex hoisting.** All analysis regexes are compiled once per action, not per file or per line. Security-scan regexes use `LazyLock` for zero-cost reuse across invocations.
 - **O(1) cross-repo linking.** Multi-repo merges use hash-based lookups for cross-boundary import resolution instead of linear scans.
 - **Vec buffer swap for graph algorithms.** PageRank and HITS alternate between two pre-allocated Vec buffers instead of cloning, halving allocation pressure per iteration.
-- **Zero clippy warnings** at v5.1.0. **31 integration tests** (self-referential — codemap scans its own `codemap-core/src/`).
+- **Zero clippy warnings** at v5.1.2. **53 integration tests** (self-referential — codemap scans its own `codemap-core/src/`).
+- **Walk safety guards (5.1.1+).** Refuses default scans of `$HOME`, hard-caps walks at 50,000 supported files, warns at 10,000. Override via `CODEMAP_NO_FILE_LIMIT=1`. Prevents the OOM cascade that can reap a parent process scope on systemd hosts when a scan accidentally rooted at `~` walked 192K+ files.
+- **Ecosystem-wide skip-dirs (5.1.2).** Walk excludes Python venvs (`.venv`, `venv`, `__pycache__`, `.tox`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `site-packages`), JS framework caches (`.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`, `.cache`, `bower_components`, `jspm_packages`, `out`), Go/PHP/Ruby `vendor/`, JVM `.gradle`, iOS `Pods`, IDE caches (`.idea`, `.vscode`), and coverage dirs — in addition to the existing `node_modules`, `target`, `dist`, `build`, `.git`, `.codemap` set.
 - **Cache sanity.** Load caps bincode file at 256 MB and rejects entries with path traversal (`..`, leading `/`). Files > 10 MB are skipped at parse time.
 
 If you want real numbers on your codebase, `codemap --dir <path> stats` prints file and line counts; time it with `time` for baseline throughput.
@@ -681,6 +694,9 @@ Add `.codemap/` to `.gitignore`.
 | `/codemap` not appearing in Claude Code | Plugin not enabled | `bash install.sh --check` — verifies plugin files, settings.json entries, binary on PATH. |
 | PE actions return "Not a PE file" | Target is not a Windows binary | PE actions only work on Windows EXE/DLL files (MZ header). |
 | `lsp-*` hangs or times out | LSP server not installed or not responding | Ensure the server command works standalone (e.g. `rust-analyzer --version`). Timeout is 5 seconds per request. |
+| `Refusing to scan $HOME` | You ran `codemap` from `~` without `--dir` | Pass `--dir <smaller_path>` (e.g. `--dir ~/Desktop/myrepo`) or set `CODEMAP_NO_FILE_LIMIT=1` to override. The refuse is intentional — a `$HOME`-rooted walk on a fleet host previously OOM-killed itself reaping a tmux session. |
+| `Scan hit the safety cap of 50000 supported files` | Scan dir contains too many supported files (likely a parent of many projects) | Pass `--dir <smaller_path>`, or `CODEMAP_NO_FILE_LIMIT=1` to override (use only with plenty of free RAM). Most often triggered by a `vendor/` or undeclared deps tree — see if `SKIP_DIRS` is missing your ecosystem's convention. |
+| `Exec format error` running `codemap` | Wrong-architecture binary (e.g. ARM binary copied to x86_64 host) | Re-run `bash install.sh` — the installer auto-detects via `uname -s -m` and pulls the correct pre-built binary from GitHub Releases. Override the auto-detect with `CODEMAP_BUILD_FROM_SOURCE=1 bash install.sh` to force a local cargo build. |
 
 ---
 
