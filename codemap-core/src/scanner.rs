@@ -174,13 +174,23 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
 
     fn is_test_file(id: &str) -> bool {
         let lower = id.to_ascii_lowercase();
-        lower.contains("/tests/") || lower.contains("/test/")
-            || lower.contains("__tests__")
-            || lower.contains("/spec/") || lower.contains("/specs/")
+        // Match dir-name segments anywhere in the path, including top-
+        // level (no leading `/`). e.g. both `tests/x.py` and
+        // `mod/tests/x.py` should count.
+        let has_dir_segment = |dir: &str| {
+            let with_slash = format!("/{dir}/");
+            lower.contains(&with_slash) || lower.starts_with(&format!("{dir}/"))
+        };
+        has_dir_segment("tests") || has_dir_segment("test")
+            || has_dir_segment("spec") || has_dir_segment("specs")
+            || has_dir_segment("__tests__")
+            || has_dir_segment("fixtures") || has_dir_segment("fixture")
             || lower.ends_with("_test.py") || lower.ends_with("_test.go")
             || lower.ends_with(".test.ts") || lower.ends_with(".test.js")
+            || lower.ends_with(".test.tsx") || lower.ends_with(".test.jsx")
             || lower.ends_with(".spec.ts") || lower.ends_with(".spec.js")
-            || lower.contains("/fixtures/") || lower.contains("/fixture/")
+            || lower.ends_with(".spec.tsx") || lower.ends_with(".spec.jsx")
+            || lower.starts_with("test_") || lower.contains("/test_")
     }
 
     fn is_minified(id: &str, node: &GraphNode) -> bool {

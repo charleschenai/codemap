@@ -893,6 +893,66 @@ fn test_scanner_promotes_urls_to_endpoint_nodes() {
 }
 
 #[test]
+fn test_url_promotion_skips_template_and_namespace_urls() {
+    // 5.7.1 regression: real-repo testing surfaced 6 URL-promotion bugs.
+    // This test pins the filter behavior so a future tightening or
+    // loosening doesn't silently regress.
+    let tmp = std::env::temp_dir().join(format!("codemap-url-filter-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::create_dir_all(tmp.join("tests")).unwrap();
+    fs::write(tmp.join("src/code.py"), concat!(
+        // Should be promoted (real endpoint)
+        "fetch('https://api.real-thing.io/v1/users')\n",
+        // Should be filtered: template placeholder
+        "fetch('https://example.com/${var}/path')\n",
+        "fetch('https://api.thing/{{interpolation}}/data')\n",
+        // Should be filtered: XML namespace
+        "ns = 'http://www.w3.org/1999/xhtml'\n",
+        "ns2 = 'http://schemas.xmlsoap.org/wsdl/'\n",
+        // Should be filtered: credentials
+        "url = 'https://user:pass@host.com/path'\n",
+        "url2 = 'https://[redacted]@somewhere.io/x'\n",
+        // Should be filtered: pseudo-TLDs
+        "fetch('https://internal.test/x')\n",
+        "fetch('https://my.invalid/y')\n",
+    )).unwrap();
+    // Test-fixture file with URLs that should NOT promote
+    fs::write(tmp.join("tests/test_api.py"),
+        "fetch('https://api.testfixture.io/users')".to_string()
+    ).unwrap();
+
+    let g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let endpoint_urls: Vec<&str> = g.nodes.values()
+        .filter(|n| n.kind == EntityKind::HttpEndpoint)
+        .filter_map(|n| n.attrs.get("url").map(|s| s.as_str()))
+        .collect();
+
+    let _ = fs::remove_dir_all(&tmp);
+
+    // ONLY the real endpoint should land in the graph
+    assert!(endpoint_urls.iter().any(|u| u.contains("api.real-thing.io")),
+        "real endpoint missing: {endpoint_urls:?}");
+    // None of the rejected URLs should appear
+    for bad in [
+        "${var}", "{{interpolation}}",
+        "w3.org", "xmlsoap.org",
+        "user:pass@", "[redacted]@",
+        "internal.test", "my.invalid",
+        "api.testfixture.io",
+    ] {
+        assert!(!endpoint_urls.iter().any(|u| u.contains(bad)),
+            "filter regression: {bad} leaked into graph: {endpoint_urls:?}");
+    }
+}
+
+#[test]
 fn test_url_promotion_skips_localhost_and_examples() {
     // localhost / 127.0.0.1 / example.com URLs should NOT become endpoint
     // nodes — they're typically test fixtures or doc placeholders, and
