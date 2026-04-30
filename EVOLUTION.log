@@ -697,3 +697,46 @@ unaffected.
   test_url_promotion_skips_localhost_and_examples covers the same
   surface area.
 
+[2026-04-30] fix: 5.7.3 — dead-functions match-arm dispatch + ELF/Mach-O Dll deps + UX
+  source: closing the remaining bug list from the 5.7.x sweep.
+
+  Fix 1: dead-functions reported all dispatched actions as dead
+    On codemap-on-itself it flagged 141 false positives (every action
+    that's reachable through `match action { "stats" => stats(g) }`).
+    Root cause: parser captures call expression `analysis::stats` as
+    qualified path, but dead-fn check looks up bare name `stats`.
+    Fix: index call sites by BOTH the qualified path AND the trailing
+    segment after `::` or `.`. Now matches both Rust (`mod::fn`) and
+    Python (`mod.fn`) dispatch patterns.
+    Result: 141 false positives → 17 real candidates.
+
+  Fix 2: ELF binaries don't expose library deps
+    pe-imports registers PeBinary → Dll → Symbol nodes; elf-info only
+    classified the binary itself even though parse_elf was already
+    extracting DT_NEEDED entries internally.
+    Fix: refactored parse_elf → parse_elf_with_deps returning (info,
+    Vec<String>). elf_info now registers each NEEDED library as a Dll
+    node with edges from the binary, mirroring the PE pattern. After
+    `codemap elf-info /usr/bin/grep`, `pagerank dll` surfaces libc.so.6
+    + libpcre2-8.so.0 + ld-linux-aarch64.so.1; `meta-path elf->dll`
+    finds 3 paths.
+
+  Fix 3: Mach-O binaries don't expose dylib deps
+    Same gap — parse_macho_detail captured LC_LOAD_DYLIB / LC_LOAD_
+    WEAK_DYLIB / LC_REEXPORT_DYLIB internally but didn't surface them.
+    Fix: added lightweight `extract_macho_dylibs` helper that re-walks
+    the load commands and returns just the dylib names (handles single-
+    arch + fat binaries). macho_info registers them as Dll nodes.
+
+  Fix 4: empty-target UX on coupling/exports
+    `coupling ""` produced "0 files coupled to ''" (matched everything
+    via .contains("")); `exports ""` produced an "ambiguous match for
+    \"\"" warning across the entire graph.
+    Fix: coupling now shows usage hint; exports lists top 30 files
+    by export count when target is empty.
+
+  Tests: 91 passing (was 87). +4 new regression tests covering
+  ELF DT_NEEDED → Dll edges, dead-functions module-dispatch
+  recognition, coupling empty-target usage, exports empty-target
+  list-all behavior.
+

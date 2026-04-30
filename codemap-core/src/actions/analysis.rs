@@ -185,6 +185,9 @@ pub fn phone_home(graph: &Graph) -> String {
 // ── 5. coupling ─────────────────────────────────────────────────────
 
 pub fn coupling(graph: &Graph, target: &str) -> String {
+    if target.trim().is_empty() {
+        return "Usage: codemap coupling <pattern>  (e.g. \"react\", \"src/utils\")".to_string();
+    }
     let mut results: Vec<String> = Vec::new();
     for (id, node) in &graph.nodes {
         if node.imports.iter().any(|imp| imp.contains(target)) {
@@ -329,6 +332,29 @@ pub fn circular(graph: &Graph) -> String {
 // ── 8. list_exports ─────────────────────────────────────────────────
 
 pub fn list_exports(graph: &Graph, target: &str) -> String {
+    // Empty target: list every file's exports (top 30 by export count).
+    // Pre-fix this fell through to find_node("") which warned about an
+    // ambiguous match across the entire graph.
+    if target.trim().is_empty() {
+        let mut by_file: Vec<(&str, &Vec<String>)> = graph.nodes.values()
+            .filter(|n| !n.exports.is_empty())
+            .map(|n| (n.id.as_str(), &n.exports))
+            .collect();
+        by_file.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
+        if by_file.is_empty() {
+            return "No exports found across the project.".to_string();
+        }
+        let mut lines = vec![
+            format!("Top {} files by export count (codemap exports <file> for one):",
+                by_file.len().min(30)),
+            String::new(),
+        ];
+        for (id, exports) in by_file.iter().take(30) {
+            lines.push(format!("  {:>4} exports  {}", exports.len(), id));
+        }
+        return lines.join("\n");
+    }
+
     let node = match graph.find_node(target) {
         Some(n) => n,
         None => return format!("File not found: {}", target),

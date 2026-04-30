@@ -1,6 +1,6 @@
 [package]
 name = "codemap-cli"
-version = "5.7.2"
+version = "5.7.3"
 edition = "2021"
 
 [[bin]]

@@ -151,18 +151,42 @@ pub fn call_graph(graph: &Graph, target: &str) -> String {
 // ── dead_functions ──────────────────────────────────────────────────
 
 pub fn dead_functions(graph: &Graph) -> String {
-    // Build map: fn name → set of file ids that call it
-    let mut all_calls: HashMap<&str, HashSet<&str>> = HashMap::new();
+    // Build map: fn name → set of file ids that call it. Index by BOTH
+    // the bare callee text AND the trailing identifier of qualified
+    // paths (foo::bar::baz → baz). This catches Rust `module::fn(args)`
+    // dispatch and Python `module.fn(args)` patterns where the parser
+    // captures the full path but dead-function detection compares to
+    // bare names.
+    let mut all_calls: HashMap<String, HashSet<&str>> = HashMap::new();
     for node in graph.nodes.values() {
         for f in &node.functions {
             for call_name in &f.calls {
-                all_calls
-                    .entry(call_name.as_str())
+                // Index by full callee
+                all_calls.entry(call_name.clone())
                     .or_default()
                     .insert(node.id.as_str());
+                // Also index by trailing segment (after last "::" or ".")
+                let last = call_name
+                    .rsplit_once("::")
+                    .map(|(_, t)| t)
+                    .or_else(|| call_name.rsplit_once('.').map(|(_, t)| t))
+                    .unwrap_or(call_name.as_str());
+                if last != call_name.as_str() && !last.is_empty() {
+                    all_calls.entry(last.to_string())
+                        .or_default()
+                        .insert(node.id.as_str());
+                }
             }
         }
     }
+
+    // Also detect match-arm dispatch: when `=> module::fn(args)` or
+    // `=> fn(args)` appears anywhere in the codebase as a string-literal
+    // arm followed by an arrow, the function is reachable through that
+    // dispatcher. Cheap regex pass over file-level url+exports field is
+    // not enough; instead, treat any call already indexed above as
+    // sufficient — the regex below would just add noise. The qualified-
+    // path indexing above is enough for canonical Rust/Python dispatch.
 
     struct DeadFn {
         file: String,

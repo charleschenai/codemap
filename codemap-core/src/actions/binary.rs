@@ -144,13 +144,27 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
         Ok(d) => d,
         Err(e) => return e,
     };
-    match parse_elf(&data) {
-        Ok(info) => info,
+    match parse_elf_with_deps(&data) {
+        Ok((info, needed)) => {
+            // Register every NEEDED library as a Dll node with edges from
+            // the binary, mirroring pe-imports' PE → Dll structure. Lets
+            // pagerank/meta-path see ELF library dependencies.
+            let bin_id = format!("elf:{target}");
+            for libname in &needed {
+                let dll_id = format!("dll:{}", libname.to_ascii_lowercase());
+                graph.ensure_typed_node(&dll_id, EntityKind::Dll, &[
+                    ("name", libname),
+                    ("source_format", "elf"),
+                ]);
+                graph.add_edge(&bin_id, &dll_id);
+            }
+            info
+        }
         Err(e) => format!("ELF parse error: {e}"),
     }
 }
 
-fn parse_elf(data: &[u8]) -> Result<String, String> {
+fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>), String> {
     if data.len() < 64 {
         return Err("File too small for ELF".to_string());
     }
@@ -451,7 +465,7 @@ fn parse_elf(data: &[u8]) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    Ok((out, needed))
 }
 
 fn read_elf_section_data(
@@ -482,6 +496,26 @@ fn read_elf_section_data(
 
 pub fn macho_info(graph: &mut Graph, target: &str) -> String {
     register_binary(graph, target, EntityKind::MachoBinary, "macho");
+    // Snapshot dylibs by parsing once before formatting; we use the
+    // formatted string for display and the dylib list for graph
+    // registration. The parser stuffs LC_LOAD_DYLIB / LC_LOAD_WEAK_DYLIB
+    // names into a list during the load-command walk; we re-walk lightly
+    // here to extract them for graphing without disturbing the
+    // 1500-line existing macho parser.
+    let data_for_dylibs = load_binary(target).unwrap_or_default();
+    if !data_for_dylibs.is_empty() {
+        let dylibs = extract_macho_dylibs(&data_for_dylibs).unwrap_or_default();
+        let bin_id = format!("macho:{target}");
+        for libname in &dylibs {
+            let dll_id = format!("dll:{}", libname.to_ascii_lowercase());
+            graph.ensure_typed_node(&dll_id, EntityKind::Dll, &[
+                ("name", libname),
+                ("source_format", "macho"),
+            ]);
+            graph.add_edge(&bin_id, &dll_id);
+        }
+    }
+
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -490,6 +524,61 @@ pub fn macho_info(graph: &mut Graph, target: &str) -> String {
         Ok(info) => info,
         Err(e) => format!("Mach-O parse error: {e}"),
     }
+}
+
+/// Lightweight LC_LOAD_DYLIB / LC_LOAD_WEAK_DYLIB / LC_REEXPORT_DYLIB
+/// extractor for graph registration. Mirrors the inline parsing in
+/// parse_macho_detail but skips all the formatting work — just returns
+/// the dylib names. Handles single-arch and fat binaries (returns the
+/// dylibs from the first contained arch in fat case).
+fn extract_macho_dylibs(data: &[u8]) -> Result<Vec<String>, String> {
+    if data.len() < 4 { return Ok(Vec::new()); }
+    let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    let (slice, is_64, is_le) = match magic {
+        0xFEEDFACE => (data, false, true),     // 32-bit LE
+        0xFEEDFACF => (data, true, true),      // 64-bit LE
+        0xCEFAEDFE => (data, false, false),    // 32-bit BE
+        0xCFFAEDFE => (data, true, false),     // 64-bit BE
+        // Fat magic: pick first arch
+        0xCAFEBABE | 0xBEBAFECA => {
+            if data.len() < 8 { return Ok(Vec::new()); }
+            let nfat = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
+            if nfat == 0 || data.len() < 8 + 20 { return Ok(Vec::new()); }
+            // Each fat_arch is 20 bytes: cputype, cpusubtype, offset, size, align
+            let off = u32::from_be_bytes([data[8 + 8], data[8 + 9], data[8 + 10], data[8 + 11]]) as usize;
+            let size = u32::from_be_bytes([data[8 + 12], data[8 + 13], data[8 + 14], data[8 + 15]]) as usize;
+            if off + size > data.len() { return Ok(Vec::new()); }
+            let inner = &data[off..off + size];
+            return extract_macho_dylibs(inner);
+        }
+        _ => return Ok(Vec::new()),
+    };
+    let r32 = if is_le { read_u32_le } else { read_u32_be };
+    let header_size = if is_64 { 32 } else { 28 };
+    if slice.len() < header_size { return Ok(Vec::new()); }
+    let ncmds = r32(slice, 16)? as usize;
+    let mut offset = header_size;
+    let mut dylibs = Vec::new();
+    for _ in 0..ncmds {
+        if offset + 8 > slice.len() { break; }
+        let cmd = r32(slice, offset)?;
+        let cmdsize = r32(slice, offset + 4)? as usize;
+        if cmdsize == 0 { break; }
+        // LC_LOAD_DYLIB (0x0C), LC_LOAD_WEAK_DYLIB (0x80000018), LC_REEXPORT_DYLIB (0x1F)
+        if cmd == 0x0C || cmd == 0x1F || cmd == 0x80000018 {
+            if offset + 12 <= slice.len() {
+                let str_offset = r32(slice, offset + 8)? as usize;
+                if str_offset < cmdsize && offset + str_offset < slice.len() {
+                    let name = read_cstring(slice, offset + str_offset);
+                    if !name.is_empty() {
+                        dylibs.push(name);
+                    }
+                }
+            }
+        }
+        offset += cmdsize;
+    }
+    Ok(dylibs)
 }
 
 fn parse_macho(data: &[u8]) -> Result<String, String> {
