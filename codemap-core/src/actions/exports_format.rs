@@ -171,6 +171,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             AndroidPackage    => (165, 214, 167),
             Permission        => (255, 204, 128),
             Secret            => (211, 47, 47),
+            Dependency        => (179, 229, 252),
         }
     }
 

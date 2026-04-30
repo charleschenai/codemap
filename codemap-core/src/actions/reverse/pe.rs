@@ -540,7 +540,49 @@ pub fn pe_resources(graph: &mut Graph, target: &str) -> String {
     ensure_pe_binary_node(graph, target, "pe_resources");
 
     match parse_pe_resources(&data) {
-        Ok(info) => info,
+        Ok(info) => {
+            // 5.19.0: lift VS_VERSION_INFO key/value pairs from the parsed
+            // text output and attach them as attrs on the PeBinary node.
+            // Lets `--type pe` filtering grep on company / product name
+            // for cross-binary inventory ("every binary signed by X" /
+            // "every NSIS-built installer in this corpus"). Stable
+            // internal format means no regex needed.
+            let bin_id = format!("pe:{target}");
+            // Whitelist of well-known VS_VERSION_INFO keys worth lifting
+            // (others are noise like CompanyShort or vendor-specific).
+            let interesting: &[&str] = &[
+                "FileVersion", "ProductVersion", "CompanyName",
+                "FileDescription", "OriginalFilename", "ProductName",
+                "LegalCopyright", "InternalName", "File Version",
+                "Product Version",
+            ];
+            // Collect into a vec first so we don't double-borrow graph.nodes.
+            let mut found: Vec<(String, String)> = Vec::new();
+            for line in info.lines() {
+                let trimmed = line.trim_start();
+                for key in interesting {
+                    let prefix = format!("{key}: ");
+                    if let Some(val) = trimmed.strip_prefix(&prefix) {
+                        // Normalize key: spaces → underscores, lowercase.
+                        let attr_key = format!("vsinfo_{}",
+                            key.to_ascii_lowercase().replace(' ', "_"));
+                        let attr_val: String = val.trim().chars().take(200).collect();
+                        if !attr_val.is_empty() {
+                            found.push((attr_key, attr_val));
+                        }
+                        break;
+                    }
+                }
+            }
+            if !found.is_empty() {
+                if let Some(node) = graph.nodes.get_mut(&bin_id) {
+                    for (k, v) in found {
+                        node.attrs.insert(k, v);
+                    }
+                }
+            }
+            info
+        }
         Err(e) => format!("PE parse error: {e}"),
     }
 }
@@ -1100,7 +1142,45 @@ pub fn pe_debug(graph: &mut Graph, target: &str) -> String {
     };
 
     match parse_pe_debug_info(&data) {
-        Ok(info) => info,
+        Ok(info) => {
+            // 5.19.0: lift the CodeView PDB path + GUID from the parsed
+            // text output and register them as a Symbol node hanging off
+            // the PE binary. Edge: pe → pdb_symbol. Useful for matching
+            // a stripped binary to its symbol-server PDB without re-running
+            // the PE walk. Stable internal format ("  PDB: ", "  GUID: ",
+            // "  Age: ") makes regex unnecessary.
+            use crate::types::EntityKind;
+            let mut pdb_path: Option<&str> = None;
+            let mut guid: Option<&str> = None;
+            let mut age: Option<&str> = None;
+            for line in info.lines() {
+                if let Some(rest) = line.strip_prefix("  PDB: ") {
+                    pdb_path = Some(rest.trim());
+                } else if let Some(rest) = line.strip_prefix("  GUID: ") {
+                    guid = Some(rest.trim());
+                } else if let Some(rest) = line.strip_prefix("  Age: ") {
+                    age = Some(rest.trim());
+                }
+            }
+            if let Some(path) = pdb_path {
+                if !path.is_empty() {
+                    let bin_id = format!("pe:{target}");
+                    let pdb_basename = path.rsplit(['\\', '/']).next().unwrap_or(path);
+                    let sym_id = format!("symbol:pdb:{target}::{pdb_basename}");
+                    let mut attrs: Vec<(&str, &str)> = vec![
+                        ("name", pdb_basename),
+                        ("kind_detail", "pdb_path"),
+                        ("source", "pe_debug"),
+                        ("pdb_path", path),
+                    ];
+                    if let Some(g) = guid { attrs.push(("codeview_guid", g)); }
+                    if let Some(a) = age  { attrs.push(("codeview_age", a)); }
+                    graph.ensure_typed_node(&sym_id, EntityKind::Symbol, &attrs);
+                    graph.add_edge(&bin_id, &sym_id);
+                }
+            }
+            info
+        }
         Err(e) => format!("PE parse error: {e}"),
     }
 }

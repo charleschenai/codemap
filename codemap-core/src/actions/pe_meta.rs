@@ -374,6 +374,18 @@ pub fn pe_meta(graph: &mut Graph, target: &str) -> String {
         if let Some(node) = graph.nodes.get_mut(&bin_id) {
             node.attrs.insert("entry_rva".into(), format!("{rva:#010x}"));
         }
+        // 5.19.0: also register the entry point as a first-class
+        // BinaryFunction node, parity with ELF/Mach-O entry promotion
+        // and the existing TLS-callback promotion above.
+        let func_id = format!("bin_func:pe:{target}::entry");
+        let rva_str = format!("{rva:#010x}");
+        graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+            ("name", "entry_point"),
+            ("binary_format", "pe"),
+            ("kind_detail", "entry_point"),
+            ("rva", &rva_str),
+        ]);
+        graph.add_edge(&bin_id, &func_id);
     }
 
     lines.join("\n")

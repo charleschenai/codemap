@@ -196,6 +196,17 @@ pub enum EntityKind {
     /// Killer queries: `meta-path "source->secret"` for inventory,
     /// `pagerank --type secret` for files concentrating risk.
     Secret,
+    /// Package-manifest dependency (Cargo.toml, package.json,
+    /// pyproject.toml, go.mod, gemspec, composer.json, pom.xml,
+    /// requirements.txt, Pipfile, etc.). Discovered by `dep-tree`.
+    /// Edges: manifest → dependency. attrs: name, version, group
+    /// (dependencies / dev-dependencies / build-dependencies / etc.),
+    /// ecosystem (cargo / npm / pypi / go / gem / composer / maven),
+    /// is_dead (set true by `dead-deps` when no import resolves).
+    /// Killer queries: `meta-path "source->dependency"` for inventory,
+    /// `pagerank --type dependency` for the most-used deps across a
+    /// monorepo, attribute filter on `is_dead=true` for cleanup PRs.
+    Dependency,
 }
 
 impl EntityKind {
@@ -231,6 +242,7 @@ impl EntityKind {
             EntityKind::AndroidPackage => "apk",
             EntityKind::Permission => "permission",
             EntityKind::Secret => "secret",
+            EntityKind::Dependency => "dependency",
         }
     }
 
@@ -268,6 +280,7 @@ impl EntityKind {
             "apk" | "android" | "androidpackage" => EntityKind::AndroidPackage,
             "permission" | "perm" => EntityKind::Permission,
             "secret" | "credential" | "leaked" => EntityKind::Secret,
+            "dep" | "dependency" | "package" => EntityKind::Dependency,
             _ => return None,
         })
     }

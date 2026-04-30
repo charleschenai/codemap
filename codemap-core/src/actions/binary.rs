@@ -145,7 +145,7 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
     match parse_elf_with_deps(&data) {
-        Ok((info, needed)) => {
+        Ok((info, needed, entry)) => {
             // Register every NEEDED library as a Dll node with edges from
             // the binary, mirroring pe-imports' PE → Dll structure. Lets
             // pagerank/meta-path see ELF library dependencies.
@@ -157,6 +157,23 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
                     ("source_format", "elf"),
                 ]);
                 graph.add_edge(&bin_id, &dll_id);
+            }
+
+            // 5.19.0: promote the ELF entry point (e_entry) to a
+            // BinaryFunction node so it participates in centrality /
+            // meta-path queries. Mirrors pe_meta.rs's TLS-callback
+            // promotion: kind_detail=entry_point + entry_addr attr.
+            // Most ELF binaries: entry → _start → __libc_start_main → main.
+            if entry != 0 {
+                let func_id = format!("bin_func:elf:{target}::entry");
+                let entry_str = format!("{entry:#018x}");
+                graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                    ("name", "entry_point"),
+                    ("binary_format", "elf"),
+                    ("kind_detail", "entry_point"),
+                    ("entry_addr", &entry_str),
+                ]);
+                graph.add_edge(&bin_id, &func_id);
             }
 
             // Extract free-form strings from .rodata + .data and promote
@@ -172,7 +189,7 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
     }
 }
 
-fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>), String> {
+fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>, u64), String> {
     if data.len() < 64 {
         return Err("File too small for ELF".to_string());
     }
@@ -481,7 +498,7 @@ fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>), String> {
         }
     }
 
-    Ok((out, needed))
+    Ok((out, needed, entry))
 }
 
 fn read_elf_section_data(
@@ -529,6 +546,21 @@ pub fn macho_info(graph: &mut Graph, target: &str) -> String {
                 ("source_format", "macho"),
             ]);
             graph.add_edge(&bin_id, &dll_id);
+        }
+        // 5.19.0: promote LC_MAIN entryoff to a BinaryFunction node so
+        // Mach-O entry points participate in centrality / meta-path
+        // queries the same way ELF/PE entry points do. Returns None for
+        // older binaries using LC_UNIXTHREAD (rare on modern macOS).
+        if let Some(entry) = extract_macho_entry(&data_for_dylibs) {
+            let func_id = format!("bin_func:macho:{target}::entry");
+            let entry_str = format!("{entry:#018x}");
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", "entry_point"),
+                ("binary_format", "macho"),
+                ("kind_detail", "entry_point"),
+                ("entry_addr", &entry_str),
+            ]);
+            graph.add_edge(&bin_id, &func_id);
         }
     }
 
@@ -595,6 +627,54 @@ fn extract_macho_dylibs(data: &[u8]) -> Result<Vec<String>, String> {
         offset += cmdsize;
     }
     Ok(dylibs)
+}
+
+/// Walk Mach-O load commands looking for LC_MAIN (0x80000028) and return
+/// the file-relative entry offset (entryoff). Returns None for fat binaries
+/// when the first arch has no LC_MAIN, or for older binaries that use
+/// LC_UNIXTHREAD instead. Mirrors extract_macho_dylibs's walking pattern.
+fn extract_macho_entry(data: &[u8]) -> Option<u64> {
+    if data.len() < 4 { return None; }
+    let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    let (slice, is_64, is_le) = match magic {
+        0xFEEDFACE => (data, false, true),
+        0xFEEDFACF => (data, true, true),
+        0xCEFAEDFE => (data, false, false),
+        0xCFFAEDFE => (data, true, false),
+        0xCAFEBABE | 0xBEBAFECA => {
+            if data.len() < 8 + 20 { return None; }
+            let off = u32::from_be_bytes([data[16], data[17], data[18], data[19]]) as usize;
+            let size = u32::from_be_bytes([data[20], data[21], data[22], data[23]]) as usize;
+            if off + size > data.len() { return None; }
+            return extract_macho_entry(&data[off..off + size]);
+        }
+        _ => return None,
+    };
+    let r32 = if is_le { read_u32_le } else { read_u32_be };
+    let header_size = if is_64 { 32 } else { 28 };
+    if slice.len() < header_size { return None; }
+    let ncmds = r32(slice, 16).ok()? as usize;
+    let mut offset = header_size;
+    for _ in 0..ncmds {
+        if offset + 8 > slice.len() { break; }
+        let cmd = r32(slice, offset).ok()?;
+        let cmdsize = r32(slice, offset + 4).ok()? as usize;
+        if cmdsize == 0 { break; }
+        // LC_MAIN: cmd=0x80000028, payload = u64 entryoff + u64 stacksize.
+        if cmd == 0x80000028 && offset + 16 <= slice.len() {
+            let entry = if is_le {
+                read_u64_le(slice, offset + 8).ok()?
+            } else {
+                let bytes = &slice[offset + 8..offset + 16];
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(bytes);
+                u64::from_be_bytes(buf)
+            };
+            return Some(entry);
+        }
+        offset += cmdsize;
+    }
+    None
 }
 
 fn parse_macho(data: &[u8]) -> Result<String, String> {

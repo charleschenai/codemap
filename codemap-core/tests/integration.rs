@@ -1521,3 +1521,117 @@ fn test_pe_meta_promotes_rich_and_tls_to_graph() {
     // Compiler kind must still parse — Rich-header-promoted nodes use this.
     assert_eq!(EntityKind::from_str("compiler"), Some(EntityKind::Compiler));
 }
+
+/// Verifies 5.19.0's dep_tree promotion: each declared dependency in a
+/// manifest becomes a Dependency graph node with edge from the manifest.
+/// Ecosystem prefixes prevent same-name collisions (Cargo `serde` ≠ npm
+/// `serde`).
+#[test]
+fn test_dep_tree_promotes_to_graph_nodes() {
+    let tmp = std::env::temp_dir().join(format!("codemap-deptree-promote-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+
+    write(&tmp.join("Cargo.toml"), "\
+[package]
+name = \"sample\"
+version = \"0.1.0\"
+
+[dependencies]
+serde = \"1.0\"
+tokio = { version = \"1\", features = [\"full\"] }
+
+[dev-dependencies]
+proptest = \"1\"
+");
+    write(&tmp.join("package.json"), "{\n  \"dependencies\": {\n    \"react\": \"^18\",\n    \"lodash\": \"4.17.21\"\n  },\n  \"devDependencies\": {\n    \"jest\": \"29\"\n  }\n}\n");
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let _ = execute(&mut g, "dep-tree", "", false).unwrap();
+
+    let deps: Vec<&codemap_core::types::GraphNode> = g.nodes.values()
+        .filter(|n| n.kind == EntityKind::Dependency).collect();
+
+    let names: Vec<(String, String)> = deps.iter()
+        .map(|n| (
+            n.attrs.get("ecosystem").cloned().unwrap_or_default(),
+            n.attrs.get("name").cloned().unwrap_or_default(),
+        )).collect();
+
+    // Cargo deps
+    assert!(names.iter().any(|(e, n)| e == "cargo" && n == "serde"),
+        "expected cargo:serde Dependency node, got: {names:?}");
+    assert!(names.iter().any(|(e, n)| e == "cargo" && n == "tokio"),
+        "expected cargo:tokio Dependency node, got: {names:?}");
+    assert!(names.iter().any(|(e, n)| e == "cargo" && n == "proptest"),
+        "expected cargo:proptest dev-dep node, got: {names:?}");
+
+    // npm deps
+    assert!(names.iter().any(|(e, n)| e == "npm" && n == "react"),
+        "expected npm:react Dependency node, got: {names:?}");
+    assert!(names.iter().any(|(e, n)| e == "npm" && n == "lodash"),
+        "expected npm:lodash Dependency node, got: {names:?}");
+
+    // Each dep should have an edge from its manifest.
+    let cargo_node = g.nodes.values()
+        .find(|n| n.kind == EntityKind::Dependency
+            && n.attrs.get("name").map(|s| s == "tokio").unwrap_or(false))
+        .unwrap();
+    let cargo_manifest = g.nodes.values()
+        .find(|n| n.id.ends_with("Cargo.toml"))
+        .expect("Cargo.toml not registered");
+    assert!(cargo_manifest.imports.iter().any(|i| i == &cargo_node.id),
+        "expected Cargo.toml → cargo:tokio edge");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+/// Verifies 5.19.0's api_surface promotion: discovered HTTP routes
+/// become HttpEndpoint graph nodes with edges from their source file.
+#[test]
+fn test_api_surface_promotes_routes_to_endpoints() {
+    let tmp = std::env::temp_dir().join(format!("codemap-apisurface-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+
+    write(&tmp.join("app.py"), "\
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get(\"/users\")
+def list_users():
+    return []
+
+@router.post(\"/orders\")
+def create_order():
+    return {}
+");
+
+    let mut g = scan(ScanOptions {
+        dirs: vec![tmp.clone()],
+        include_paths: vec![],
+        no_cache: true,
+        quiet: true,
+    }).expect("scan should succeed");
+
+    let _ = execute(&mut g, "api-surface", "", false).unwrap();
+
+    let endpoints: Vec<&codemap_core::types::GraphNode> = g.nodes.values()
+        .filter(|n| n.kind == EntityKind::HttpEndpoint)
+        .filter(|n| n.attrs.get("discovered_via")
+            .map(|s| s == "api_surface").unwrap_or(false))
+        .collect();
+
+    let urls: Vec<&String> = endpoints.iter()
+        .filter_map(|n| n.attrs.get("url")).collect();
+    assert!(urls.iter().any(|u| u == &"/users"),
+        "expected /users HttpEndpoint discovered_via=api_surface; got {urls:?}");
+    assert!(urls.iter().any(|u| u == &"/orders"),
+        "expected /orders HttpEndpoint discovered_via=api_surface; got {urls:?}");
+
+    let _ = fs::remove_dir_all(&tmp);
+}

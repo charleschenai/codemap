@@ -1768,3 +1768,96 @@ unaffected.
   Action count: 163 (unchanged — all 5 LSP actions already
   existed). EntityKinds: 29 (unchanged; LSP symbols reuse the
   existing Symbol kind via attrs).
+
+
+[2026-04-30] feat: 5.19.0 — close more graph-integration gaps (#53)
+  source: post-5.18.0 audit identified more actions parsing
+  structured findings without writing to the heterogeneous
+  graph. This release closes gaps G2/G3/G7/G8 + adds the
+  Dependency EntityKind.
+
+  Promotions added:
+
+  G7: dep_tree → Dependency nodes + dead_deps marking.
+     - New EntityKind Dependency (29 → 30). Each declared dep
+       promotes to dep:{ecosystem}:{name} node, namespaced by
+       package ecosystem (cargo / npm / pypi / go / composer /
+       maven / rubygems) so same-name pkgs across ecosystems
+       don t collide. attrs: name, version, group (deps /
+       dev-deps / etc.), ecosystem, optionally is_dead.
+     - dep_tree + dead_deps signatures flipped to &mut Graph.
+     - Both functions now self-discover manifests by walking
+       scan_dir directly, since the scanner s SUPPORTED_EXTS
+       excludes .toml / .json (avoiding lockfile noise) and
+       previously dep_tree found nothing on real codebases.
+     - dead_deps marks dead Dependency nodes with is_dead=true
+       for cleanup-PR generation via attribute filter.
+     - Killer queries: meta-path "source->dependency" for
+       inventory, pagerank --type dependency for most-used deps
+       in a monorepo, attribute-filter is_dead=true for cleanup.
+
+  G7: api_surface → HttpEndpoint nodes for routes.
+     - signature flipped to &mut Graph. Each discovered HTTP
+       route (Flask @app.route / FastAPI @router.get / Express
+       app.get) promotes to ep:{path} HttpEndpoint with
+       discovered_via=api_surface attr + edge from source file.
+       Joins the same graph surface as openapi-schema /
+       web-blueprint / robots-parse for uniform meta-path
+       "source->endpoint" queries across discovery modes.
+
+  G3: pe_debug → Symbol node for PDB path.
+     - PDB filename + CodeView GUID + age now promote to a
+       Symbol node (kind_detail=pdb_path) hanging off the PE
+       binary. Implementation lifts the values from the parsed
+       text output via stable-format prefix matching ("  PDB: "
+       / "  GUID: " / "  Age: ") to avoid duplicating the PE
+       walk. Useful for matching a stripped binary to its
+       symbol-server PDB without re-running pe_debug.
+
+  G8: ELF/Mach-O entry points → BinaryFunction nodes.
+     - parse_elf_with_deps now also returns e_entry; elf_info
+       promotes it to bin_func:elf:{target}::entry with
+       binary_format=elf, kind_detail=entry_point.
+     - New extract_macho_entry walks LC_MAIN (cmd=0x80000028);
+       macho_info promotes entryoff to bin_func:macho:{target}
+       ::entry. Returns None for older binaries using
+       LC_UNIXTHREAD (rare on modern macOS). Handles fat
+       binaries by recursing into first arch.
+     - pe_meta s entry_rva (was attrs-only) also promotes to
+       a BinaryFunction node now, parity across formats. All
+       three populate the same kind_detail=entry_point shape
+       so cross-binary attribute queries work uniformly.
+
+  G2: pe_resources → VS_VERSION_INFO attrs on PeBinary.
+     - Same stable-prefix-lift technique as pe_debug. Lifts
+       FileVersion / ProductVersion / CompanyName / FileDescription
+       / OriginalFilename / ProductName / LegalCopyright /
+       InternalName as vsinfo_* attrs on PeBinary node. Cross-
+       binary inventory ("every binary signed by Microsoft" /
+       "every NSIS-built installer in this corpus") via
+       attribute filter.
+
+  Bridges sweep (gpu_functions, monkey_patches, dispatch_map):
+     - read-only over scan-built node.bridges data (already
+       populated during scan walk). No gap. Confirmed.
+
+  Tests: 193 passing (was 191). +2 regression tests:
+    - test_dep_tree_promotes_to_graph_nodes — Cargo.toml +
+      package.json with three Cargo deps (incl. dev-dep) and
+      two npm deps; asserts ecosystem-namespaced Dependency
+      nodes registered with manifest→dep edges.
+    - test_api_surface_promotes_routes_to_endpoints — FastAPI
+      sample.py with @router.get + @router.post; asserts
+      HttpEndpoint nodes registered with discovered_via=
+      api_surface and correct urls (/users + /orders).
+
+  Action count: 163 (unchanged — promotions added to existing
+  actions, no new actions). EntityKinds: 29 → 30 (+Dependency).
+
+  Outstanding gaps after this ship:
+    - G5 binary_diff (still &mut Graph but ignored — needs
+      single-graph-vs-cross-graph design pass).
+    - G6 ml.rs gguf/safetensors/onnx (only register parent
+      MlModel; tensors / operators not promoted).
+    - Other follow-ups identified mid-session: nothing
+      blocking, all extension work.

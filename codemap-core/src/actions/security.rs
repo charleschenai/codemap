@@ -464,24 +464,84 @@ fn is_manifest(filename: &str) -> bool {
     )
 }
 
-pub fn dep_tree(graph: &Graph, target: &str) -> String {
+/// Walk `graph.scan_dir` for known manifest filenames and ensure each as a
+/// SourceFile node. Needed because the scanner's SUPPORTED_EXTS list
+/// excludes .toml/.json (avoiding lockfile/config noise), so manifests
+/// don't otherwise land in the graph and dep_tree/dead_deps would find
+/// nothing on real codebases.
+fn discover_manifests(graph: &mut Graph) {
+    use crate::types::EntityKind;
+    fn walk(dir: &std::path::Path, depth: usize, root: &std::path::Path,
+            out: &mut Vec<String>) {
+        if depth > 8 { return; }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().into_owned();
+            if name_str.starts_with('.') { continue; }
+            // Skip noisy dirs that mirror `scanner.rs::SKIP_DIRS`.
+            if matches!(name_str.as_str(),
+                "node_modules" | "target" | "dist" | "build" | "vendor"
+                | "__pycache__" | "venv" | ".venv" | ".git") { continue; }
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                walk(&path, depth + 1, root, out);
+            } else if ft.is_file() && is_manifest(&name_str) {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    let root = std::path::PathBuf::from(&graph.scan_dir);
+    let mut found = Vec::new();
+    walk(&root, 0, &root, &mut found);
+    for rel in found {
+        graph.ensure_typed_node(&rel, EntityKind::SourceFile, &[("path", &rel)]);
+    }
+}
+
+/// Map a manifest file path to its package ecosystem name. Used to namespace
+/// Dependency node IDs so the same package name from different ecosystems
+/// (e.g. `serde` Cargo vs `serde` npm) doesn't collide.
+fn ecosystem_from_manifest(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with("cargo.toml") { "cargo" }
+    else if lower.ends_with("package.json") { "npm" }
+    else if lower.ends_with("pyproject.toml") || lower.ends_with("requirements.txt")
+        || lower.ends_with("pipfile") || lower.ends_with("setup.py") { "pypi" }
+    else if lower.ends_with("go.mod") { "go" }
+    else if lower.ends_with("composer.json") { "composer" }
+    else if lower.ends_with("pom.xml") || lower.ends_with("build.gradle") { "maven" }
+    else if lower.ends_with(".gemspec") || lower.ends_with("gemfile") { "rubygems" }
+    else { "unknown" }
+}
+
+pub fn dep_tree(graph: &mut Graph, target: &str) -> String {
     let mut manifest_deps: BTreeMap<String, Vec<DepEntry>> = BTreeMap::new();
 
-    for file_id in graph.nodes.keys() {
-        if !is_manifest(file_id) {
+    // 5.19.0: self-sufficient manifest discovery. Scanner doesn't index
+    // .toml / .json files, so previously dep_tree found nothing on real
+    // codebases unless the user had separately ensured the manifests
+    // into the graph. Walk scan_dir directly for known manifest names.
+    discover_manifests(graph);
+
+    for file_id in graph.nodes.keys().cloned().collect::<Vec<_>>() {
+        if !is_manifest(&file_id) {
             continue;
         }
         if !target.is_empty() && !file_id.contains(target) && file_id != target {
             continue;
         }
-        let path = Path::new(&graph.scan_dir).join(file_id);
+        let path = Path::new(&graph.scan_dir).join(&file_id);
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let deps = parse_manifest(file_id, &content);
+        let deps = parse_manifest(&file_id, &content);
         if !deps.is_empty() {
-            manifest_deps.insert(file_id.clone(), deps);
+            manifest_deps.insert(file_id, deps);
         }
     }
 
@@ -495,6 +555,28 @@ pub fn dep_tree(graph: &Graph, target: &str) -> String {
 
     let total_manifests = manifest_deps.len();
     let total_deps: usize = manifest_deps.values().map(|v| v.len()).sum();
+
+    // 5.19.0: promote each declared dep to a Dependency graph node with
+    // edge from its manifest. Namespaced by ecosystem to avoid collisions
+    // (Cargo `serde` ≠ npm `serde`). Unlocks
+    //   meta-path "source->dependency"     (every manifest's deps)
+    //   pagerank --type dependency        (most-used deps in a monorepo)
+    use crate::types::EntityKind;
+    for (manifest_id, deps) in &manifest_deps {
+        let eco = ecosystem_from_manifest(manifest_id);
+        graph.ensure_typed_node(manifest_id, EntityKind::SourceFile,
+            &[("path", manifest_id)]);
+        for dep in deps {
+            let dep_id = format!("dep:{eco}:{}", dep.name);
+            graph.ensure_typed_node(&dep_id, EntityKind::Dependency, &[
+                ("name", dep.name.as_str()),
+                ("version", dep.version.as_str()),
+                ("group", dep.group.as_str()),
+                ("ecosystem", eco),
+            ]);
+            graph.add_edge(manifest_id, &dep_id);
+        }
+    }
 
     let mut lines = vec![
         format!("=== Dependency Tree ({} manifests, {} deps) ===", total_manifests, total_deps),
@@ -528,20 +610,23 @@ pub fn dep_tree(graph: &Graph, target: &str) -> String {
 
 // ── 3. dead_deps ───────────────────────────────────────────────────
 
-pub fn dead_deps(graph: &Graph, _target: &str) -> String {
+pub fn dead_deps(graph: &mut Graph, _target: &str) -> String {
+    // 5.19.0: same self-sufficient discovery as dep_tree.
+    discover_manifests(graph);
+
     // Step 1: Parse all manifests to get declared dependencies
     let mut declared: HashMap<String, (String, String)> = HashMap::new(); // name -> (manifest, group)
 
-    for file_id in graph.nodes.keys() {
-        if !is_manifest(file_id) {
+    for file_id in graph.nodes.keys().cloned().collect::<Vec<_>>() {
+        if !is_manifest(&file_id) {
             continue;
         }
-        let path = Path::new(&graph.scan_dir).join(file_id);
+        let path = Path::new(&graph.scan_dir).join(&file_id);
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let deps = parse_manifest(file_id, &content);
+        let deps = parse_manifest(&file_id, &content);
         for dep in deps {
             declared.insert(dep.name.clone(), (file_id.clone(), dep.group.clone()));
         }
@@ -618,6 +703,18 @@ pub fn dead_deps(graph: &Graph, _target: &str) -> String {
 
     dead.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
+    // 5.19.0: mark each dead Dependency node with is_dead=true so cleanup
+    // PRs can be generated from `attribute filter is_dead=true`. Requires
+    // dep_tree to have populated Dependency nodes first; if not, the
+    // graph.nodes.get_mut lookup is a no-op.
+    for (name, manifest, _group) in &dead {
+        let eco = ecosystem_from_manifest(manifest);
+        let dep_id = format!("dep:{eco}:{name}");
+        if let Some(node) = graph.nodes.get_mut(&dep_id) {
+            node.attrs.insert("is_dead".into(), "true".into());
+        }
+    }
+
     if dead.is_empty() {
         return format!(
             "=== Dead Dependencies ===\nAll {} declared dependencies appear to be used.",
@@ -658,7 +755,7 @@ struct ApiEntry {
     kind: &'static str, // "export", "route", "resolver", "cli"
 }
 
-pub fn api_surface(graph: &Graph, target: &str) -> String {
+pub fn api_surface(graph: &mut Graph, target: &str) -> String {
     let mut entries: Vec<ApiEntry> = Vec::new();
 
     // Route patterns
@@ -755,6 +852,32 @@ pub fn api_surface(graph: &Graph, target: &str) -> String {
         } else {
             format!("=== API Surface ===\nNo public API found matching '{}'.", target)
         };
+    }
+
+    // 5.19.0: route entries become HttpEndpoint nodes with edges from
+    // their source file. Brings api_surface findings into the same graph
+    // surface as openapi_schema / web_blueprint / robots_parse, so
+    // `meta-path "source->endpoint"` answers uniformly across discovery
+    // sources. Skips kind=export (already on graph as functions) and
+    // kind=cli/resolver (different shape).
+    use crate::types::EntityKind;
+    for entry in &entries {
+        if entry.kind != "route" { continue; }
+        // Take just the URL path part (before " -> handler" suffix).
+        let url_path = entry.name.split_whitespace().next()
+            .unwrap_or(&entry.name).to_string();
+        let ep_id = format!("ep:{}", url_path);
+        let line_str = entry.line.to_string();
+        graph.ensure_typed_node(&ep_id, EntityKind::HttpEndpoint, &[
+            ("url", url_path.as_str()),
+            ("source_kind", "api_surface"),
+            ("discovered_via", "api_surface"),
+            ("source_file", entry.file.as_str()),
+            ("line", &line_str),
+        ]);
+        graph.ensure_typed_node(&entry.file, EntityKind::SourceFile,
+            &[("path", entry.file.as_str())]);
+        graph.add_edge(&entry.file, &ep_id);
     }
 
     // Deduplicate: prefer routes/resolvers over plain exports

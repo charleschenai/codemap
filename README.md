@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.18.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.19.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -36,7 +36,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **163 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
-- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, ML model files, and **(5.17.0+) hardcoded secrets** — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `pagerank --type secret` ranks files by credential-risk concentration. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 29 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
+- **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, ML model files, **(5.17.0+) hardcoded secrets**, and **(5.19.0+) package-manifest dependencies** — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `pagerank --type secret` ranks files by credential-risk concentration. `pagerank --type dependency` ranks the most-used deps in a monorepo. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 30 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
 - **11 centrality measures (5.2.0+).** PageRank, HITS, betweenness (Brandes 2001), eigenvector, Katz, closeness, harmonic (Marchiori-Latora 2000, handles disconnected graphs), load (Newman 2001), structural-holes / brokers (Burt 1992 — finds nodes that broker between groups), VoteRank (Zhang 2016 — top-k spreaders), group centrality, percolation (Piraveenan 2013), current-flow betweenness (Newman 2005). Each accepts a kind filter for slicing the heterogeneous graph.
 
@@ -267,8 +267,8 @@ For analyzing compiled binaries, legacy databases, and applications without sour
 | `pe-strings <file>` | Extract ASCII strings from PE binaries. Each string becomes a `StringLiteral` graph node classified by intent (url / sql / path / registry / guid / base64 / hex / format-string / error-msg / email / envvar / user-agent). URL-classified strings auto-promote to `HttpEndpoint` so `meta-path "pe->string->endpoint"` works. |
 | `pe-exports <file>` | Parse the PE export directory table. Demangled names register as `Symbol` nodes; raw mangled saved as `attrs["mangled"]`. |
 | `pe-imports <file>` | Parse the PE import table — every DLL dependency + API call. Adds `Dll` nodes + `Symbol` nodes with edges. |
-| `pe-resources <file>` | Parse the PE resource directory — version info, manifests, string tables, resource counts. |
-| `pe-debug <file>` | PDB paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, POGO data. |
+| `pe-resources <file>` | Parse the PE resource directory — version info, manifests, string tables, resource counts. **(5.19.0+)** VS_VERSION_INFO key/value pairs (FileVersion / ProductVersion / CompanyName / OriginalFilename / etc.) lift to `vsinfo_*` attrs on the `PeBinary` node so cross-binary inventory queries like "every binary signed by X" work via attribute filter. |
+| `pe-debug <file>` | PDB paths, CodeView RSDS/NB10 records (GUID, age), build timestamps, POGO data. **(5.19.0+)** PDB filename promotes to a `Symbol` node (`kind_detail=pdb_path`) with edge from the PE binary; CodeView GUID + age land as attrs. Useful for matching a stripped binary to its symbol-server PDB. |
 | `pe-sections <file>` | Section table with per-section Shannon entropy. Auto-flags packed binaries (any section H > 7.0) via `attrs["packed"]=true`. Detects + registers overlay (data past EOS) as `Overlay` node with `kind` classification (NSIS / Inno / PyInstaller / ZIP self-extract / Authenticode / high-entropy / generic). |
 | `pe-meta <file>` | **(5.12.2+)** Combined PE metadata triage: Rich header parse (Microsoft toolchain fingerprint — VS6 → VS2022 cl.exe / link.exe versions), TLS callback enumeration (run-before-main, common malware persistence), entry-point RVA. **(5.17.0+)** Each unique Rich header tool promotes to a `Compiler` graph node (with `binary→compiler` edge) so per-version queries work via `meta-path "compiler->pe"`. Each TLS callback promotes to a `BinaryFunction` node with `kind_detail=tls_persistence` so it participates in centrality + meta-path queries. |
 | `pe-cert <file>` | **(5.15.0+)** PE Authenticode parsing. Walks the certificate-table data directory, decodes WIN_CERTIFICATE / PKCS#7 / X.509 DER, extracts subject CN + issuer CN + serial + validity per cert. Each becomes a `Cert` node with binary→cert edge. Recognizes Authenticode signatures as a benign overlay rather than misflagging. |
@@ -295,8 +295,8 @@ For analyzing compiled binaries across platforms — ELF (Linux), Mach-O (macOS)
 
 | Action | What it does |
 |--------|-------------|
-| `elf-info <file>` | ELF analysis — sections + entropy, DT_NEEDED → `Dll` edges, demangled symbols. **(5.12.1+)** Free-form strings extracted from `.rodata` / `.data` register as `StringLiteral` nodes (capped 5000/binary); URL-classified strings auto-promote to `HttpEndpoint`. |
-| `macho-info <file>` | Mach-O analysis — load commands, segments, dylib deps via LC_LOAD_DYLIB → `Dll` edges, rpaths, UUID, symbols. Handles fat/universal binaries. |
+| `elf-info <file>` | ELF analysis — sections + entropy, DT_NEEDED → `Dll` edges, demangled symbols. **(5.12.1+)** Free-form strings extracted from `.rodata` / `.data` register as `StringLiteral` nodes (capped 5000/binary); URL-classified strings auto-promote to `HttpEndpoint`. **(5.19.0+)** `e_entry` (entry point) promotes to a `BinaryFunction` node (`kind_detail=entry_point`) with edge from the ELF binary, parity with PE/Mach-O. |
+| `macho-info <file>` | Mach-O analysis — load commands, segments, dylib deps via LC_LOAD_DYLIB → `Dll` edges, rpaths, UUID, symbols. Handles fat/universal binaries. **(5.19.0+)** `LC_MAIN` entryoff promotes to a `BinaryFunction` node (`kind_detail=entry_point`) with edge from the Mach-O binary, parity with PE/ELF. |
 | `java-class <file>` | Java .class / .jar analysis — constant pool, class hierarchy, fields, methods. **(5.15.2+)** Each method registers as a `BinaryFunction` node with `attrs["binary_format"]=jvm, kind_detail=method`. JAR files unpack to per-class summaries. |
 | `wasm-info <file>` | WebAssembly module analysis — sections + entropy, imports/exports, type/function counts. **(5.13.1+)** Walks the Code section: each function (import or defined) becomes a `BinaryFunction` node with intra-module call edges via the `call` opcode (0x10). `meta-path "wasm->bin_func->bin_func"` traces module-internal call graphs. |
 
@@ -336,9 +336,9 @@ Supply-chain hygiene and secret detection.
 | Action | What it does |
 |--------|-------------|
 | `secret-scan` | Scan all files for hardcoded secrets — AWS keys, GitHub PATs, private keys, JWTs, passwords, API keys, connection strings, IPs. Groups by severity (critical/high/medium), masks values. **(5.17.0+)** Each finding promotes to a `Secret` graph node with edge from its source file. Enables `meta-path "source->secret"` for credential inventory and `pagerank --type secret` for files concentrating credential risk. |
-| `dep-tree [manifest]` | Parse package manifests (package.json, Cargo.toml, requirements.txt, go.mod, pyproject.toml, pom.xml, Gemfile, Pipfile) and show dependency trees. |
-| `dead-deps` | Cross-reference declared dependencies against actual imports — find packages in manifests that no source file references. |
-| `api-surface [file]` | Extract the public API surface — all exported functions grouped by file, plus HTTP routes, GraphQL resolvers, and CLI commands. |
+| `dep-tree [manifest]` | Parse package manifests (package.json, Cargo.toml, requirements.txt, go.mod, pyproject.toml, pom.xml, Gemfile, Pipfile) and show dependency trees. **(5.19.0+)** Each declared dep promotes to a `Dependency` graph node (namespaced by ecosystem: `dep:cargo:serde` ≠ `dep:npm:serde`) with edge from its manifest. Self-discovers manifests by walking scan_dir (the scanner's SUPPORTED_EXTS doesn't index .toml/.json). Enables `meta-path "source->dependency"` and `pagerank --type dependency`. |
+| `dead-deps` | Cross-reference declared dependencies against actual imports — find packages in manifests that no source file references. **(5.19.0+)** Marks each dead `Dependency` node with `is_dead=true` attr for cleanup-PR generation via attribute filter. |
+| `api-surface [file]` | Extract the public API surface — all exported functions grouped by file, plus HTTP routes, GraphQL resolvers, and CLI commands. **(5.19.0+)** Discovered HTTP routes (Flask / FastAPI / Express patterns) promote to `HttpEndpoint` nodes (`discovered_via=api_surface`) with edges from their source file, joining the same graph surface as `openapi-schema` / `web-blueprint` / `robots-parse`. |
 
 ### Web (5)
 
