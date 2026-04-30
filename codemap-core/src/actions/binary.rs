@@ -158,6 +158,14 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
                 ]);
                 graph.add_edge(&bin_id, &dll_id);
             }
+
+            // Extract free-form strings from .rodata + .data and promote
+            // each to a StringLiteral node (with classification). URL
+            // strings additionally promote to HttpEndpoint via the
+            // existing pipeline. Capped at 5000 strings per binary.
+            let strings = crate::actions::reverse::common::extract_ascii_strings(&data, 6);
+            crate::actions::reverse::common::promote_strings_to_graph(graph, target, "elf", &strings);
+
             info
         }
         Err(e) => format!("ELF parse error: {e}"),

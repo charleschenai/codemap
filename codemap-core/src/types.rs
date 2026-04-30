@@ -137,6 +137,19 @@ pub enum EntityKind {
     /// Edges: binary → compiler. Lets meta-path queries answer "every
     /// Go-compiled binary in this repo" or "what toolchains do we ship?"
     Compiler,
+    /// String literal extracted from a binary's data sections.
+    /// Edges: binary → string. attrs["string_type"] classifies as
+    /// url/sql/path/registry/guid/base64/hex/format_str/error_msg/
+    /// generic. Strings that classify as URLs additionally feed the
+    /// existing HttpEndpoint promotion pipeline so meta-path queries
+    /// like "pe->string->endpoint" work uniformly.
+    StringLiteral,
+    /// Data appended past the official end of a PE/ELF/Mach-O binary.
+    /// Edges: binary → overlay. attrs["size"] / attrs["entropy"]
+    /// classify the overlay (NSIS installer / Inno Setup / PyInstaller
+    /// bootstrap / generic / encrypted-blob). Common malware
+    /// indicator + the heart of how installers ship extra payloads.
+    Overlay,
 }
 
 impl EntityKind {
@@ -163,6 +176,8 @@ impl EntityKind {
             EntityKind::DotnetAssembly => "asm",
             EntityKind::DotnetType => "type",
             EntityKind::Compiler => "compiler",
+            EntityKind::StringLiteral => "string",
+            EntityKind::Overlay => "overlay",
         }
     }
 
@@ -191,6 +206,8 @@ impl EntityKind {
             "asm" | "assembly"   => EntityKind::DotnetAssembly,
             "type" | "dotnet-type" => EntityKind::DotnetType,
             "compiler" | "toolchain" | "lang" => EntityKind::Compiler,
+            "string" | "str" | "literal" => EntityKind::StringLiteral,
+            "overlay" | "trailing" => EntityKind::Overlay,
             _ => return None,
         })
     }

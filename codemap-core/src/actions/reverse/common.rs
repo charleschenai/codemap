@@ -183,3 +183,82 @@ pub fn read_binary_file(target: &str) -> Result<Vec<u8>, String> {
 
     fs::read(path).map_err(|e| format!("Error reading file: {e}"))
 }
+
+/// Promote a list of binary-extracted strings to StringLiteral nodes.
+/// Each string becomes a node with id `str:<binary>:<short-hash>`,
+/// classified via crate::strings::classify, and linked back to the
+/// binary via a `binary→string` edge. URL-classified strings are
+/// additionally promoted to HttpEndpoint nodes (matches the existing
+/// source-code URL-promotion pipeline) so meta-path queries like
+/// "pe->string->endpoint" work uniformly.
+///
+/// `bin_kind` is "pe" / "elf" / "macho" — used to construct the
+/// binary node id and the string node id prefix.
+///
+/// Caps the number of nodes registered at 5000 per binary to keep
+/// graphs sane on huge stripped binaries with millions of strings.
+/// Skips strings shorter than 6 chars and longer than 4 KB.
+pub fn promote_strings_to_graph(
+    graph: &mut crate::types::Graph,
+    target: &str,
+    bin_kind: &str,
+    strings: &[String],
+) {
+    use crate::types::EntityKind;
+    let bin_id = format!("{bin_kind}:{target}");
+    let mut registered = 0usize;
+    const MAX_STRINGS_PER_BINARY: usize = 5000;
+    for s in strings {
+        if registered >= MAX_STRINGS_PER_BINARY { break; }
+        if s.len() < 6 || s.len() > 4096 { continue; }
+        let st = crate::strings::classify(s);
+        let hash = short_hash(s);
+        let str_id = format!("str:{bin_kind}:{}:{}", target_basename(target), hash);
+        let display = if s.len() > 200 { &s[..200] } else { s.as_str() };
+        graph.ensure_typed_node(&str_id, EntityKind::StringLiteral, &[
+            ("value", display),
+            ("string_type", st.as_str()),
+            ("source_binary", target),
+            ("length", &s.len().to_string()),
+        ]);
+        graph.add_edge(&bin_id, &str_id);
+
+        // URL strings: promote to HttpEndpoint and add string→endpoint edge.
+        if matches!(st, crate::strings::StringType::Url) {
+            let ep_id = format!("ep:{}", normalize_url(s));
+            graph.ensure_typed_node(&ep_id, EntityKind::HttpEndpoint, &[
+                ("url", display),
+                ("source_kind", bin_kind),
+                ("discovered_via", "binary_string"),
+            ]);
+            graph.add_edge(&str_id, &ep_id);
+        }
+        registered += 1;
+    }
+}
+
+fn short_hash(s: &str) -> String {
+    // FNV-1a 64-bit, hex-encoded; deterministic and stable.
+    let mut h = 0xcbf29ce484222325u64;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+fn target_basename(target: &str) -> String {
+    Path::new(target)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| target.to_string())
+}
+
+fn normalize_url(url: &str) -> String {
+    // Strip whitespace, query strings, and fragment for endpoint id.
+    let clean = url.trim();
+    let head = clean.split_whitespace().next().unwrap_or(clean);
+    let no_frag = head.split('#').next().unwrap_or(head);
+    let no_query = no_frag.split('?').next().unwrap_or(no_frag);
+    no_query.to_string()
+}

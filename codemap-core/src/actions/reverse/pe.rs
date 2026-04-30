@@ -35,6 +35,9 @@ pub fn pe_strings(graph: &mut Graph, target: &str) -> String {
         return "No strings found in binary.".to_string();
     }
 
+    // Promote each extracted string to a StringLiteral node.
+    promote_strings_to_graph(graph, target, "pe", &strings);
+
     // Categorize
     let mut sql_strings: BTreeSet<String> = BTreeSet::new();
     let mut table_strings: BTreeSet<String> = BTreeSet::new();
@@ -1381,9 +1384,62 @@ pub fn pe_sections(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
 
+    // Auto-flag the binary as packed if any section has entropy > 7.0,
+    // and detect overlay (post-section trailing data) in the same pass.
+    flag_packed_and_overlay(graph, target, &data);
+
     match parse_pe_sections_info(&data) {
         Ok(info) => info,
         Err(e) => format!("PE parse error: {e}"),
+    }
+}
+
+/// Walk the PE section table, compute per-section entropy, and tag
+/// the PE binary node with `attrs["packed"] = "true"` if any section
+/// crosses the 7.0 bits/byte threshold (indicates UPX-style packing
+/// or section-level encryption). Also runs the overlay detector and
+/// registers an Overlay node + binary→overlay edge if found.
+fn flag_packed_and_overlay(graph: &mut Graph, target: &str, data: &[u8]) {
+    let bin_id = format!("pe:{target}");
+    if let Some(overlay) = crate::actions::overlay::detect_pe_overlay(data) {
+        let overlay_id = format!("overlay:{target}:{:x}", overlay.offset);
+        let off = format!("{:#x}", overlay.offset);
+        let size = overlay.size.to_string();
+        let entropy = format!("{:.3}", overlay.entropy);
+        graph.ensure_typed_node(&overlay_id, EntityKind::Overlay, &[
+            ("source_binary", target),
+            ("offset", &off),
+            ("size", &size),
+            ("entropy", &entropy),
+            ("kind", overlay.kind.as_str()),
+        ]);
+        graph.add_edge(&bin_id, &overlay_id);
+    }
+
+    // Quick section-entropy scan: if any has H > 7.0, mark the binary.
+    if data.len() < 0x40 || &data[..2] != b"MZ" { return; }
+    let e_lfanew = u32::from_le_bytes([data[0x3c], data[0x3d], data[0x3e], data[0x3f]]) as usize;
+    if e_lfanew + 24 > data.len() || &data[e_lfanew..e_lfanew + 4] != b"PE\0\0" { return; }
+    let coff = e_lfanew + 4;
+    let n_sections = u16::from_le_bytes([data[coff + 2], data[coff + 3]]) as usize;
+    let opt_size = u16::from_le_bytes([data[coff + 16], data[coff + 17]]) as usize;
+    let sec_table = coff + 20 + opt_size;
+    let mut max_entropy = 0.0_f64;
+    for i in 0..n_sections.min(64) {
+        let off = sec_table + i * 40;
+        if off + 24 > data.len() { break; }
+        let raw_size = u32::from_le_bytes([data[off + 16], data[off + 17], data[off + 18], data[off + 19]]) as usize;
+        let raw_off = u32::from_le_bytes([data[off + 20], data[off + 21], data[off + 22], data[off + 23]]) as usize;
+        if raw_size == 0 || raw_off >= data.len() { continue; }
+        let end = (raw_off + raw_size).min(data.len());
+        let h = crate::actions::overlay::shannon_entropy(&data[raw_off..end]);
+        if h > max_entropy { max_entropy = h; }
+    }
+    if let Some(node) = graph.nodes.get_mut(&bin_id) {
+        node.attrs.insert("max_section_entropy".into(), format!("{max_entropy:.3}"));
+        if max_entropy > 7.0 {
+            node.attrs.insert("packed".into(), "true".into());
+        }
     }
 }
 

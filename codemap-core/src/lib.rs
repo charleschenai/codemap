@@ -35,6 +35,7 @@ pub mod cpg;
 pub mod actions;
 pub mod demangle;
 pub mod fingerprint;
+pub mod strings;
 
 use std::path::PathBuf;
 use types::Graph;

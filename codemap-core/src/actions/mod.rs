@@ -23,6 +23,7 @@ pub mod exports_format;
 pub mod temporal;
 pub mod spectral;
 pub mod lang_fp;
+pub mod overlay;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -223,6 +224,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "spectral-gap"         => Ok(spectral::spectral_gap(graph)),
         // Binary fingerprinting (5.12.0) — language/compiler/runtime detection
         "lang-fingerprint" | "fingerprint" => Ok(lang_fp::lang_fingerprint(graph, target)),
+        "overlay-info" | "overlay" => Ok(overlay::overlay_info(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

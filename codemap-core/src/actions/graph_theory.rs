@@ -591,6 +591,8 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         DotnetAssembly    => "shape=component, fillcolor=\"#e1f5fe\", style=filled",
         DotnetType        => "shape=record, fillcolor=\"#e0f7fa\", style=filled, fontsize=8",
         Compiler          => "shape=hexagon, fillcolor=\"#fce4ec\", style=filled, fontsize=10",
+        StringLiteral     => "shape=note, fillcolor=\"#f5f5f5\", style=filled, fontsize=8",
+        Overlay           => "shape=cds, fillcolor=\"#ef9a9a\", style=filled, fontsize=9",
     }
 }
 
@@ -731,6 +733,8 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         DotnetAssembly    => "pe",
         DotnetType        => "field",
         Compiler          => "compiler",
+        StringLiteral     => "string",
+        Overlay           => "overlay",
     }
 }
 

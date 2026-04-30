@@ -1008,3 +1008,53 @@ unaffected.
   passthrough, namespace splitting) + 7 fingerprint cases.
 
   Action count: 145 → 146 (+1).
+
+[2026-04-30] feat: 5.12.1 — StringLiteral + Overlay nodes (closes 5.12.0 graph debt)
+  source: same RE gap-analysis as 5.12.0. pe-strings was print-only
+  (extracted 50K strings, none registered to the graph). pe-resources
+  same. ELF info same. Overlay/packing flags also missing.
+
+  Two new EntityKinds:
+    - StringLiteral (kind: "string") — every binary-extracted string
+      becomes a node. attrs["string_type"] classifies as url/sql/path/
+      registry/guid/base64/hex/format_str/error_msg/email/envvar/
+      user_agent/generic. Edges: binary→string. URL strings auto-
+      promote to HttpEndpoint via the existing source-code pipeline.
+      Cap: 5000 strings per binary. ~6-byte minimum length.
+    - Overlay (kind: "overlay") — data appended past the official
+      end of a PE/ELF/Mach-O. Common malware/installer signal.
+      Format-aware detection (PE: max(section.raw_end, cert_end);
+      ELF: max(section_end, segment_end, sht_end)). Classified by
+      signature: nsis_installer / inno_setup / pyinstaller / py2exe /
+      self_extract (PK/7z) / authenticode_sig (benign — recognized
+      and labeled rather than misflagged) / high_entropy_blob /
+      generic. attrs["entropy"] / attrs["size"] / attrs["kind"].
+
+  New module: src/strings.rs (~280 LOC) — StringType enum + classify().
+  New module: src/actions/overlay.rs (~280 LOC) — detect_pe_overlay,
+    detect_elf_overlay, shannon_entropy, OverlayKind classifier,
+    overlay_info action.
+  New helper: actions/reverse/common.rs::promote_strings_to_graph
+    (FNV-1a-based stable string IDs, URL→endpoint chain).
+
+  Wired into:
+    - pe-strings → registers all extracted strings as StringLiteral
+    - elf-info → extracts strings from full binary + promotes
+    - pe-sections → auto-flags overlay + sets attrs["packed"] = "true"
+      when any section's Shannon entropy > 7.0; attrs["max_section_
+      entropy"] always set
+    - new top-level action: `overlay-info <binary>` reports overlay
+      with classification + size + entropy
+
+  Live verification:
+    - codemap binary (Rust ELF, 26 MB): 200+ StringLiteral nodes
+      registered. meta-path "elf->string->endpoint" traces the
+      embedded `file://` URL through string node to HttpEndpoint.
+    - hand-crafted PE with PK\x03\x04 ZIP overlay: detected as
+      "self_extract" at offset 0x1200, 1054 bytes, entropy 3.6.
+
+  Tests: 146 passing (was 130). +16 new (12 string-classification,
+  4 overlay/entropy).
+
+  Action count: 146 → 148 (+2: overlay-info, lang-fingerprint
+  already shipped in 5.12.0).

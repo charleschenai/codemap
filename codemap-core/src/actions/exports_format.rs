@@ -162,6 +162,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             DotnetAssembly    => (225, 245, 254),
             DotnetType        => (224, 247, 250),
             Compiler          => (252, 228, 236),
+            StringLiteral     => (245, 245, 245),
+            Overlay           => (239, 154, 154),
         }
     }
 
