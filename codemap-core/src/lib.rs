@@ -33,6 +33,8 @@ pub mod resolve;
 pub mod scanner;
 pub mod cpg;
 pub mod actions;
+pub mod demangle;
+pub mod fingerprint;
 
 use std::path::PathBuf;
 use types::Graph;

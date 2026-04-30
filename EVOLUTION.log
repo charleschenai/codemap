@@ -958,3 +958,53 @@ unaffected.
   114/114 unit + integration tests pass. Clippy clean.
 
   Action count: 145 (no change).
+
+[2026-04-30] feat: 5.12.0 — symbol demangling + language fingerprinting + Compiler nodes
+  source: post-5.11 RE gap-analysis. pe-exports / elf-info / pe-imports
+  were printing raw mangled names like _ZN5tokio4time5sleep17h... and
+  ?MyFunc@Foo@@QAEHXZ — useless for human reading. Plus no way to
+  triage "is this a Rust binary or a Go binary or .NET" without manual
+  string-grepping.
+
+  Two new modules + 1 new action:
+    - src/demangle.rs (~330 LOC) — Itanium C++ ABI, MSVC C++, Rust
+      legacy (_ZN..17h<hash>E), Rust v0 (_R...). Pure pattern-match,
+      no external dep. Wired into pe-exports + pe-imports + elf-info
+      output; demangled name becomes the canonical Symbol id; raw
+      mangled goes to attrs["mangled"]. macOS double-underscore
+      prefix (`__Z...`) handled.
+    - src/fingerprint.rs (~250 LOC) — section-name + signature-string
+      heuristics for Go (.gopclntab / runtime.morestack), Rust
+      (__rust_alloc / RUST_BACKTRACE / rust_eh_personality), .NET
+      (BSJB metadata / mscorlib), PyInstaller (_MEIPASS), Nuitka,
+      Electron (V8 + node_modules), Delphi (Borland / @System@),
+      MinGW vs MSVC vs GCC (CRT signatures), Swift (libswiftCore),
+      C-extensions (Py_InitModule). Returns (language, compiler,
+      runtime, confidence).
+    - actions/lang_fp.rs (~250 LOC) — `codemap lang-fingerprint
+      <binary>` action. Reads file, sniffs format from magic bytes,
+      runs heuristics, registers Compiler node + binary→compiler
+      edge with attrs. Idempotent.
+
+  New EntityKind: Compiler (kind: "compiler"). Lets meta-path
+  queries answer "every Go-compiled binary in this repo" or
+  "what toolchains do we ship?"
+
+  Scan window for fingerprinting: 64 MB cap (was 1 MB in initial
+  draft — Rust signatures often live in .rodata which sits ~5 MB
+  into a stripped release binary, so 1 MB missed them). NOT run
+  during default scan; only on explicit invocation.
+
+  Live verification:
+    - codemap on itself (Rust binary, 26 MB) → detected as
+      lang=rust compiler=rustc, confidence 90/100.
+    - libstdc++.so.6 on Ubuntu (1900+ symbols) → demangling reveals
+      `__gnu_cxx::stdio_sync_filebuf<...>::pbackfail` and similar
+      readable forms; raw mangled retained as attrs["mangled"].
+
+  Tests: 130 passing (was 114). +16 unit tests covering 9 demangle
+  cases (Itanium simple/nested/macOS-prefix, Rust legacy with hash
+  strip, Rust v0 crate root, MSVC simple/nested, unmangled
+  passthrough, namespace splitting) + 7 fingerprint cases.
+
+  Action count: 145 → 146 (+1).

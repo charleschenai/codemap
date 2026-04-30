@@ -146,10 +146,15 @@ pub fn pe_exports(graph: &mut Graph, target: &str) -> String {
             ensure_pe_binary_node(graph, target, "pe_exports");
             let bin_id = format!("pe:{target}");
             for sym in &exports {
-                let sym_id = format!("sym:{target}::{sym}");
-                graph.ensure_typed_node(&sym_id, EntityKind::Symbol, &[
-                    ("name", sym), ("exported_by", target),
-                ]);
+                let demangled = crate::demangle::demangle(sym);
+                let display = demangled.as_deref().unwrap_or(sym);
+                let sym_id = format!("sym:{target}::{display}");
+                let mut attrs: Vec<(&str, &str)> = vec![
+                    ("name", display),
+                    ("exported_by", target),
+                ];
+                if demangled.is_some() { attrs.push(("mangled", sym)); }
+                graph.ensure_typed_node(&sym_id, EntityKind::Symbol, &attrs);
                 graph.add_edge(&bin_id, &sym_id);
             }
             if exports.is_empty() {
@@ -159,7 +164,12 @@ pub fn pe_exports(graph: &mut Graph, target: &str) -> String {
             out.push_str("=== PE Export Table ===\n\n");
             out.push_str(&format!("Exports: {}\n\n", exports.len()));
             for (i, name) in exports.iter().enumerate() {
-                out.push_str(&format!("  {:4}  {}\n", i + 1, name));
+                let demangled = crate::demangle::demangle(name);
+                if let Some(d) = demangled {
+                    out.push_str(&format!("  {:4}  {}\n         (mangled: {})\n", i + 1, d, name));
+                } else {
+                    out.push_str(&format!("  {:4}  {}\n", i + 1, name));
+                }
             }
             out
         }
@@ -366,11 +376,18 @@ fn register_pe_imports_into_graph(graph: &mut Graph, target: &str, dlls: &[Impor
         graph.add_edge(&bin_id, &dll_id);
 
         for sym in &dll.functions {
-            let sym_id = format!("sym:{}::{}", dll.name.to_ascii_lowercase(), sym);
+            let demangled = crate::demangle::demangle(sym);
+            let display = demangled.as_deref().unwrap_or(sym);
+            let sym_id = format!("sym:{}::{}", dll.name.to_ascii_lowercase(), display);
+            let mut attrs: Vec<(&str, &str)> = vec![
+                ("name", display),
+                ("dll", &dll.name),
+            ];
+            if demangled.is_some() { attrs.push(("mangled", sym)); }
             graph.ensure_typed_node(
                 &sym_id,
                 crate::types::EntityKind::Symbol,
-                &[("name", sym), ("dll", &dll.name)],
+                &attrs,
             );
             graph.add_edge(&dll_id, &sym_id);
         }

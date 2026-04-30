@@ -22,6 +22,7 @@ pub mod community;
 pub mod exports_format;
 pub mod temporal;
 pub mod spectral;
+pub mod lang_fp;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -220,6 +221,8 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "fiedler"              => Ok(spectral::fiedler(graph)),
         "spectral-cluster"     => Ok(spectral::spectral_cluster(graph, target)),
         "spectral-gap"         => Ok(spectral::spectral_gap(graph)),
+        // Binary fingerprinting (5.12.0) — language/compiler/runtime detection
+        "lang-fingerprint" | "fingerprint" => Ok(lang_fp::lang_fingerprint(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

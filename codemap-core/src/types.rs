@@ -132,6 +132,11 @@ pub enum EntityKind {
     DotnetAssembly,
     /// .NET type (class, struct, interface).
     DotnetType,
+    /// Compiler / toolchain detected by language fingerprinting (rust,
+    /// go, msvc, gcc, mingw, .NET, Delphi, PyInstaller, Electron, etc.).
+    /// Edges: binary → compiler. Lets meta-path queries answer "every
+    /// Go-compiled binary in this repo" or "what toolchains do we ship?"
+    Compiler,
 }
 
 impl EntityKind {
@@ -157,6 +162,7 @@ impl EntityKind {
             EntityKind::MlModel => "model",
             EntityKind::DotnetAssembly => "asm",
             EntityKind::DotnetType => "type",
+            EntityKind::Compiler => "compiler",
         }
     }
 
@@ -184,6 +190,7 @@ impl EntityKind {
             "model" | "ml"       => EntityKind::MlModel,
             "asm" | "assembly"   => EntityKind::DotnetAssembly,
             "type" | "dotnet-type" => EntityKind::DotnetType,
+            "compiler" | "toolchain" | "lang" => EntityKind::Compiler,
             _ => return None,
         })
     }

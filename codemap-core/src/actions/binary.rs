@@ -448,7 +448,11 @@ fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>), String> {
     if !exported.is_empty() {
         out.push_str(&format!("\n\u{2500}\u{2500} Exported Symbols ({}) \u{2500}\u{2500}\n", exported.len()));
         for name in exported.iter().take(200) {
-            out.push_str(&format!("  {name}\n"));
+            if let Some(d) = crate::demangle::demangle(name) {
+                out.push_str(&format!("  {d}\n     (mangled: {name})\n"));
+            } else {
+                out.push_str(&format!("  {name}\n"));
+            }
         }
         if exported.len() > 200 {
             out.push_str(&format!("  ... and {} more\n", exported.len() - 200));
@@ -458,7 +462,11 @@ fn parse_elf_with_deps(data: &[u8]) -> Result<(String, Vec<String>), String> {
     if !imported.is_empty() {
         out.push_str(&format!("\n\u{2500}\u{2500} Imported Symbols ({}) \u{2500}\u{2500}\n", imported.len()));
         for name in imported.iter().take(200) {
-            out.push_str(&format!("  {name}\n"));
+            if let Some(d) = crate::demangle::demangle(name) {
+                out.push_str(&format!("  {d}\n     (mangled: {name})\n"));
+            } else {
+                out.push_str(&format!("  {name}\n"));
+            }
         }
         if imported.len() > 200 {
             out.push_str(&format!("  ... and {} more\n", imported.len() - 200));
