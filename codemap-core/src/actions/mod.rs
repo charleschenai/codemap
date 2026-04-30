@@ -30,6 +30,7 @@ pub mod license;
 pub mod cve;
 pub mod sbom;
 pub mod fuzzy;
+pub mod cert;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -242,6 +243,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "to-cyclonedx" => Ok(sbom::to_cyclonedx(graph)),
         "fuzzy-hash"   => Ok(fuzzy::fuzzy_hash(graph, target)),
         "fuzzy-match"  => Ok(fuzzy::fuzzy_match(graph, target)),
+        "pe-cert" | "verify-sig" | "authenticode" => Ok(cert::pe_cert(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

@@ -172,6 +172,12 @@ pub enum EntityKind {
     /// supply-chain auditor: meta-path "source->binary->dll->cve"
     /// finds vulnerable transitive deps in your code.
     Cve,
+    /// Code-signing certificate extracted from a signed binary.
+    /// Edges: binary → cert (signs it), cert → cert (issuer chain).
+    /// attrs: subject, issuer, serial, sha256, valid_from,
+    /// valid_to. Lets you ask "who signed this?" / "are all our
+    /// vendors using current certs?" / "find the chain root."
+    Cert,
 }
 
 impl EntityKind {
@@ -203,6 +209,7 @@ impl EntityKind {
             EntityKind::BinaryFunction => "bin_func",
             EntityKind::License => "license",
             EntityKind::Cve => "cve",
+            EntityKind::Cert => "cert",
         }
     }
 
@@ -236,6 +243,7 @@ impl EntityKind {
             "bin_func" | "binfunc" | "function" | "func" => EntityKind::BinaryFunction,
             "license" | "spdx" => EntityKind::License,
             "cve" | "vuln" => EntityKind::Cve,
+            "cert" | "certificate" | "x509" => EntityKind::Cert,
             _ => return None,
         })
     }

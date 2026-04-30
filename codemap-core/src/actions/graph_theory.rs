@@ -596,6 +596,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         BinaryFunction    => "shape=ellipse, fillcolor=\"#fff9c4\", style=filled, fontsize=9",
         License           => "shape=box, fillcolor=\"#c5e1a5\", style=\"filled,rounded\", fontsize=10",
         Cve               => "shape=octagon, fillcolor=\"#ef5350\", style=filled, fontcolor=white, fontsize=10",
+        Cert              => "shape=diamond, fillcolor=\"#90caf9\", style=filled, fontsize=10",
     }
 }
 
@@ -741,6 +742,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         BinaryFunction    => "bin_func",
         License           => "license",
         Cve               => "cve",
+        Cert              => "cert",
     }
 }
 

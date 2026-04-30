@@ -167,6 +167,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             BinaryFunction    => (255, 249, 196),
             License           => (197, 225, 165),
             Cve               => (239, 83, 80),
+            Cert              => (144, 202, 249),
         }
     }
 

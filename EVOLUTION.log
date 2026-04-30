@@ -1330,3 +1330,41 @@ unaffected.
   `196608:Q0f9Niq1...` cleanly in <100ms.
 
   Action count: 155 → 157 (+2: fuzzy-hash, fuzzy-match).
+
+[2026-04-30] feat: 5.15.0 — code signing → Cert nodes (PE Authenticode v1) (#46)
+  source: 5.15.0 task #46. New EntityKind Cert + new action pe-cert.
+  v1 scope: PE Authenticode only. Mac codesign (LC_CODE_SIGNATURE)
+  + JAR signing (META-INF/*.RSA) deferred to follow-ups since each
+  is a different binary format with its own complexity.
+
+  New module: src/actions/cert.rs (~440 LOC). New action `pe-cert`
+  (aliases: `verify-sig`, `authenticode`).
+
+  PE Authenticode lives in the certificate-table data directory
+  (index 4). Each WIN_CERTIFICATE entry wraps a PKCS#7 SignedData
+  blob containing DER-encoded X.509 certificates. We:
+    1. Locate the cert table from the PE optional header
+    2. Walk WIN_CERTIFICATE entries (header + PKCS#7 body)
+    3. DER-walk the PKCS#7 to find the certificates [0] IMPLICIT SET
+    4. Per-cert: extract serial (INTEGER), validity (UTCTime/
+       GeneralizedTime), subject CN + issuer CN (Name → SET → SEQ
+       → AttributeTypeAndValue with OID 2.5.4.3)
+    5. Register Cert node + binary→cert edge with fingerprint as
+       the canonical id
+
+  Pure DER walk — no rsa/openssl/oid-registry deps. Validation
+  (chain-building, OCSP, CRL) is its own multi-MB project; we
+  just expose textual identity. The "fingerprint" attribute is an
+  FNV-1a-128 digest of the cert DER (deterministic, unique enough
+  for graph node IDs, not validation-grade — forensic users
+  re-hash with real SHA-256 if needed).
+
+  New EntityKind: Cert (kind: "cert"). Edges: pe→cert (signs it).
+  Attributes: subject_cn, issuer_cn, serial, sha256 (FNV-1a-128
+  fingerprint despite the historic attr name), not_before, not_after.
+
+  Tests: 177 passing (was 173). +4 cert unit tests covering DER
+  length parsing (short + long form), fingerprint determinism,
+  locate_cert_table returning None on unsigned PE.
+
+  Action count: 157 → 158 (+1: pe-cert). Total EntityKinds: 26.
