@@ -1684,3 +1684,87 @@ unaffected.
 
   Action count: 163 (unchanged — quality additions, not new
   actions). EntityKinds: 28 → 29 (+Secret).
+
+
+[2026-04-30] feat: 5.18.0 — LSP actions write to the graph (#52)
+  source: post-5.17.0 audit identified that all 5 lsp_* actions
+  in actions/lsp.rs took &Graph (immutable, ignored) and emitted
+  text-only output. LSP returns the richest semantic data in the
+  toolkit — symbols / references / call hierarchy / diagnostics /
+  types — and none of it landed in the heterogeneous graph. This
+  release closes that gap with bounded promotions per action.
+
+  Bounds (per single action invocation):
+    MAX_LSP_SYMBOLS_PER_CALL = 5000
+    MAX_LSP_REFS_PER_CALL    = 1000
+    MAX_LSP_CALL_EDGES       =  500
+
+  These caps prevent LSP responses on large repos (tens of
+  thousands of symbols, millions of references on common APIs)
+  from blowing up the graph. The cap is reported in the action s
+  text output so users know when truncation occurred.
+
+  Promotions added:
+
+  1. lsp_symbols → Symbol nodes (recursive walker).
+     Each promotable DocumentSymbol kind (Class / Method /
+     Property / Field / Constructor / Enum / Interface /
+     Function / Variable / Constant / EnumMember / Struct)
+     becomes a Symbol node with attrs name, source=lsp,
+     lsp_kind (string), lsp_kind_code (numeric), file, line.
+     Edge: source_file → symbol. Non-promotable kinds (Module,
+     Namespace, Object literals, Property/Key noise) are
+     skipped, but the walker recurses into their children so
+     legitimate methods nested under noise wrappers still land.
+     Recursion depth capped at 8.
+
+  2. lsp_references → usage edges.
+     The query targets one symbol at file:line:col. v1
+     registers that target as a single Symbol node
+     (lsp_kind=ReferenceTarget) once, then for each reference
+     location, adds a referrer_file → target_symbol edge. This
+     answers "which files reference X" via outgoing-edge
+     traversal of the symbol node — concretely usable via
+     `pagerank --type symbol` to find the most-referenced
+     LSP symbols across a codebase.
+
+  3. lsp_calls → call edges.
+     Registers the prepareCallHierarchy target as a Symbol
+     (lsp_kind=CallTarget). For each incoming call, registers
+     the caller as a Symbol (lsp_kind=CallParticipant) and
+     adds a caller→target edge. For each outgoing call, same
+     pattern but target→callee. Source-file edges land for
+     all participating symbols.
+
+  4. lsp_diagnostics → SourceFile attrs.
+     No new nodes — counts attached to each existing/created
+     SourceFile node: lsp_errors, lsp_warnings, lsp_info,
+     plus lsp_first_error (truncated to 200 chars) for quick
+     triage. Enables `pagerank --type source` ranking by
+     error density.
+
+  5. lsp_types → SourceFile attrs.
+     lsp_typed_symbols + lsp_total_symbols counts surface
+     type-coverage gaps without storing huge hover bodies.
+     Files with many untyped symbols rank low.
+
+  Implementation: src/actions/lsp.rs ~250 LOC of additions.
+  All 5 action signatures flipped from &Graph to &mut Graph;
+  no call-site changes needed (mod.rs auto-coerced &mut Graph
+  to &Graph for the immutable signatures). New helpers:
+    lsp_kind_is_promotable(i64) -> bool
+    register_lsp_symbols(&mut Graph, file_id, symbols, written, depth)
+    register_call_edge(&mut Graph, call, key, target, caller_to_target)
+    file_id_for_graph(&Graph, &Path) -> String
+
+  Tests: 191 passing (was 189). +2 new lsp_symbol_walker unit
+  tests covering (a) promotable-kind filtering — Object kind
+  is skipped while its child Method is recursed into and
+  registered, (b) cap enforcement — walker stops exactly at
+  MAX_LSP_SYMBOLS_PER_CALL when fed payload of cap+100. Real
+  rust-analyzer round-trip not added because it would slow CI
+  by 10-15 seconds; unit tests cover the walker contract.
+
+  Action count: 163 (unchanged — all 5 LSP actions already
+  existed). EntityKinds: 29 (unchanged; LSP symbols reuse the
+  existing Symbol kind via attrs).

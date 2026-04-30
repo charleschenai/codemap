@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.17.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.18.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -56,7 +56,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Web scraper blueprinting.** 5 actions for reverse-engineering web applications: HAR file parsing into API endpoint maps, HTML DOM analysis for forms/tables/selectors, sitemap building from saved HTML directories, combined HAR+HTML scraper blueprint generation (auth recipe, pagination, rate limits), and JavaScript bundle archaeology for extracting API endpoints from minified code.
 
-- **LSP integration.** 5 actions that connect to any Language Server Protocol server to extract symbols, references, call hierarchies, diagnostics, and type information. Works with rust-analyzer, pylsp, typescript-language-server, clangd, or any LSP-compliant server.
+- **LSP integration.** 5 actions that connect to any Language Server Protocol server to extract symbols, references, call hierarchies, diagnostics, and type information. Works with rust-analyzer, pylsp, typescript-language-server, clangd, or any LSP-compliant server. **(5.18.0+)** Every LSP action now writes into the heterogeneous graph: `lsp-symbols` registers `Symbol` nodes with `source=lsp` (capped 5K/call), `lsp-references` adds file→symbol usage edges (capped 1K/call), `lsp-calls` adds caller→target / target→callee edges (capped 500/call), `lsp-diagnostics` and `lsp-types` attach per-file attrs (`lsp_errors` / `lsp_warnings` / `lsp_typed_symbols`) for `pagerank` ranking by error density or type-coverage gaps.
 
 - **Bash/shell support.** 13 languages now covered with tree-sitter AST parsing, including Bash/Shell scripts (`.sh`, `.bash`). Function definitions and `source` imports are extracted from real parse trees.
 
@@ -283,11 +283,11 @@ Connect to any Language Server Protocol server to extract semantic analysis data
 
 | Action | What it does |
 |--------|-------------|
-| `lsp-symbols <server> <file>` | Extract document symbols (functions, classes, methods, variables) via `textDocument/documentSymbol`. |
-| `lsp-references <server> <file:line:col>` | Find all references to a symbol via `textDocument/references`. |
-| `lsp-calls <server> <file:line:col>` | Get incoming and outgoing call hierarchy via `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls`. |
-| `lsp-diagnostics <server> <file>` | Collect all diagnostics (errors, warnings) from `textDocument/publishDiagnostics` notifications. |
-| `lsp-types <server> <file>` | Extract type signatures for each symbol via `textDocument/hover`. |
+| `lsp-symbols <server> <file>` | Extract document symbols (functions, classes, methods, variables) via `textDocument/documentSymbol`. **(5.18.0+)** Each promotable symbol (Class/Method/Function/Constructor/Field/Constant/etc.) becomes a `Symbol` graph node with `source=lsp` + `source_file → symbol` edge. Capped at 5000 symbols per call. |
+| `lsp-references <server> <file:line:col>` | Find all references to a symbol via `textDocument/references`. **(5.18.0+)** Registers the queried symbol once, then adds `referrer_file → symbol` edges per reference. Capped at 1000 references per call. Enables "which files reference X" via outgoing-edge traversal. |
+| `lsp-calls <server> <file:line:col>` | Get incoming and outgoing call hierarchy via `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls`. **(5.18.0+)** Registers target + each caller/callee as Symbol nodes with `caller→target` (incoming) and `target→callee` (outgoing) edges. Capped at 500 call edges per invocation. |
+| `lsp-diagnostics <server> <file>` | Collect all diagnostics (errors, warnings) from `textDocument/publishDiagnostics` notifications. **(5.18.0+)** Counts attached as `lsp_errors` / `lsp_warnings` / `lsp_info` attrs on each `SourceFile` node, plus `lsp_first_error` for quick triage. Enables `pagerank --type source` ranking by error density. |
+| `lsp-types <server> <file>` | Extract type signatures for each symbol via `textDocument/hover`. **(5.18.0+)** Per-file `lsp_typed_symbols` / `lsp_total_symbols` attrs surface type-coverage gaps (files with many untyped symbols rank low). |
 
 ### Binary formats (4)
 

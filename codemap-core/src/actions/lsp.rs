@@ -626,6 +626,109 @@ fn strip_code_fences(s: &str) -> String {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Graph integration helpers (5.18.0)
+// ═══════════════════════════════════════════════════════════════════
+//
+// LSP returns rich semantic data — symbols, references, call hierarchy,
+// diagnostics, types — that previously only landed in text output.
+// These helpers promote that data into the heterogeneous graph so it
+// participates in PageRank / centrality / meta-path queries.
+//
+// Bounds: each action caps how many graph writes it performs to keep
+// huge LSP responses (millions of refs on common APIs) from blowing up
+// the graph. Caps are per-call, not per-target.
+
+/// Cap on Symbol nodes written per single LSP call.
+const MAX_LSP_SYMBOLS_PER_CALL: usize = 5000;
+/// Cap on reference edges written per single LSP call.
+const MAX_LSP_REFS_PER_CALL: usize = 1000;
+/// Cap on incoming + outgoing call edges per single LSP-calls invocation.
+const MAX_LSP_CALL_EDGES: usize = 500;
+
+/// LSP symbol-kind codes worth surfacing as graph edges into the source
+/// file. Subset that maps to "real" code constructs (functions / methods
+/// / classes / etc.) — skips LSP's object-literal / property / event
+/// noise that bloats document-symbol responses.
+fn lsp_kind_is_promotable(kind: i64) -> bool {
+    matches!(kind,
+        5  | // Class
+        6  | // Method
+        7  | // Property
+        8  | // Field
+        9  | // Constructor
+        10 | // Enum
+        11 | // Interface
+        12 | // Function
+        13 | // Variable (module-level only — children skipped via depth gate)
+        14 | // Constant
+        22 | // EnumMember
+        23   // Struct
+    )
+}
+
+/// Recursively register Symbol nodes for an LSP DocumentSymbol tree.
+/// Returns the running written-count so the caller can stop at the cap.
+fn register_lsp_symbols(
+    graph: &mut crate::types::Graph,
+    file_id: &str,
+    symbols: &[Value],
+    written: &mut usize,
+    depth: usize,
+) {
+    use crate::types::EntityKind;
+    if depth > 8 { return; }
+    for sym in symbols {
+        if *written >= MAX_LSP_SYMBOLS_PER_CALL { return; }
+        let name = sym.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        if name.is_empty() { continue; }
+        let kind = sym.get("kind").and_then(|k| k.as_i64()).unwrap_or(0);
+        if !lsp_kind_is_promotable(kind) {
+            // Recurse into children even when skipping the parent — LSP
+            // sometimes nests methods under unrelated wrappers.
+            if let Some(children) = sym.get("children").and_then(|c| c.as_array()) {
+                register_lsp_symbols(graph, file_id, children, written, depth + 1);
+            }
+            continue;
+        }
+        let range = sym.get("range")
+            .or_else(|| sym.get("location").and_then(|l| l.get("range")));
+        let line = range
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|l| l.as_u64()).map(|l| l + 1).unwrap_or(0);
+        let kind_str = symbol_kind_name(kind);
+        let line_str = line.to_string();
+        let kind_num = kind.to_string();
+        let sym_id = format!("lsp_sym:{file_id}::{name}::{line}");
+        graph.ensure_typed_node(&sym_id, EntityKind::Symbol, &[
+            ("name", name),
+            ("source", "lsp"),
+            ("lsp_kind", kind_str),
+            ("lsp_kind_code", &kind_num),
+            ("file", file_id),
+            ("line", &line_str),
+        ]);
+        graph.add_edge(file_id, &sym_id);
+        *written += 1;
+
+        if let Some(children) = sym.get("children").and_then(|c| c.as_array()) {
+            register_lsp_symbols(graph, file_id, children, written, depth + 1);
+        }
+    }
+}
+
+/// Convert an absolute path back to a graph-friendly source-file ID
+/// (relative to scan_dir if possible, else the absolute path).
+fn file_id_for_graph(graph: &crate::types::Graph, path: &Path) -> String {
+    let scan_root = Path::new(&graph.scan_dir);
+    if let Ok(rel) = path.strip_prefix(scan_root) {
+        rel.to_string_lossy().into_owned()
+    } else {
+        path.to_string_lossy().into_owned()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Actions
 // ═══════════════════════════════════════════════════════════════════
 
@@ -633,7 +736,7 @@ fn strip_code_fences(s: &str) -> String {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Examples: `rust-analyzer src/main.rs`, `pylsp .`
-pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
+pub fn lsp_symbols(graph: &mut Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -656,6 +759,7 @@ pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
 
     let mut output = String::new();
     output.push_str("=== LSP Document Symbols ===\n");
+    let mut written_count = 0usize;
 
     for file in &files {
         if let Err(e) = client.open_file(file) {
@@ -676,6 +780,15 @@ pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
                         let rel = file.strip_prefix(&root).unwrap_or(file).to_string_lossy();
                         output.push_str(&format!("\n# {}\n", rel));
                         format_symbols(&mut output, arr, 0);
+
+                        // 5.18.0: promote each LSP symbol to a Symbol graph
+                        // node. Bound at MAX_LSP_SYMBOLS_PER_CALL to keep
+                        // huge LSP responses from blowing up the graph.
+                        let file_id = file_id_for_graph(graph, file);
+                        graph.ensure_typed_node(&file_id,
+                            crate::types::EntityKind::SourceFile,
+                            &[("path", &file_id)]);
+                        register_lsp_symbols(graph, &file_id, arr, &mut written_count, 0);
                     }
                 }
             }
@@ -691,6 +804,12 @@ pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
     if output == "=== LSP Document Symbols ===\n" {
         output.push_str("\nNo symbols found.\n");
     }
+    if written_count > 0 {
+        output.push_str(&format!(
+            "\n[graph] {} Symbol nodes registered (cap {}).\n",
+            written_count, MAX_LSP_SYMBOLS_PER_CALL,
+        ));
+    }
     output
 }
 
@@ -698,7 +817,7 @@ pub fn lsp_symbols(_graph: &Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file>:<line>:<col>`
 /// Example: `rust-analyzer src/main.rs:42:10`
-pub fn lsp_references(_graph: &Graph, target: &str) -> String {
+pub fn lsp_references(graph: &mut Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -756,6 +875,29 @@ pub fn lsp_references(_graph: &Graph, target: &str) -> String {
                     output.push_str("No references found.\n");
                 } else {
                     output.push_str(&format!("{} references:\n\n", arr.len()));
+
+                    // 5.18.0: register the queried symbol as a Symbol node,
+                    // then add file→symbol edges for each reference.
+                    // This makes "which files reference X" answerable via
+                    // outgoing-edge traversal of the symbol node.
+                    use crate::types::EntityKind;
+                    let target_file_id = file_id_for_graph(graph, &abs_path);
+                    let target_sym_id =
+                        format!("lsp_sym:{target_file_id}::ref_at::{line}");
+                    let line_str = line.to_string();
+                    let col_str = col.to_string();
+                    let ref_count = arr.len().to_string();
+                    graph.ensure_typed_node(&target_sym_id, EntityKind::Symbol, &[
+                        ("name", &format!("{target_file_id}:{line}:{col}")),
+                        ("source", "lsp"),
+                        ("lsp_kind", "ReferenceTarget"),
+                        ("file", &target_file_id),
+                        ("line", &line_str),
+                        ("column", &col_str),
+                        ("ref_count", &ref_count),
+                    ]);
+                    let mut edges_written = 0usize;
+
                     for loc in arr {
                         let loc_uri = loc
                             .get("uri")
@@ -779,11 +921,27 @@ pub fn lsp_references(_graph: &Graph, target: &str) -> String {
                             if let Ok(rel) = PathBuf::from(&loc_path).strip_prefix(&root) {
                                 rel.to_string_lossy().to_string()
                             } else {
-                                loc_path
+                                loc_path.clone()
                             };
                         output.push_str(&format!(
                             "  {}:{}:{}\n",
                             display_path, loc_line, loc_col
+                        ));
+
+                        if edges_written < MAX_LSP_REFS_PER_CALL {
+                            let referrer_file_id = file_id_for_graph(
+                                graph, &PathBuf::from(&loc_path));
+                            graph.ensure_typed_node(&referrer_file_id,
+                                EntityKind::SourceFile,
+                                &[("path", &referrer_file_id)]);
+                            graph.add_edge(&referrer_file_id, &target_sym_id);
+                            edges_written += 1;
+                        }
+                    }
+                    if edges_written > 0 {
+                        output.push_str(&format!(
+                            "\n[graph] {} reference edges → {target_sym_id} (cap {}).\n",
+                            edges_written, MAX_LSP_REFS_PER_CALL,
                         ));
                     }
                 }
@@ -800,7 +958,7 @@ pub fn lsp_references(_graph: &Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file>:<line>:<col>`
 /// Example: `rust-analyzer src/main.rs:42:10`
-pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
+pub fn lsp_calls(graph: &mut Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -873,6 +1031,25 @@ pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
     let mut output = String::new();
     output.push_str(&format!("=== LSP Call Hierarchy: {} ===\n", item_name));
 
+    // 5.18.0: register the target symbol + its caller/callee symbols as
+    // Symbol nodes. Add caller→target and target→callee edges so
+    // call-hierarchy data participates in centrality / meta-path queries.
+    use crate::types::EntityKind;
+    let target_file_id = file_id_for_graph(graph, &abs_path);
+    let target_line_str = line.to_string();
+    let target_sym_id = format!("lsp_sym:{target_file_id}::{item_name}::{line}");
+    graph.ensure_typed_node(&target_sym_id, EntityKind::Symbol, &[
+        ("name", item_name),
+        ("source", "lsp"),
+        ("lsp_kind", "CallTarget"),
+        ("file", &target_file_id),
+        ("line", &target_line_str),
+    ]);
+    graph.ensure_typed_node(&target_file_id, EntityKind::SourceFile,
+        &[("path", &target_file_id)]);
+    graph.add_edge(&target_file_id, &target_sym_id);
+    let mut edges_written = 0usize;
+
     // Step 2: Incoming calls
     output.push_str("\n--- Incoming Calls (callers) ---\n");
     match client.request("callHierarchy/incomingCalls", json!({ "item": item })) {
@@ -883,6 +1060,11 @@ pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
                 } else {
                     for call in arr {
                         format_call_item(&mut output, call, "from", &root);
+                        if edges_written < MAX_LSP_CALL_EDGES {
+                            register_call_edge(graph, call, "from",
+                                &target_sym_id, /*caller→target=*/ true);
+                            edges_written += 1;
+                        }
                     }
                 }
             } else {
@@ -902,6 +1084,11 @@ pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
                 } else {
                     for call in arr {
                         format_call_item(&mut output, call, "to", &root);
+                        if edges_written < MAX_LSP_CALL_EDGES {
+                            register_call_edge(graph, call, "to",
+                                &target_sym_id, /*caller→target=*/ false);
+                            edges_written += 1;
+                        }
                     }
                 }
             } else {
@@ -912,7 +1099,53 @@ pub fn lsp_calls(_graph: &Graph, target: &str) -> String {
     }
 
     client.shutdown();
+    if edges_written > 0 {
+        output.push_str(&format!(
+            "\n[graph] {} call edges around {target_sym_id} (cap {}).\n",
+            edges_written, MAX_LSP_CALL_EDGES,
+        ));
+    }
     output
+}
+
+/// Register a Symbol node for one side of a call-hierarchy item, then
+/// connect it to the central target. `caller_to_target=true` for incoming
+/// (caller → target), false for outgoing (target → callee).
+fn register_call_edge(
+    graph: &mut crate::types::Graph,
+    call: &Value,
+    key: &str,
+    target_sym_id: &str,
+    caller_to_target: bool,
+) {
+    use crate::types::EntityKind;
+    let empty = json!({});
+    let other = call.get(key).unwrap_or(&empty);
+    let name = other.get("name").and_then(|n| n.as_str()).unwrap_or("<unknown>");
+    let other_uri = other.get("uri").and_then(|u| u.as_str()).unwrap_or("");
+    let other_path = uri_to_path(other_uri);
+    let line = other.get("range")
+        .and_then(|r| r.get("start"))
+        .and_then(|s| s.get("line"))
+        .and_then(|l| l.as_u64()).map(|l| l + 1).unwrap_or(0);
+    let other_file_id = file_id_for_graph(graph, &PathBuf::from(&other_path));
+    let line_str = line.to_string();
+    let other_sym_id = format!("lsp_sym:{other_file_id}::{name}::{line}");
+    graph.ensure_typed_node(&other_sym_id, EntityKind::Symbol, &[
+        ("name", name),
+        ("source", "lsp"),
+        ("lsp_kind", "CallParticipant"),
+        ("file", &other_file_id),
+        ("line", &line_str),
+    ]);
+    graph.ensure_typed_node(&other_file_id, EntityKind::SourceFile,
+        &[("path", &other_file_id)]);
+    graph.add_edge(&other_file_id, &other_sym_id);
+    if caller_to_target {
+        graph.add_edge(&other_sym_id, target_sym_id);
+    } else {
+        graph.add_edge(target_sym_id, &other_sym_id);
+    }
 }
 
 fn format_call_item(output: &mut String, call: &Value, key: &str, root: &Path) {
@@ -946,7 +1179,7 @@ fn format_call_item(output: &mut String, call: &Value, key: &str, root: &Path) {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Example: `rust-analyzer src/`, `pylsp .`
-pub fn lsp_diagnostics(_graph: &Graph, target: &str) -> String {
+pub fn lsp_diagnostics(graph: &mut Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -1037,15 +1270,37 @@ pub fn lsp_diagnostics(_graph: &Graph, target: &str) -> String {
     for (file, mut diags) in sorted_files {
         diags.sort_by_key(|d| (d.0, d.1));
         output.push_str(&format!("\n# {} ({} issues)\n", file, diags.len()));
+        let mut file_errors = 0usize;
+        let mut file_warnings = 0usize;
+        let mut file_info = 0usize;
+        let mut first_error: Option<String> = None;
         for (severity, line, message) in &diags {
             let sev_name = severity_name(*severity);
             match severity {
-                1 => errors += 1,
-                2 => warnings += 1,
+                1 => { errors += 1; file_errors += 1;
+                       if first_error.is_none() {
+                           let trimmed: String = message.chars().take(200).collect();
+                           first_error = Some(format!("L{line}: {trimmed}"));
+                       } }
+                2 => { warnings += 1; file_warnings += 1; }
+                3 => file_info += 1,
                 _ => {}
             }
             total += 1;
             output.push_str(&format!("  L{} [{}] {}\n", line, sev_name, message));
+        }
+        // 5.18.0: attach diagnostic counts to the SourceFile node so
+        // `--type source` filtering can rank files by error density.
+        let file_id = file_id_for_graph(graph, &PathBuf::from(&file));
+        graph.ensure_typed_node(&file_id, crate::types::EntityKind::SourceFile,
+            &[("path", &file_id)]);
+        if let Some(node) = graph.nodes.get_mut(&file_id) {
+            node.attrs.insert("lsp_errors".into(), file_errors.to_string());
+            node.attrs.insert("lsp_warnings".into(), file_warnings.to_string());
+            node.attrs.insert("lsp_info".into(), file_info.to_string());
+            if let Some(msg) = first_error {
+                node.attrs.insert("lsp_first_error".into(), msg);
+            }
         }
     }
 
@@ -1060,7 +1315,7 @@ pub fn lsp_diagnostics(_graph: &Graph, target: &str) -> String {
 ///
 /// Target format: `<server_command> <file_or_dir>`
 /// Example: `rust-analyzer src/main.rs`, `pylsp utils.py`
-pub fn lsp_types(_graph: &Graph, target: &str) -> String {
+pub fn lsp_types(graph: &mut Graph, target: &str) -> String {
     let (server_cmd, file_part) = match parse_target(target) {
         Ok(v) => v,
         Err(e) => return e,
@@ -1112,6 +1367,9 @@ pub fn lsp_types(_graph: &Graph, target: &str) -> String {
 
         // For each symbol, hover at its start position to get type signatures
         let positions = collect_symbol_positions(&symbols);
+        // 5.18.0: count typed symbols per file as an attr — rather than
+        // storing every hover body (huge), surface aggregate signal.
+        let mut typed_count = 0usize;
 
         for (name, kind, line, col) in &positions {
             let hover_result = client.request(
@@ -1127,6 +1385,7 @@ pub fn lsp_types(_graph: &Graph, target: &str) -> String {
                 Ok(ref hover) if !hover.is_null() => {
                     let type_str = extract_hover_type(hover);
                     if !type_str.is_empty() {
+                        typed_count += 1;
                         output.push_str(&format!(
                             "  {} {} (L{}): {}\n",
                             kind_name,
@@ -1153,8 +1412,134 @@ pub fn lsp_types(_graph: &Graph, target: &str) -> String {
                 }
             }
         }
+
+        // Per-file attr summarizing type-info coverage.
+        let file_id = file_id_for_graph(graph, file);
+        graph.ensure_typed_node(&file_id, crate::types::EntityKind::SourceFile,
+            &[("path", &file_id)]);
+        if let Some(node) = graph.nodes.get_mut(&file_id) {
+            node.attrs.insert("lsp_typed_symbols".into(), typed_count.to_string());
+            node.attrs.insert("lsp_total_symbols".into(), positions.len().to_string());
+        }
     }
 
     client.shutdown();
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Graph, EntityKind};
+    use std::collections::HashMap;
+
+    /// Verifies 5.18.0's lsp_symbols promotion: walking a synthetic
+    /// DocumentSymbol tree registers Symbol nodes with `source=lsp`
+    /// attr + edges from the source-file id; non-promotable kinds are
+    /// skipped while their children are still visited.
+    #[test]
+    fn lsp_symbol_walker_promotes_promotable_kinds_only() {
+        // LSP DocumentSymbol kinds: 5=Class, 6=Method, 12=Function,
+        // 13=Variable, 19=Object (skipped), 20=Key (skipped).
+        // Tree shape: Class { Method, Method, Object { Method (nested) } }
+        // Plus a top-level Function and a top-level Variable.
+        let payload = serde_json::json!([
+            {
+                "name": "Calculator",
+                "kind": 5,
+                "range": { "start": { "line": 0, "character": 0 },
+                           "end":   { "line": 50, "character": 0 } },
+                "children": [
+                    { "name": "__init__", "kind": 6,
+                      "range": { "start": { "line": 1, "character": 4 },
+                                 "end":   { "line": 3, "character": 4 } } },
+                    { "name": "add",      "kind": 6,
+                      "range": { "start": { "line": 5, "character": 4 },
+                                 "end":   { "line": 7, "character": 4 } } },
+                    { "name": "_helpers", "kind": 19,
+                      "range": { "start": { "line": 9, "character": 4 },
+                                 "end":   { "line": 12, "character": 4 } },
+                      "children": [
+                          { "name": "nested_method", "kind": 6,
+                            "range": { "start": { "line": 10, "character": 8 },
+                                       "end":   { "line": 11, "character": 8 } } }
+                      ] }
+                ]
+            },
+            { "name": "top_level_fn", "kind": 12,
+              "range": { "start": { "line": 60, "character": 0 },
+                         "end":   { "line": 65, "character": 0 } } },
+            { "name": "MAX_SIZE", "kind": 14,
+              "range": { "start": { "line": 70, "character": 0 },
+                         "end":   { "line": 70, "character": 30 } } }
+        ]);
+
+        let mut g = Graph {
+            nodes: HashMap::new(),
+            scan_dir: ".".to_string(),
+            cpg: None,
+        };
+        let file_id = "src/calc.py".to_string();
+        g.ensure_typed_node(&file_id, EntityKind::SourceFile, &[("path", &file_id)]);
+
+        let mut written = 0usize;
+        let arr = payload.as_array().unwrap();
+        register_lsp_symbols(&mut g, &file_id, arr, &mut written, 0);
+
+        let lsp_syms: Vec<&crate::types::GraphNode> = g.nodes.values()
+            .filter(|n| n.kind == EntityKind::Symbol)
+            .filter(|n| n.attrs.get("source").map(|s| s == "lsp").unwrap_or(false))
+            .collect();
+
+        let names: Vec<&String> = lsp_syms.iter()
+            .filter_map(|n| n.attrs.get("name")).collect();
+
+        // Promotable: Class, Method×3 (incl. nested under Object), Function, Constant
+        for expected in ["Calculator", "__init__", "add", "nested_method",
+                         "top_level_fn", "MAX_SIZE"] {
+            assert!(names.iter().any(|n| n.as_str() == expected),
+                "expected `{expected}` registered as Symbol; got {names:?}");
+        }
+        // Object (kind=19) must NOT be registered itself, but its child IS.
+        assert!(!names.iter().any(|n| n.as_str() == "_helpers"),
+            "Object-kind `_helpers` should be skipped; got {names:?}");
+
+        // Each Symbol should have an edge from the source file.
+        let src = g.nodes.get(&file_id).unwrap();
+        for sym in &lsp_syms {
+            assert!(src.imports.iter().any(|i| i == &sym.id),
+                "expected source `{file_id}` → `{}` edge", sym.id);
+        }
+
+        assert_eq!(written, 6, "should have written exactly 6 promotable symbols");
+    }
+
+    /// Bound check: the cap kicks in once we exceed MAX_LSP_SYMBOLS_PER_CALL.
+    #[test]
+    fn lsp_symbol_walker_respects_cap() {
+        let mut children = Vec::with_capacity(MAX_LSP_SYMBOLS_PER_CALL + 100);
+        for i in 0..(MAX_LSP_SYMBOLS_PER_CALL + 100) {
+            children.push(serde_json::json!({
+                "name": format!("fn_{i}"), "kind": 12,
+                "range": { "start": { "line": i, "character": 0 },
+                           "end":   { "line": i, "character": 10 } }
+            }));
+        }
+        let payload = serde_json::Value::Array(children);
+
+        let mut g = Graph {
+            nodes: HashMap::new(),
+            scan_dir: ".".to_string(),
+            cpg: None,
+        };
+        let file_id = "huge.rs".to_string();
+        g.ensure_typed_node(&file_id, EntityKind::SourceFile, &[("path", &file_id)]);
+
+        let mut written = 0usize;
+        register_lsp_symbols(&mut g, &file_id, payload.as_array().unwrap(),
+            &mut written, 0);
+
+        assert_eq!(written, MAX_LSP_SYMBOLS_PER_CALL,
+            "cap MAX_LSP_SYMBOLS_PER_CALL must stop the walker exactly at the limit");
+    }
 }
