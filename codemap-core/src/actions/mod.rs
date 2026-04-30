@@ -32,6 +32,7 @@ pub mod sbom;
 pub mod fuzzy;
 pub mod cert;
 pub mod apk;
+pub mod recon;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -246,6 +247,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "fuzzy-match"  => Ok(fuzzy::fuzzy_match(graph, target)),
         "pe-cert" | "verify-sig" | "authenticode" => Ok(cert::pe_cert(graph, target)),
         "apk-info" | "apk" | "android" => Ok(apk::apk_info(graph, target)),
+        // Recon-artifact parsers (5.16.0) — pure-static, named-artifact-only
+        "robots-parse" | "robots"        => Ok(recon::robots_parse(graph, target)),
+        "web-sitemap-parse" | "sitemap-parse" => Ok(recon::web_sitemap_parse(graph, target)),
+        "web-fingerprint" | "fingerprint-web" => Ok(recon::web_fingerprint(graph, target)),
+        "crt-parse" | "crt-sh"           => Ok(recon::crt_parse(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

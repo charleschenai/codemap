@@ -1493,3 +1493,64 @@ unaffected.
   159 (+14). EntityKinds from 20 → 28. iced-x86 added as the only
   new dep (pure Rust, no system libs). Default scan invariant
   preserved across all 12 releases.
+
+[2026-04-30] feat: 5.16.0 — recon-artifact parsers (#49)
+  source: post-SBM-recon (main4) gap analysis. Charles affirmed
+  "if you build an active crawler codemap isn't really codemap
+  anymore" — so this release stays strictly pure-static. Each
+  parser consumes a captured artifact (file the user named
+  explicitly); never makes network requests.
+
+  Four new actions, no new EntityKinds (reuse HttpEndpoint, Compiler,
+  Cert from earlier releases):
+
+    - robots-parse <robots.txt> — classify each Disallow/Allow
+      rule (admin / sensitive / api / auth / search / asset /
+      generic), promote each path to an HttpEndpoint with
+      attrs[discovered_via=robots, category=...]. Flag leaky
+      rules (admin/sensitive/api categories — robots that
+      *advertise* sensitive paths). Capture Sitemap directives
+      separately.
+    - web-sitemap-parse <sitemap.xml> — extract every <loc>,
+      promote to HttpEndpoint nodes, group URLs by path pattern
+      with `{ID}` substitution for numeric/UUID segments. Detects
+      ID-enumerable patterns (the killer "this sitemap exposes
+      a complete enumeration" finding from main4).
+    - web-fingerprint <html-or-har> — Wappalyzer-style tech
+      detection via 50+ signature rules covering CMSes (WordPress,
+      Drupal, Ghost, Sanity, Strapi), backend frameworks (JHipster,
+      Spring Boot, Django, Rails, Laravel, ASP.NET, FastAPI,
+      Phoenix), frontend (Next.js, React, Vue, Angular, Svelte,
+      Nuxt, Gatsby, Remix), servers (nginx/Apache/IIS/Caddy/
+      OpenResty), CDNs (Cloudflare/CloudFront/Fastly/Akamai/
+      Vercel/Netlify), libs (jQuery, lodash, Bootstrap, Tailwind,
+      Algolia, Elasticsearch), analytics (GA, Segment, Mixpanel).
+      Each match registers a Compiler node with category +
+      anchor count + confidence (25-100 based on hits).
+    - crt-parse <crt.sh-json> — parses crt.sh ?output=json
+      response, extracts subdomains from name_value (split on \n,
+      strip wildcards), tracks earliest not_before per host,
+      registers HttpEndpoint per host + Cert per issuer.
+
+  Implementation: src/actions/recon.rs (~590 LOC). All four
+  parsers operate on captured artifacts. User does the curl
+  themselves; codemap parses the result. Single-file actions —
+  no recursion, no crawling, no network. Same line wget draws.
+
+  Live verification on the SBM recon artifacts (/tmp/sbm-recon/):
+    - robots-parse → 24 rules classified, 8 leaky paths flagged
+      (/api/audits/, /api/logs/, /api/users/, /management/,
+      /v2/api-docs/, etc.), 5 multi-tenant sitemap directives
+      captured (sbm/gabar/isba/inbar/nebar — Zeekbeek platform).
+    - web-sitemap-parse on sbm_sitemap.xml → 47,229 URLs
+      extracted, ID-enumerable pattern /lawyer/{ID} auto-detected
+      → exactly the killer finding from main4.
+    - web-fingerprint on vendor bundle → React (3 anchors, 75%
+      confidence) + Google Analytics caught honestly.
+
+  Tests: 186 passing (was 180). +6 recon unit tests covering
+  rule classification, path-pattern numeric-ID + UUID detection,
+  fingerprint substring matching.
+
+  Action count: 159 → 163 (+4: robots-parse, web-sitemap-parse,
+  web-fingerprint, crt-parse). EntityKinds: still 28.
