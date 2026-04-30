@@ -1,7 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
+
+/// Heterogeneous-graph helper: register a schema-source file with the
+/// appropriate entity kind. Used by all five schema actions to attach their
+/// parsed structures to a single source node, so cross-action queries
+/// ("which proto messages does this OpenAPI path correspond to?") become
+/// meta-path traversals over typed edges.
+fn ensure_schema_source(graph: &mut Graph, target: &str, kind: &str) {
+    let id = format!("schema:{kind}:{target}");
+    graph.ensure_typed_node(&id, EntityKind::SourceFile, &[
+        ("path", target), ("schema_kind", kind),
+    ]);
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 //  1. proto_schema — Parse .proto (Protocol Buffer / gRPC) files
@@ -317,7 +329,7 @@ fn parse_proto_rpc(line: &str) -> Option<ProtoRpc> {
     })
 }
 
-pub fn proto_schema(_graph: &Graph, target: &str) -> String {
+pub fn proto_schema(graph: &mut Graph, target: &str) -> String {
     if target.is_empty() {
         return "Usage: codemap proto-schema <file.proto | directory>".to_string();
     }
@@ -326,6 +338,7 @@ pub fn proto_schema(_graph: &Graph, target: &str) -> String {
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    ensure_schema_source(graph, target, "proto");
 
     let files = collect_proto_files(target);
     if files.is_empty() {
@@ -404,7 +417,7 @@ pub fn proto_schema(_graph: &Graph, target: &str) -> String {
 //  2. openapi_schema — Parse OpenAPI/Swagger JSON or YAML spec files
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn openapi_schema(_graph: &Graph, target: &str) -> String {
+pub fn openapi_schema(graph: &mut Graph, target: &str) -> String {
     if target.is_empty() {
         return "Usage: codemap openapi-schema <spec.json | spec.yaml>".to_string();
     }
@@ -413,6 +426,7 @@ pub fn openapi_schema(_graph: &Graph, target: &str) -> String {
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    ensure_schema_source(graph, target, "openapi");
 
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -1018,7 +1032,7 @@ fn parse_graphql_file(path: &str) -> Option<GqlFile> {
     Some(gf)
 }
 
-pub fn graphql_schema(_graph: &Graph, target: &str) -> String {
+pub fn graphql_schema(graph: &mut Graph, target: &str) -> String {
     if target.is_empty() {
         return "Usage: codemap graphql-schema <file.graphql | directory>".to_string();
     }
@@ -1027,6 +1041,7 @@ pub fn graphql_schema(_graph: &Graph, target: &str) -> String {
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    ensure_schema_source(graph, target, "graphql");
 
     let files = collect_graphql_files(target);
     if files.is_empty() {
@@ -1141,7 +1156,7 @@ struct DockerService {
     command: String,
 }
 
-pub fn docker_map(_graph: &Graph, target: &str) -> String {
+pub fn docker_map(graph: &mut Graph, target: &str) -> String {
     if target.is_empty() {
         return "Usage: codemap docker-map <docker-compose.yml>".to_string();
     }
@@ -1150,6 +1165,7 @@ pub fn docker_map(_graph: &Graph, target: &str) -> String {
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    ensure_schema_source(graph, target, "docker");
 
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -1692,7 +1708,7 @@ fn collect_tf_attributes(lines: &[&str], i: &mut usize) -> BTreeMap<String, Stri
     attrs
 }
 
-pub fn terraform_map(_graph: &Graph, target: &str) -> String {
+pub fn terraform_map(graph: &mut Graph, target: &str) -> String {
     if target.is_empty() {
         return "Usage: codemap terraform-map <file.tf | directory>".to_string();
     }
@@ -1701,6 +1717,7 @@ pub fn terraform_map(_graph: &Graph, target: &str) -> String {
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    ensure_schema_source(graph, target, "terraform");
 
     let files = collect_tf_files(target);
     if files.is_empty() {

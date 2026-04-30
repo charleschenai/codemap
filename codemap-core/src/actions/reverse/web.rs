@@ -3,13 +3,43 @@ use std::fs;
 use std::path::Path;
 use regex::Regex;
 use std::sync::LazyLock;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
 
 use super::common::*;
 
+/// Heterogeneous-graph helper: register an HTTP endpoint as a typed node.
+/// Edges from SourceFile/JsBundle/HAR to the endpoint give us cross-domain
+/// queries — e.g. `meta-path SourceFile->HttpEndpoint` traces every code
+/// file that ultimately produces an API call.
+fn register_endpoint(graph: &mut Graph, source: &str, method: &str, url: &str) {
+    let ep_id = format!("ep:{method}:{url}");
+    graph.ensure_typed_node(&ep_id, EntityKind::HttpEndpoint, &[
+        ("method", method),
+        ("url", url),
+        ("first_seen", source),
+    ]);
+    let src_id = format!("file:{source}");
+    graph.ensure_typed_node(&src_id, EntityKind::SourceFile, &[("path", source)]);
+    graph.add_edge(&src_id, &ep_id);
+}
+
+/// Helper: register an HTML form as a WebForm with edges to the source page.
+fn register_form(graph: &mut Graph, source: &str, action: &str, method: &str) {
+    if action.is_empty() { return; }
+    let form_id = format!("form:{method}:{action}");
+    graph.ensure_typed_node(&form_id, EntityKind::WebForm, &[
+        ("action", action),
+        ("method", method),
+        ("page", source),
+    ]);
+    let src_id = format!("file:{source}");
+    graph.ensure_typed_node(&src_id, EntityKind::SourceFile, &[("path", source)]);
+    graph.add_edge(&src_id, &form_id);
+}
+
 // ── 1. web_api ────────────────────────────────────────────────────
 
-pub fn web_api(_graph: &Graph, target: &str) -> String {
+pub fn web_api(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -177,6 +207,13 @@ pub fn web_api(_graph: &Graph, target: &str) -> String {
 
     if endpoints.is_empty() && static_assets.is_empty() {
         return "No API endpoints or static assets found in HAR file.".to_string();
+    }
+
+    // Pass: register every parsed endpoint so other passes (web_blueprint,
+    // js_api_extract) can deduplicate against the same nodes, and
+    // graph-theory actions can find the central endpoints.
+    for ep in endpoints.values() {
+        register_endpoint(graph, target, &ep.method, &ep.path);
     }
 
     // Determine primary base URL
@@ -392,7 +429,7 @@ fn is_id_segment(seg: &str) -> bool {
 
 // ── 2. web_dom ────────────────────────────────────────────────────
 
-pub fn web_dom(_graph: &Graph, target: &str) -> String {
+pub fn web_dom(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -411,6 +448,13 @@ pub fn web_dom(_graph: &Graph, target: &str) -> String {
 
     // Extract forms
     let forms = extract_forms(&content);
+
+    // Pass: register every form action as a WebForm node with edge to the
+    // page that contains it. After this you can `pagerank --type form` to
+    // find the most-used form action endpoints.
+    for form in &forms {
+        register_form(graph, target, &form.action, &form.method);
+    }
 
     // Extract tables
     let tables = extract_tables(&content);
@@ -1089,7 +1133,7 @@ fn extract_links(content: &str) -> Vec<(String, String)> {
 
 // ── 3. web_sitemap ────────────────────────────────────────────────
 
-pub fn web_sitemap(_graph: &Graph, target: &str) -> String {
+pub fn web_sitemap(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("Path not found: {target}");
@@ -1186,6 +1230,29 @@ pub fn web_sitemap(_graph: &Graph, target: &str) -> String {
 
     if pages.is_empty() {
         return "No pages parsed.".to_string();
+    }
+
+    // Pass: register every page as a SourceFile (HTML *is* source) and
+    // every internal link as an edge. Now `pagerank` over these nodes
+    // surfaces the most-linked-to pages — equivalent to old-school SEO
+    // PageRank on a static site, but reusing the same graph algorithms
+    // codemap already ships.
+    for (page_path, page) in &pages {
+        let pid = format!("page:{page_path}");
+        graph.ensure_typed_node(&pid, EntityKind::SourceFile, &[
+            ("path", page_path), ("title", &page.title),
+        ]);
+    }
+    for (page_path, page) in &pages {
+        let from = format!("page:{page_path}");
+        for link in &page.internal_links {
+            let to = format!("page:{link}");
+            // Only add edge if both endpoints exist (target page may be
+            // outside the scanned dir).
+            if pages.contains_key(link) {
+                graph.add_edge(&from, &to);
+            }
+        }
     }
 
     // Count incoming links for each page
@@ -1339,7 +1406,7 @@ fn extract_domain_from_url(url: &str) -> String {
 
 // ── 4. web_blueprint ────────────────────────────────────────────────
 
-pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
+pub fn web_blueprint(graph: &mut Graph, target: &str) -> String {
     let parts: Vec<&str> = target.splitn(2, ' ').collect();
     if parts.is_empty() || parts[0].is_empty() {
         return "Usage: web-blueprint <har_file> [html_dir]".to_string();
@@ -1705,6 +1772,14 @@ pub fn web_blueprint(_graph: &Graph, target: &str) -> String {
 
     // API Endpoints
     if !endpoints.is_empty() {
+        // Pass: register every blueprint endpoint into the heterogeneous
+        // graph. web_blueprint is the most comprehensive web action — its
+        // endpoint list combines HAR + HTML form actions, so the resulting
+        // HttpEndpoint nodes are a superset of what web_api alone produces.
+        for ep in endpoints.values() {
+            register_endpoint(graph, target, &ep.method, &ep.path);
+        }
+
         out.push_str(&format!("\u{2500}\u{2500} API Endpoints ({}) \u{2500}\u{2500}\n", endpoints.len()));
         for ep in endpoints.values() {
             let params_str = if !ep.query_params.is_empty() {
@@ -1850,7 +1925,7 @@ static JS_CONTENT_TYPE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"['"]Content-Type['"]\s*:\s*['"`]([^'"`]+)['"`]"#).unwrap()
 });
 
-pub fn js_api_extract(_graph: &Graph, target: &str) -> String {
+pub fn js_api_extract(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("Path not found: {target}");
@@ -1966,6 +2041,15 @@ pub fn js_api_extract(_graph: &Graph, target: &str) -> String {
         if seen.insert(key) {
             unique_calls.push((method.clone(), url.clone()));
         }
+    }
+
+    // Pass: register every JS-extracted endpoint plus an edge from each
+    // calling JS file to its endpoints. Crucial for `meta-path
+    // SourceFile->HttpEndpoint` queries — finds every JS bundle that
+    // produces an API call without needing a HAR capture.
+    for (method, url, file) in &all_api_calls {
+        let m = if method.is_empty() { "GET" } else { method.as_str() };
+        register_endpoint(graph, file, m, url);
     }
 
     // Build output

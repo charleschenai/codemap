@@ -13,7 +13,8 @@ use std::time::Instant;
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CACHE_VERSION: u32 = 8;
+// 9: heterogeneous graph (EntityKind + attrs on GraphNode)
+const CACHE_VERSION: u32 = 9;
 const MAX_DEPTH: usize = 50;
 
 /// Print a warning when a single scan crosses this many supported files.
@@ -402,6 +403,8 @@ fn scan_single_dir(
                                 functions: cached.functions.clone(),
                                 data_flow: cached.data_flow.clone(),
                                 bridges: cached.bridges.clone(),
+                                kind: crate::types::EntityKind::SourceFile,
+                                attrs: std::collections::HashMap::new(),
                                 mtime: Some(mtime),
                             },
                         );
@@ -480,6 +483,8 @@ fn scan_single_dir(
                     functions: result.functions,
                     data_flow: result.data_flow,
                     bridges: result.bridges,
+                    kind: crate::types::EntityKind::SourceFile,
+                    attrs: std::collections::HashMap::new(),
                     mtime: Some(mtime),
                 },
             })

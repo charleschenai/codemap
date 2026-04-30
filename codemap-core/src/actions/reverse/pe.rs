@@ -1,18 +1,32 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
 use crate::utils;
 
 use super::common::*;
 
+/// Heterogeneous-graph helper: register the analyzed PE binary as a typed
+/// node so subsequent passes (pe_imports, pe_exports, etc.) can attach
+/// edges to the same node, and so graph-theory actions (pagerank, hubs,
+/// dot, mermaid) see it. Idempotent — multiple actions on the same
+/// target merge their attrs into a single node.
+fn ensure_pe_binary_node(graph: &mut Graph, target: &str, source: &str) {
+    let bin_id = format!("pe:{target}");
+    graph.ensure_typed_node(&bin_id, EntityKind::PeBinary, &[
+        ("path", target),
+        ("source_action", source),
+    ]);
+}
+
 // ── 1. pe_strings ───────────────────────────────────────────────────
 
-pub fn pe_strings(_graph: &Graph, target: &str) -> String {
+pub fn pe_strings(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
+    ensure_pe_binary_node(graph, target, "pe_strings");
 
     // Extract ASCII strings of length >= 6
     let strings = extract_ascii_strings(&data, 6);
@@ -118,7 +132,7 @@ pub fn pe_strings(_graph: &Graph, target: &str) -> String {
 
 // ── 2. pe_exports ───────────────────────────────────────────────────
 
-pub fn pe_exports(_graph: &Graph, target: &str) -> String {
+pub fn pe_exports(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -126,6 +140,18 @@ pub fn pe_exports(_graph: &Graph, target: &str) -> String {
 
     match parse_pe_exports(&data) {
         Ok(exports) => {
+            // Register binary + each export as a Symbol node (with the
+            // binary as the export source), so reverse lookups work:
+            // "what binary exports symbol X?" via imported_by traversal.
+            ensure_pe_binary_node(graph, target, "pe_exports");
+            let bin_id = format!("pe:{target}");
+            for sym in &exports {
+                let sym_id = format!("sym:{target}::{sym}");
+                graph.ensure_typed_node(&sym_id, EntityKind::Symbol, &[
+                    ("name", sym), ("exported_by", target),
+                ]);
+                graph.add_edge(&bin_id, &sym_id);
+            }
             if exports.is_empty() {
                 return "No exports found in PE binary.".to_string();
             }
@@ -302,15 +328,52 @@ fn extract_export_names_heuristic(data: &[u8]) -> Vec<String> {
 
 // ── 3. pe_imports ──────────────────────────────────────────────────
 
-pub fn pe_imports(_graph: &Graph, target: &str) -> String {
+pub fn pe_imports(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
 
     match parse_pe_imports_structured(&data) {
-        Ok(dlls) => format_pe_imports_result(&dlls),
+        Ok(dlls) => {
+            register_pe_imports_into_graph(graph, target, &dlls);
+            format_pe_imports_result(&dlls)
+        }
         Err(e) => format!("PE import parse error: {e}"),
+    }
+}
+
+/// Heterogeneous-graph pass: register the analyzed PE binary, every DLL it
+/// imports, and every imported symbol as typed nodes, with edges from the
+/// binary to its DLLs and from each DLL to its symbols. Lets pagerank/hubs/
+/// bridges/clusters/dot operate on PE binary networks the same way they
+/// operate on source-code import graphs.
+fn register_pe_imports_into_graph(graph: &mut Graph, target: &str, dlls: &[ImportedDll]) {
+    let bin_id = format!("pe:{target}");
+    graph.ensure_typed_node(
+        &bin_id,
+        crate::types::EntityKind::PeBinary,
+        &[("path", target), ("dll_count", &dlls.len().to_string())],
+    );
+
+    for dll in dlls {
+        let dll_id = format!("dll:{}", dll.name.to_ascii_lowercase());
+        graph.ensure_typed_node(
+            &dll_id,
+            crate::types::EntityKind::Dll,
+            &[("name", &dll.name), ("symbol_count", &dll.functions.len().to_string())],
+        );
+        graph.add_edge(&bin_id, &dll_id);
+
+        for sym in &dll.functions {
+            let sym_id = format!("sym:{}::{}", dll.name.to_ascii_lowercase(), sym);
+            graph.ensure_typed_node(
+                &sym_id,
+                crate::types::EntityKind::Symbol,
+                &[("name", sym), ("dll", &dll.name)],
+            );
+            graph.add_edge(&dll_id, &sym_id);
+        }
     }
 }
 
@@ -449,11 +512,12 @@ fn format_pe_imports_result(dlls: &[ImportedDll]) -> String {
 
 // ── 4. pe_resources ────────────────────────────────────────────────
 
-pub fn pe_resources(_graph: &Graph, target: &str) -> String {
+pub fn pe_resources(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
+    ensure_pe_binary_node(graph, target, "pe_resources");
 
     match parse_pe_resources(&data) {
         Ok(info) => info,
@@ -1008,7 +1072,8 @@ fn parse_version_children(data: &[u8], start: usize, end: usize, depth: usize) -
 
 // ── 5. pe_debug ───────────────────────────────────────────────────
 
-pub fn pe_debug(_graph: &Graph, target: &str) -> String {
+pub fn pe_debug(graph: &mut Graph, target: &str) -> String {
+    ensure_pe_binary_node(graph, target, "pe_debug");
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -1292,7 +1357,8 @@ fn is_leap_year(y: i64) -> bool {
 
 // ── 6. pe_sections ──────────────────────────────────────────────────
 
-pub fn pe_sections(_graph: &Graph, target: &str) -> String {
+pub fn pe_sections(graph: &mut Graph, target: &str) -> String {
+    ensure_pe_binary_node(graph, target, "pe_sections");
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -1443,11 +1509,22 @@ fn shannon_entropy(data: &[u8]) -> f64 {
 
 // ── 7. dotnet_meta ──────────────────────────────────────────────────
 
-pub fn dotnet_meta(_graph: &Graph, target: &str) -> String {
+pub fn dotnet_meta(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
+
+    // Register the .NET-specific binary as both a PeBinary (it's still a PE)
+    // and a DotnetAssembly (with managed-code attrs). Two-tier registration
+    // lets you query via either kind: `pagerank --type pe` includes .NET
+    // assemblies; `--type assembly` filters to just managed.
+    ensure_pe_binary_node(graph, target, "dotnet_meta");
+    let asm_id = format!("asm:{target}");
+    graph.ensure_typed_node(&asm_id, EntityKind::DotnetAssembly, &[
+        ("path", target),
+    ]);
+    graph.add_edge(&format!("pe:{target}"), &asm_id);
 
     match parse_dotnet_metadata(&data) {
         Ok(info) => info,
@@ -1999,7 +2076,7 @@ fn read_compressed_uint(data: &[u8], offset: usize) -> (usize, usize) {
 
 // ── 8. binary_diff ─────────────────────────────────────────────────
 
-pub fn binary_diff(_graph: &Graph, target: &str) -> String {
+pub fn binary_diff(graph: &mut Graph, target: &str) -> String {
     let parts: Vec<&str> = target.splitn(2, ' ').collect();
     if parts.len() != 2 {
         return "Usage: binary-diff <file1> <file2>\nCompare two PE binaries.".to_string();

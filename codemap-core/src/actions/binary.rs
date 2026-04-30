@@ -1,6 +1,13 @@
 use std::fs;
 use std::path::Path;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
+
+/// Heterogeneous-graph helper: register a binary node with the appropriate
+/// kind. Idempotent — repeated calls only merge attrs.
+fn register_binary(graph: &mut Graph, target: &str, kind: EntityKind, prefix: &str) {
+    let id = format!("{prefix}:{target}");
+    graph.ensure_typed_node(&id, kind, &[("path", target)]);
+}
 
 const MAX_BINARY_SIZE: u64 = 256 * 1024 * 1024; // 256 MB
 
@@ -131,7 +138,8 @@ fn decode_leb128(data: &[u8], pos: usize) -> Result<(u64, usize), String> {
 
 // ── 1. elf_info ────────────────────────────────────────────────────
 
-pub fn elf_info(_graph: &Graph, target: &str) -> String {
+pub fn elf_info(graph: &mut Graph, target: &str) -> String {
+    register_binary(graph, target, EntityKind::ElfBinary, "elf");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -472,7 +480,8 @@ fn read_elf_section_data(
 
 // ── 2. macho_info ──────────────────────────────────────────────────
 
-pub fn macho_info(_graph: &Graph, target: &str) -> String {
+pub fn macho_info(graph: &mut Graph, target: &str) -> String {
+    register_binary(graph, target, EntityKind::MachoBinary, "macho");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -907,11 +916,12 @@ fn macho_cpu_name(cpu_type: u32, _cpu_subtype: u32) -> &'static str {
 
 // ── 3. java_class ──────────────────────────────────────────────────
 
-pub fn java_class(_graph: &Graph, target: &str) -> String {
+pub fn java_class(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
     }
+    register_binary(graph, target, EntityKind::JavaClass, "java");
 
     // Check if JAR (ZIP) file
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
@@ -1339,7 +1349,8 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
 
 // ── 4. wasm_info ───────────────────────────────────────────────────
 
-pub fn wasm_info(_graph: &Graph, target: &str) -> String {
+pub fn wasm_info(graph: &mut Graph, target: &str) -> String {
+    register_binary(graph, target, EntityKind::WasmModule, "wasm");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,

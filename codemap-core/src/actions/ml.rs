@@ -1,7 +1,18 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
+
+/// Heterogeneous-graph helper: register an ML model file as an MlModel node.
+/// Format-specific attrs (architecture, parameter count, quantization) flow
+/// through `attrs`. Lets `codemap pagerank --type model` rank model files
+/// by their importance in a project's data layer.
+fn register_ml_model(graph: &mut Graph, target: &str, format: &str) {
+    let id = format!("model:{target}");
+    graph.ensure_typed_node(&id, EntityKind::MlModel, &[
+        ("path", target), ("format", format),
+    ]);
+}
 
 const MAX_BINARY_SIZE: u64 = 256 * 1024 * 1024; // 256 MB
 
@@ -134,7 +145,8 @@ fn read_gguf_string(data: &[u8], offset: usize) -> Result<(String, usize), Strin
 
 // ── 1. gguf_info ──────────────────────────────────────────────────
 
-pub fn gguf_info(_graph: &Graph, target: &str) -> String {
+pub fn gguf_info(graph: &mut Graph, target: &str) -> String {
+    register_ml_model(graph, target, "gguf");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -551,7 +563,8 @@ fn parse_gguf(data: &[u8], target: &str) -> Result<String, String> {
 
 // ── 2. safetensors_info ───────────────────────────────────────────
 
-pub fn safetensors_info(_graph: &Graph, target: &str) -> String {
+pub fn safetensors_info(graph: &mut Graph, target: &str) -> String {
+    register_ml_model(graph, target, "safetensors");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -732,7 +745,8 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
 
 // ── 3. onnx_info ──────────────────────────────────────────────────
 
-pub fn onnx_info(_graph: &Graph, target: &str) -> String {
+pub fn onnx_info(graph: &mut Graph, target: &str) -> String {
+    register_ml_model(graph, target, "onnx");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -1076,7 +1090,8 @@ fn parse_onnx(data: &[u8], target: &str) -> Result<String, String> {
 
 // ── 4. pyc_info ───────────────────────────────────────────────────
 
-pub fn pyc_info(_graph: &Graph, target: &str) -> String {
+pub fn pyc_info(graph: &mut Graph, target: &str) -> String {
+    register_ml_model(graph, target, "pyc");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,
@@ -1298,7 +1313,8 @@ fn parse_pyc(data: &[u8], target: &str) -> Result<String, String> {
 
 // ── 5. cuda_info ──────────────────────────────────────────────────
 
-pub fn cuda_info(_graph: &Graph, target: &str) -> String {
+pub fn cuda_info(graph: &mut Graph, target: &str) -> String {
+    register_ml_model(graph, target, "cuda");
     let data = match load_binary(target) {
         Ok(d) => d,
         Err(e) => return e,

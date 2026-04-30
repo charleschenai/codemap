@@ -1,9 +1,31 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
-use crate::types::Graph;
+use crate::types::{Graph, EntityKind};
 
 use super::common::*;
+
+/// Heterogeneous-graph helper: register a SchemaTable + its fields.
+/// `tbl_attrs` carries table-level metadata (engine, file, etc.); `fields`
+/// is name → type for each column. Each field becomes a SchemaField node
+/// edge-connected to its parent SchemaTable, enabling queries like:
+/// "what tables have a `customer_id` field?" via imported_by traversal.
+fn register_schema_table(
+    graph: &mut Graph,
+    table_name: &str,
+    tbl_attrs: &[(&str, &str)],
+    fields: &[(String, String)],
+) {
+    let tbl_id = format!("table:{table_name}");
+    graph.ensure_typed_node(&tbl_id, EntityKind::SchemaTable, tbl_attrs);
+    for (fname, ftype) in fields {
+        let fld_id = format!("field:{table_name}.{fname}");
+        graph.ensure_typed_node(&fld_id, EntityKind::SchemaField, &[
+            ("name", fname), ("type", ftype), ("table", table_name),
+        ]);
+        graph.add_edge(&tbl_id, &fld_id);
+    }
+}
 
 // ── Clarion Schema Types ────────────────────────────────────────────
 
@@ -32,7 +54,7 @@ struct ClarionField {
 
 // ── 1. clarion_schema ───────────────────────────────────────────────
 
-pub fn clarion_schema(_graph: &Graph, target: &str) -> String {
+pub fn clarion_schema(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
     if !path.exists() {
         return format!("File not found: {target}");
@@ -53,6 +75,23 @@ pub fn clarion_schema(_graph: &Graph, target: &str) -> String {
 
     if tables.is_empty() {
         return "No tables found in file.".to_string();
+    }
+
+    // Pass: register every parsed table + its fields into the graph so
+    // pagerank can identify the most-referenced tables, dot/mermaid can
+    // visualize the schema, and meta-path queries like
+    // `meta-path SourceFile->SchemaTable` can find code that touches data.
+    for tbl in &tables {
+        let fields: Vec<(String, String)> = tbl.fields.iter()
+            .map(|f| (f.name.clone(), f.field_type.clone()))
+            .collect();
+        register_schema_table(graph, &tbl.name, &[
+            ("source", target),
+            ("kind", "clarion"),
+            ("sql_name", &tbl.sql_name),
+            ("prefix", &tbl.prefix),
+            ("key_count", &tbl.keys.len().to_string()),
+        ], &fields);
     }
 
     let total_fields: usize = tables.iter().map(|t| t.fields.len()).sum();
@@ -406,11 +445,23 @@ fn infer_relationships(tables: &[ClarionTable]) -> Vec<String> {
 
 // ── 2. dbf_schema ─────────────────────────────────────────────────
 
-pub fn dbf_schema(_graph: &Graph, target: &str) -> String {
+pub fn dbf_schema(graph: &mut Graph, target: &str) -> String {
     let data = match read_binary_file(target) {
         Ok(d) => d,
         Err(e) => return e,
     };
+
+    // Register the DBF file as a SchemaTable. parse_dbf_header returns a
+    // human-readable report without exposing structured fields, so we tag
+    // the table itself but skip per-field registration. (Future work:
+    // refactor parse_dbf_header to also return Vec<DbfField> so we can
+    // register each column as a SchemaField like clarion_schema does.)
+    let table_name = std::path::Path::new(target)
+        .file_stem().and_then(|s| s.to_str()).unwrap_or(target);
+    register_schema_table(graph, table_name, &[
+        ("source", target),
+        ("kind", "dbf"),
+    ], &[]);
 
     match parse_dbf_header(&data, target) {
         Ok(info) => info,
@@ -564,7 +615,7 @@ fn format_dbf_number(n: u32) -> String {
 
 // ── 3. sql_extract ─────────────────────────────────────────────────
 
-pub fn sql_extract(_graph: &Graph, target: &str) -> String {
+pub fn sql_extract(graph: &mut Graph, target: &str) -> String {
     let path = Path::new(target);
 
     if path.is_dir() {
@@ -578,6 +629,24 @@ pub fn sql_extract(_graph: &Graph, target: &str) -> String {
     };
 
     let result = extract_sql_from_binary(&data);
+
+    // Pass: register every table referenced in extracted SQL + every join
+    // relationship as an edge between its table pair. After this, you can
+    // run `codemap pagerank --type table` to find the central tables in
+    // an unknown binary's data layer, or `codemap clusters --type table`
+    // to find tightly-coupled table groups.
+    for tname in result.table_ops.keys() {
+        register_schema_table(graph, tname, &[
+            ("source", target),
+            ("kind", "sql_extract"),
+        ], &[]);
+    }
+    for ((a, b), _count) in &result.join_relationships {
+        let a_id = format!("table:{a}");
+        let b_id = format!("table:{b}");
+        graph.add_edge(&a_id, &b_id);
+    }
+
     format_sql_extraction(&result, None)
 }
 

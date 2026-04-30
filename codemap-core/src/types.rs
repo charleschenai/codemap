@@ -78,6 +78,140 @@ impl BridgeKind {
     }
 }
 
+// ── EntityKind ──────────────────────────────────────────────────────
+//
+// Heterogeneous graph: a single Graph can hold source files, PE/ELF/Mach-O
+// binaries, DLLs, schema tables, HTTP endpoints, ML models, etc. Every node
+// declares what it represents via `kind`. Algorithms can filter or weight by
+// kind, visualizations get distinct shapes/colors, and `meta-path` queries
+// can traverse paths through specific kind sequences.
+//
+// Inspired by GitHub's stack-graphs (Node enum with predicate methods) and
+// Joern's pass-based CPG augmentation: each RE action is a "pass" that
+// inserts kind-tagged nodes/edges into the shared Graph.
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum EntityKind {
+    /// Source file with parsed AST (Python, Rust, TypeScript, etc.). Default.
+    SourceFile,
+    /// Windows PE binary (EXE/DLL).
+    PeBinary,
+    /// Linux ELF binary.
+    ElfBinary,
+    /// macOS Mach-O binary (universal or per-arch).
+    MachoBinary,
+    /// JVM Java/Kotlin .class or .jar.
+    JavaClass,
+    /// WebAssembly module.
+    WasmModule,
+    /// External library a binary imports (e.g. `kernel32.dll`, `libc.so.6`).
+    Dll,
+    /// Function/method symbol from a binary's import or export table.
+    Symbol,
+    /// HTTP endpoint discovered from web-api/web-blueprint/openapi/etc.
+    HttpEndpoint,
+    /// HTML form action endpoint with method + fields.
+    WebForm,
+    /// Database table from SQL/Clarion/DBF schema extraction.
+    SchemaTable,
+    /// Field/column on a SchemaTable.
+    SchemaField,
+    /// Protobuf message type.
+    ProtoMessage,
+    /// GraphQL type (object, scalar, interface, etc.).
+    GraphqlType,
+    /// OpenAPI/Swagger path operation.
+    OpenApiPath,
+    /// Docker Compose service.
+    DockerService,
+    /// Terraform resource or module.
+    TerraformResource,
+    /// ML model file (GGUF, SafeTensors, ONNX, .pyc, CUDA fatbin).
+    MlModel,
+    /// .NET assembly.
+    DotnetAssembly,
+    /// .NET type (class, struct, interface).
+    DotnetType,
+}
+
+impl EntityKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EntityKind::SourceFile => "source",
+            EntityKind::PeBinary => "pe",
+            EntityKind::ElfBinary => "elf",
+            EntityKind::MachoBinary => "macho",
+            EntityKind::JavaClass => "jclass",
+            EntityKind::WasmModule => "wasm",
+            EntityKind::Dll => "dll",
+            EntityKind::Symbol => "symbol",
+            EntityKind::HttpEndpoint => "endpoint",
+            EntityKind::WebForm => "form",
+            EntityKind::SchemaTable => "table",
+            EntityKind::SchemaField => "field",
+            EntityKind::ProtoMessage => "proto",
+            EntityKind::GraphqlType => "gql",
+            EntityKind::OpenApiPath => "oapi",
+            EntityKind::DockerService => "docker",
+            EntityKind::TerraformResource => "tf",
+            EntityKind::MlModel => "model",
+            EntityKind::DotnetAssembly => "asm",
+            EntityKind::DotnetType => "type",
+        }
+    }
+
+    /// Parse a kind from CLI input ("source", "pe", etc.). Used by --type filter.
+    pub fn from_str(s: &str) -> Option<Self> {
+        let s = s.to_ascii_lowercase();
+        Some(match s.as_str() {
+            "source" | "src" | "file" => EntityKind::SourceFile,
+            "pe"      => EntityKind::PeBinary,
+            "elf"     => EntityKind::ElfBinary,
+            "macho"   => EntityKind::MachoBinary,
+            "jclass" | "java"  => EntityKind::JavaClass,
+            "wasm"    => EntityKind::WasmModule,
+            "dll"     => EntityKind::Dll,
+            "symbol" | "sym"   => EntityKind::Symbol,
+            "endpoint" | "ep"  => EntityKind::HttpEndpoint,
+            "form"    => EntityKind::WebForm,
+            "table"   => EntityKind::SchemaTable,
+            "field"   => EntityKind::SchemaField,
+            "proto"   => EntityKind::ProtoMessage,
+            "gql" | "graphql"  => EntityKind::GraphqlType,
+            "oapi" | "openapi" => EntityKind::OpenApiPath,
+            "docker" | "service" => EntityKind::DockerService,
+            "tf" | "terraform"   => EntityKind::TerraformResource,
+            "model" | "ml"       => EntityKind::MlModel,
+            "asm" | "assembly"   => EntityKind::DotnetAssembly,
+            "type" | "dotnet-type" => EntityKind::DotnetType,
+            _ => return None,
+        })
+    }
+
+    pub fn is_binary(&self) -> bool {
+        matches!(self,
+            EntityKind::PeBinary | EntityKind::ElfBinary | EntityKind::MachoBinary
+                | EntityKind::JavaClass | EntityKind::WasmModule)
+    }
+
+    pub fn is_schema(&self) -> bool {
+        matches!(self,
+            EntityKind::SchemaTable | EntityKind::SchemaField
+                | EntityKind::ProtoMessage | EntityKind::GraphqlType)
+    }
+
+    pub fn is_web(&self) -> bool {
+        matches!(self,
+            EntityKind::HttpEndpoint | EntityKind::WebForm | EntityKind::OpenApiPath)
+    }
+
+    pub fn is_infra(&self) -> bool {
+        matches!(self, EntityKind::DockerService | EntityKind::TerraformResource)
+    }
+}
+
+fn default_entity_kind() -> EntityKind { EntityKind::SourceFile }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: String,
@@ -89,6 +223,17 @@ pub struct GraphNode {
     pub functions: Vec<FunctionInfo>,
     pub data_flow: Option<FileDataFlow>,
     pub bridges: Vec<BridgeInfo>,
+    /// Heterogeneous-graph node kind. Defaults to SourceFile so existing
+    /// scanner code (which only produces source-file nodes) keeps working.
+    /// RE actions tag their nodes with the appropriate non-default kind.
+    #[serde(default = "default_entity_kind")]
+    pub kind: EntityKind,
+    /// Free-form attribute bag for kind-specific metadata. e.g. a SchemaTable
+    /// might store {"engine": "innodb"}; an HttpEndpoint might store
+    /// {"method": "POST", "auth": "bearer"}. Kept generic so adding new node
+    /// kinds doesn't churn the struct.
+    #[serde(default)]
+    pub attrs: HashMap<String, String>,
     #[serde(skip)]
     pub mtime: Option<f64>,
 }
@@ -238,6 +383,123 @@ impl Graph {
             return Some(matches[0]);
         }
         None
+    }
+
+    /// Insert (or fetch) a typed node. Used by RE-action passes to register
+    /// kind-tagged nodes — PE binaries, schema tables, HTTP endpoints, etc.
+    /// If a node with the same id already exists, returns it without overwriting
+    /// fields (so repeated runs are idempotent and won't lose state). Pass
+    /// kind-specific metadata via the `attrs` slice.
+    pub fn ensure_typed_node(
+        &mut self,
+        id: &str,
+        kind: EntityKind,
+        attrs: &[(&str, &str)],
+    ) -> &mut GraphNode {
+        if !self.nodes.contains_key(id) {
+            let mut attr_map = HashMap::new();
+            for (k, v) in attrs {
+                attr_map.insert((*k).to_string(), (*v).to_string());
+            }
+            self.nodes.insert(id.to_string(), GraphNode {
+                id: id.to_string(),
+                imports: Vec::new(),
+                imported_by: Vec::new(),
+                urls: Vec::new(),
+                exports: Vec::new(),
+                lines: 0,
+                functions: Vec::new(),
+                data_flow: None,
+                bridges: Vec::new(),
+                kind,
+                attrs: attr_map,
+                mtime: None,
+            });
+        } else {
+            // Existing node — merge attrs, but preserve kind if already set
+            // (don't let a later pass downgrade a node's classification).
+            let n = self.nodes.get_mut(id).unwrap();
+            for (k, v) in attrs {
+                n.attrs.insert((*k).to_string(), (*v).to_string());
+            }
+        }
+        self.nodes.get_mut(id).unwrap()
+    }
+
+    /// Add a directed import-style edge between two nodes by id. Both nodes
+    /// must exist; missing nodes are silently no-op'd to keep RE passes
+    /// robust against partial extraction. Idempotent — repeated calls do not
+    /// duplicate edges.
+    pub fn add_edge(&mut self, from: &str, to: &str) {
+        if from == to { return; }
+        if !self.nodes.contains_key(from) || !self.nodes.contains_key(to) { return; }
+        if let Some(src) = self.nodes.get_mut(from) {
+            if !src.imports.iter().any(|i| i == to) {
+                src.imports.push(to.to_string());
+            }
+        }
+        if let Some(dst) = self.nodes.get_mut(to) {
+            if !dst.imported_by.iter().any(|i| i == from) {
+                dst.imported_by.push(from.to_string());
+            }
+        }
+    }
+
+    /// Filter nodes by a set of allowed kinds. Returns ids in stable order.
+    /// Used by `--type` flag on graph-theory actions.
+    pub fn nodes_by_kind(&self, kinds: &[EntityKind]) -> Vec<&GraphNode> {
+        let mut v: Vec<&GraphNode> = self.nodes.values()
+            .filter(|n| kinds.contains(&n.kind))
+            .collect();
+        v.sort_by(|a, b| a.id.cmp(&b.id));
+        v
+    }
+
+    /// Traverse a meta-path: a sequence of EntityKinds that edges should
+    /// connect. Returns every concrete path through the graph that follows
+    /// the kind sequence. Powers the `meta-path` action — the heterogeneous
+    /// graph killer feature ("show me every SourceFile that ends in an
+    /// HttpEndpoint"). Limited to `max_paths` to avoid blowups on dense
+    /// graphs; depth bounded by the kind sequence length.
+    pub fn meta_path(&self, kinds: &[EntityKind], max_paths: usize) -> Vec<Vec<String>> {
+        if kinds.len() < 2 { return Vec::new(); }
+        let mut out: Vec<Vec<String>> = Vec::new();
+        let starts: Vec<&str> = self.nodes.values()
+            .filter(|n| n.kind == kinds[0])
+            .map(|n| n.id.as_str())
+            .collect();
+        for start in starts {
+            self.meta_path_dfs(start, kinds, 0, &mut Vec::new(), &mut out, max_paths);
+            if out.len() >= max_paths { break; }
+        }
+        out
+    }
+
+    fn meta_path_dfs(
+        &self,
+        cur: &str,
+        kinds: &[EntityKind],
+        depth: usize,
+        path: &mut Vec<String>,
+        out: &mut Vec<Vec<String>>,
+        max_paths: usize,
+    ) {
+        if out.len() >= max_paths { return; }
+        path.push(cur.to_string());
+        if depth + 1 == kinds.len() {
+            out.push(path.clone());
+        } else if let Some(node) = self.nodes.get(cur) {
+            let next_kind = kinds[depth + 1];
+            for n in &node.imports {
+                if let Some(next) = self.nodes.get(n) {
+                    if next.kind == next_kind {
+                        self.meta_path_dfs(&next.id, kinds, depth + 1, path, out, max_paths);
+                    }
+                }
+                if out.len() >= max_paths { break; }
+            }
+        }
+        path.pop();
     }
 }
 
