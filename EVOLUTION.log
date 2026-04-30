@@ -1058,3 +1058,30 @@ unaffected.
 
   Action count: 146 → 148 (+2: overlay-info, lang-fingerprint
   already shipped in 5.12.0).
+
+[2026-04-30] feat: 5.12.2 — PE Rich header + TLS callbacks + entry-point analysis
+  source: 5.13.0 task #38 lifted forward — these don't actually need
+  the disasm framework (#36) so they shipped cleanly without it.
+
+  New module: src/actions/pe_meta.rs (~340 LOC). Single new action:
+  `pe-meta <pe-binary>` (alias `rich-header`).
+
+  Features:
+    - Rich header parsing — undocumented Microsoft fingerprint
+      embedded between the DOS stub and PE signature. Records which
+      cl.exe / link.exe / cvtres / masm versions produced each
+      object file linked into the binary. Product-ID lookup table
+      covers VS6 → VS2022. attrs["rich_msvc"] / attrs["rich_entries"]
+      on the binary node.
+    - TLS callbacks — TLS_DIRECTORY callback array. These run BEFORE
+      main(), making them a common malware persistence vector.
+      Detects + flags + lists callback RVAs. attrs["has_tls_callback"]
+      / attrs["tls_callback_count"]. Surfaces ⚠ warning in output.
+    - Entry-point analysis — AddressOfEntryPoint from optional
+      header. attrs["entry_rva"] on binary node.
+
+  All three live in one action so users don't need to remember
+  three commands to triage a PE binary.
+
+  Tests: 150 passing (was 146). +4 pe_meta tests.
+  Action count: 148 → 149 (+1).
