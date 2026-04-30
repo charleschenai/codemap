@@ -692,6 +692,44 @@ fn test_brokers_alias() {
 }
 
 #[test]
+fn test_voterank_runs() {
+    let mut g = two_clique_graph();
+    let result = execute(&mut g, "voterank", "", false).unwrap();
+    assert!(result.contains("VoteRank"), "missing header: {result}");
+    // Top spreaders should include nodes from both cliques
+    assert!(result.contains("a") || result.contains("b"));
+}
+
+#[test]
+fn test_group_centrality_runs() {
+    let mut g = synthetic_hetero_graph();
+    // Group all SchemaTable nodes
+    let result = execute(&mut g, "group", "table", false).unwrap();
+    assert!(result.contains("Group Centrality"), "missing header: {result}");
+}
+
+#[test]
+fn test_group_centrality_requires_filter() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "group", "", false).unwrap();
+    assert!(result.contains("requires a kind filter"), "should warn: {result}");
+}
+
+#[test]
+fn test_percolation_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "percolation", "", false).unwrap();
+    assert!(result.contains("Percolation"), "missing header: {result}");
+}
+
+#[test]
+fn test_current_flow_runs() {
+    let mut g = synthetic_hetero_graph();
+    let result = execute(&mut g, "current-flow", "", false).unwrap();
+    assert!(result.contains("Current-Flow"), "missing header: {result}");
+}
+
+#[test]
 fn test_scanner_promotes_urls_to_endpoint_nodes() {
     // 5.4.0: source-code URLs become HttpEndpoint nodes during scan, so
     // `meta-path source->endpoint` works on any codebase without first

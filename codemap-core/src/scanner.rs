@@ -160,7 +160,7 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
             if skip_hosts.iter().any(|h| {
                 let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
                 let after = &url[scheme_end..];
-                let host_end = after.find(|c: char| c == '/' || c == ':' || c == '?' || c == '#').unwrap_or(after.len());
+                let host_end = after.find([':', '/', '?', '#']).unwrap_or(after.len());
                 &after[..host_end] == *h
             }) { continue; }
 

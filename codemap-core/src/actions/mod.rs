@@ -161,6 +161,10 @@ fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree_mode: bool
         "harmonic"    => Ok(centrality::harmonic(graph, &centrality::parse_kinds(target))),
         "load"        => Ok(centrality::load_centrality(graph, &centrality::parse_kinds(target))),
         "structural-holes" | "brokers" => Ok(centrality::structural_holes(graph, &centrality::parse_kinds(target))),
+        "voterank"    => Ok(centrality::voterank(graph, &centrality::parse_kinds(target))),
+        "group"       => Ok(centrality::group_centrality(graph, &centrality::parse_kinds(target))),
+        "percolation" => Ok(centrality::percolation(graph, &centrality::parse_kinds(target))),
+        "current-flow" | "current-flow-betweenness" => Ok(centrality::current_flow_betweenness(graph, &centrality::parse_kinds(target))),
         // Meta-Path (1) — heterogeneous graph traversal. Target is the
         // arrow-separated kind sequence: "source->endpoint" etc.
         "meta-path" | "metapath" => Ok(meta_path::meta_path(graph, target)),

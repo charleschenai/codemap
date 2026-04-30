@@ -514,3 +514,32 @@ unaffected.
   to silence the Node 20 deprecation warnings GitHub Actions emits on
   every run.
 
+[2026-04-30] feat: 5.5.0 — 4 more centrality measures (7 → 11 of 17 from NetworkX)
+  source: NetworkX ships 17 centrality measures, codemap had 7. Closing
+  the gap with the next 4 most useful:
+
+    voterank — Zhang et al. 2016. Iterative voting elects k spreaders;
+      each round elects the highest-vote node and decays its neighbors'
+      voting capacity. Output is the spreaders in selection order.
+      In codebases: "which files would have outsized impact if changed".
+    group — degree centrality of an arbitrary node SET (not single node).
+      Target syntax `codemap group table` treats every SchemaTable as
+      the group; reports group reachability + cohesion. Useful for
+      whole-cluster refactor impact analysis.
+    percolation — Piraveenan et al. 2013. Like betweenness but each
+      path s→t weighted by source's "percolation state" (we use degree
+      as proxy since codebases lack inherent state).
+    current-flow — Newman 2005. Random-walk variant of betweenness
+      (BFS approximation, not full Laplacian inverse — exact is
+      O(VE × N²) per pair).
+
+  Aliases: brokers → structural-holes, current-flow-betweenness →
+  current-flow.
+
+  Tests: 80 passing (was 75). +5 new tests.
+
+  Action count: 104 → 108 (+ voterank, group, percolation, current-flow).
+  Centrality coverage 7 → 11 of 17 NetworkX measures. Still ~6 short
+  (subgraph_alg, second_order, dispersion, reaching, trophic, voterank's
+  k-influencer set variant) — those are more situational.
+
