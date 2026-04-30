@@ -877,3 +877,59 @@ unaffected.
       src/server/layout.ts.
 
   Action count: 139 → 142 (+3).
+
+[2026-04-30] feat: 5.11.0 — Tier 2 spectral analysis (Lanczos eigensolver)
+  source: post-5.10.0 the remaining Tier 2 candidate was spectral
+  graph analysis — Fiedler bisection, Shi-Malik clustering, eigengap
+  heuristic. None of NetworkX/petgraph/CodeQL ship this for code
+  graphs. Closing the gap with a self-contained eigensolver.
+
+  Three new actions (actions/spectral.rs, ~520 LOC):
+    - fiedler — computes λ₁ (≈ 0), λ₂ (algebraic connectivity), and
+      the Fiedler vector v₂. Sign-cut bisection: nodes with v₂ ≥ 0
+      vs v₂ < 0. Approximates the min-cut partition (Fiedler 1973,
+      Pothen-Simon-Liou 1990). Reports cut size as % of edges; flags
+      bottlenecks (λ₂ < 0.05) and disconnections (λ₂ < 1e-6).
+    - spectral-cluster [k=8] — Shi-Malik 2000 normalized-cut. Builds
+      the symmetric normalized Laplacian L_sym = I - D^(-1/2) A
+      D^(-1/2), takes the top-k smallest eigenvectors as an n×k
+      embedding, row-normalizes per Ng-Jordan-Weiss 2002, then runs
+      k-means++ in that embedding. Captures community structure that
+      modularity-based methods (Leiden / LPA) miss when the graph
+      has near-cut bottlenecks.
+    - spectral-gap — top-25 eigenvalues of L. Applies von Luxburg
+      2007 eigengap heuristic to recommend a community count k where
+      λ_{k+1} - λ_k is the largest gap. Also reports connected-
+      component count from λ₁ multiplicity (count of near-zero
+      eigenvalues).
+
+  Eigensolver internals:
+    - Lanczos with full re-orthogonalization (twice per step for
+      numerical stability), capped at 60 iterations. Sparse mat-vec
+      O(n + E) per step.
+    - Result: dense symmetric tridiagonal m×m, m ≤ 60. Diagonalized
+      via classical Jacobi rotations (60 sweeps max, ~80 LOC). Total
+      eigensolve cost: O(n²) for Lanczos basis projection vs O(n³)
+      for full dense decomposition.
+    - Capped at 5000 nodes. Larger graphs return a clear error
+      message pointing to clusters / leiden as the alternative.
+
+  Self-contained: no nalgebra / ndarray / LAPACK dep. Codemap stays
+  one-binary-no-system-libs.
+
+  Tests: 111 passing (was 108). +3 new spectral tests:
+    - lanczos_finds_zero_eigenvalue_of_connected_graph
+    - fiedler_bisects_two_clique_at_bridge — textbook two-cliques-
+      with-single-bridge graph; Fiedler MUST split at the bridge
+    - jacobi_diagonalizes_symmetric_matrix — closed-form eigenvalues
+      of {[2,1,0],[1,2,1],[0,1,2]} = {2-√2, 2, 2+√2}
+
+  Smoke-tested live:
+    - codemap-on-itself (48 nodes): λ₂ = 0.140, well-connected.
+      Fiedler bisection cuts at exactly 1 of 38 edges (lib.rs →
+      reverse/mod.rs), correctly separating infrastructure (utils,
+      types, parser, scanner) from RE actions.
+    - charlie-code (2036 nodes): full spectrum + eigengap in 0.58s.
+      Eigengap heuristic recommends ~19 communities.
+
+  Action count: 142 → 145 (+3).

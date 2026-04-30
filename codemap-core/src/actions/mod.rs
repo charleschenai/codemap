@@ -21,6 +21,7 @@ pub mod link_prediction;
 pub mod community;
 pub mod exports_format;
 pub mod temporal;
+pub mod spectral;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -215,6 +216,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "node-lifespan"        => Ok(temporal::node_lifespan(graph, target)),
         "edge-churn"           => Ok(temporal::edge_churn(graph, target)),
         "community-evolution" | "comm-evolution" => Ok(temporal::community_evolution(graph, target)),
+        // Spectral (5.11.0) — Lanczos eigensolver on the graph Laplacian
+        "fiedler"              => Ok(spectral::fiedler(graph)),
+        "spectral-cluster"     => Ok(spectral::spectral_cluster(graph, target)),
+        "spectral-gap"         => Ok(spectral::spectral_gap(graph)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

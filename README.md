@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 142 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 145 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, spectral analysis (Fiedler bisection + Shi-Malik clustering + eigengap), backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.10.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.11.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -34,7 +34,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **142 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **145 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
 - **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, and ML model files — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 20 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
@@ -43,6 +43,8 @@ Most code-analysis tools are either language-specific (works great for one stack
 - **Leiden community detection (5.3.0+).** Faithful Traag-Waltman-van Eck 2019 implementation: local moving + refinement (the "well-connected-subset" criterion that distinguishes Leiden from Louvain) + aggregation. Default for `clusters`. Auto-named by longest common path prefix or homogeneous-kind: `Cluster 1 [src/algo/*]` / `Cluster 1 [endpoint cluster]`.
 
 - **Temporal graph analysis (5.10.0+).** `node-lifespan` bucketizes the codebase by first-seen / last-modified age and surfaces young hotspots, active veterans, and ancient stable files. `edge-churn` counts co-change commits per import edge to separate true coupling from vestigial imports. `community-evolution` reconstructs cluster memberships at N evenly-spaced historical snapshots (filtering each to nodes that existed by then) and detects BIRTH / DEATH / SPLIT / MERGE events via Jaccard. All three operate on a single `git log` pass — no checkouts, no reparse loops.
+
+- **Spectral analysis (5.11.0+).** `fiedler` computes the algebraic connectivity λ₂ and the Fiedler vector (Fiedler 1973), then bisects the graph at the sign-cut — the partition that approximately minimizes Cheeger's constant. λ₂ also detects bottlenecks: low value = near-cut. `spectral-cluster k` runs Shi-Malik 2000 spectral clustering — projects nodes via the top-k smallest eigenvectors of the symmetric normalized Laplacian, row-normalizes the embedding (Ng-Jordan-Weiss 2002), then k-means in that space. `spectral-gap` exposes the eigenvalue spectrum and applies von Luxburg's eigengap heuristic to recommend a community count automatically. Self-contained Lanczos eigensolver with full re-orthogonalization + Jacobi rotations on the resulting tridiagonal — no LAPACK or external linalg dep. Caps at 5000 nodes; 2000-node graphs eigendecompose in < 1 s.
 
 - **Binary reverse engineering.** 11 actions for cracking compiled Windows binaries without source code: PE import/export/resource/debug/section analysis, string extraction with SQL categorization, .NET CLR metadata parsing, Clarion DDL and dBASE schema extraction, SQL query mining with table access maps, and binary diffing. Built from studying goblin, Ghidra, Falcon, and pe-parse source code.
 
@@ -155,7 +157,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 142 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 145 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -340,6 +342,16 @@ Treat git history as a sequence of graph states. Single `git log` pass — no ch
 | `node-lifespan` | Per-file first-seen / last-modified / commit count. Bucketizes the codebase by age. Surfaces young hotspots (high commits/day, < 1y old), active veterans (> 1y but touched recently), and ancient stable files (> 1y, dormant > 90d). |
 | `edge-churn [N=500]` | For every import edge in the graph, count co-change commits across the last N. High co-change = true coupling. Zero co-change with both files having history = vestigial import. |
 | `community-evolution [N=4]` | Run LPA clustering at N evenly-spaced snapshots between the first commit and HEAD (filtering each snapshot to nodes that existed by then). Compares cluster memberships across snapshots via Jaccard to detect BIRTH / DEATH / SPLIT / MERGE events. |
+
+### Spectral (3)
+
+Eigenstructure of the graph Laplacian. Self-contained Lanczos solver — no LAPACK dep. Capped at 5000 nodes.
+
+| Action | What it does |
+|--------|-------------|
+| `fiedler` | Algebraic connectivity λ₂ + Fiedler vector. Sign-cut bisection (Fiedler 1973, Pothen-Simon-Liou 1990) approximates min-cut. λ₂ ≈ 0 ⇒ disconnected; small λ₂ ⇒ bottleneck. Reports λ₁/λ₂, the cut size, and top files on each side ranked by Fiedler magnitude. |
+| `spectral-cluster [k=8]` | Shi-Malik 2000 normalized-cut spectral clustering. Projects nodes via top-k smallest eigenvectors of the symmetric normalized Laplacian, row-normalizes (Ng-Jordan-Weiss 2002), then k-means. Captures community structure that modularity-based methods (Leiden / LPA) sometimes miss. |
+| `spectral-gap` | Top-25 eigenvalues of L. Applies von Luxburg's eigengap heuristic to recommend a community count automatically — the k where λ_{k+1} − λ_k is largest. Also reports the connected-component count from λ₁ multiplicity. |
 
 ---
 
@@ -607,7 +619,7 @@ codemap/
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) -> String (142 actions)
+│           ├── mod.rs             # dispatch(action, target) -> String (145 actions)
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure
