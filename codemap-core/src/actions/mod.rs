@@ -29,6 +29,7 @@ pub mod bin_disasm;
 pub mod license;
 pub mod cve;
 pub mod sbom;
+pub mod fuzzy;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -239,6 +240,8 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "cve-match"    => Ok(cve::cve_match(graph, target)),
         "to-spdx"      => Ok(sbom::to_spdx(graph)),
         "to-cyclonedx" => Ok(sbom::to_cyclonedx(graph)),
+        "fuzzy-hash"   => Ok(fuzzy::fuzzy_hash(graph, target)),
+        "fuzzy-match"  => Ok(fuzzy::fuzzy_match(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

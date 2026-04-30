@@ -1287,3 +1287,46 @@ unaffected.
   Tests: 166 passing (was 163). +3 sbom unit tests covering JSON
   validity + required fields + ISO 8601 timestamp format.
   Action count: 153 → 155 (+2: to-spdx, to-cyclonedx).
+
+[2026-04-30] feat: 5.14.2 — fuzzy hashing (TLSH + ssdeep) (#48)
+  source: 5.15.0 task #48 — fleet-level binary similarity. Pure
+  Rust, no external dep. Both algorithm specs are stable and
+  well-documented; our implementations are simple-but-correct.
+
+  New module: src/actions/fuzzy.rs (~440 LOC). Two new actions,
+  no new EntityKinds (similarity edges are added between existing
+  binary nodes).
+
+    - fuzzy-hash <binary> — computes TLSH (Trend Locality-Sensitive
+      Hash, 2013) + ssdeep (Context-Triggered Piecewise Hash,
+      2006). Stores both as attrs["tlsh"] / attrs["ssdeep"] on
+      the binary node. Idempotent.
+    - fuzzy-match [tlsh-threshold=70] — walks every binary node
+      with a fuzzy hash, computes pairwise TLSH distance + ssdeep
+      similarity. If TLSH ≤ threshold OR ssdeep ≥ 50, adds a
+      similar_binary edge between the two binaries (symmetric).
+      Then PageRank / Leiden / etc. treat similar binaries as
+      connected — automatic clustering of variants.
+
+  Algorithm correctness:
+    - TLSH: 5-byte sliding window, 6 trigram permutations per
+      window, Pearson hash buckets, quartile-based 2-bit nibble
+      encoding. 70-char hex output starting with T1 prefix.
+      Distance is bit-difference of header + 2-bit-pair body.
+      Self-distance is 0; identical inputs produce identical
+      hashes (verified).
+    - ssdeep: Adler-style rolling hash for chunk boundaries,
+      FNV-style trigger hash per chunk. Auto-adjusts blocksize
+      to keep output ~64 chars. Format: BS:H1:H2. Similarity is
+      Levenshtein-distance-based, normalized to 0-100. Self-
+      similarity is 100 (verified).
+
+  Tests: 173 passing (was 166). +7 fuzzy tests including
+  identical-input identity, distance-grows-with-mutation,
+  edit-distance correctness, ssdeep round-trip.
+
+  Live verification: codemap binary on mater (26 MB ARM64 ELF)
+  produces TLSH `T1BFC518470D8A...` + ssdeep
+  `196608:Q0f9Niq1...` cleanly in <100ms.
+
+  Action count: 155 → 157 (+2: fuzzy-hash, fuzzy-match).
