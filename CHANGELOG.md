@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #2 — ELF OS detection cascade, 9 chained heuristics)
+- **New `elf-os` action** (aliases: `os`, `detect-os`). Tags every ELF binary with `os: linux/freebsd/openbsd/android/...` (24-variant enum) plus `language: go|...`. Today codemap labels ELFs as just "ELF"; after this, `audit` clusters can separate Android-targeting code from server-targeting from kernel modules.
+- **9 chained heuristics**, ranked by confidence (algorithm port from capa's `detect_elf_os` in `~/reference/codemap-research-targets/01-capa/capa/features/extractors/elf.py`, Apache-2.0):
+  1. **PT_NOTE w/ NT_GNU_ABI_TAG** (c=10) — most reliable.
+  2. **SHT_NOTE owner-name scan** (c=9) — catches kernel modules and ELF objects without program headers.
+  3. **PT_INTERP linker path** (c=8) — `/lib64/ld-linux-x86-64.so.2`, `/system/bin/linker64` (Android), `/libexec/ld-elf.so.1` (FreeBSD).
+  4. **GLIBC versions in DT_VERNEED** (c=7) — Linux/Hurd disambiguator.
+  5. **DT_NEEDED dependency names** (c=7) — `libandroid.so` / `liblog.so` (Android), `libhurduser.so` / `libmachuser.so` (Hurd).
+  6. **Go buildinfo** (c=6) — `.go.buildinfo` magic + `GOOS=<os>` k=v scan; also tags `language: go`.
+  7. **Symtab keyword scan** (c=5) — best-effort `linux` / `/linux/` whole-word match.
+  8. **`.comment` GCC string** (c=4) — Debian/Ubuntu/Red Hat/Alpine/Android cross-compile fingerprints.
+  9. **OS/ABI byte e_ident[7]** (c=3) — fallback when nothing else fires.
+- **OS enum** (24 variants): Linux / Hurd / Solaris / FreeBSD / NetBSD / OpenBSD / DragonflyBSD / Illumos / AIX / IRIX / Android / Tru64 / OpenVMS / NSK / AROS / FenixOS / Cloud / Syllable / NaCl / z/OS / HPUX / 86open / Modesto / Unix.
+- **Cascade ranking** — every fired heuristic is collected and the highest-confidence one wins. Ties broken by source order in the cascade.
+- **Auto-attribute on `elf-info`** — when the standard `elf-info` action runs, it now also stamps `os` + `os_source` + `language` attributes on the `ElfBinary` node, so downstream actions (`audit`, `pagerank --type elf`, `leiden`) automatically benefit without needing a separate `elf-os` pass.
+
+### Implementation notes
+- **Self-contained ELF parser** in `actions/elf_os.rs` (~970 LOC) — parses program headers, section headers, `.shstrtab`, `.dynstr`, `.dynamic` (DT_NEEDED), and `.gnu.version_r` (GLIBC verneed). Doesn't depend on the existing `binary.rs` parser, which is tightly coupled to the formatted-output path.
+- **Go buildinfo parser** — handles the `\xff Go buildinf:` 16-byte magic header and brute-force-greps for inline `GOOS=` k=v pairs. The address-following path for older non-inline-strings binaries falls back to None (rare in modern Go).
+- **9 unit tests** with synthetic ELF builder — covers PT_INTERP for Linux + Android, PT_NOTE GNU_ABI_TAG, libandroid.so DT_NEEDED, Go buildinfo, .comment Debian fingerprint, OS-ABI byte for FreeBSD, and the no-heuristics-fire fallback. Smoke-tested on `/bin/ls` (4 heuristics fire, all agree on Linux).
+- **Static-purity preserved** — every heuristic is pure file-byte parsing; no I/O beyond the initial `fs::read`.
+
+### Why
+This is a high-leverage capa port: ~600 LOC of well-documented heuristics buys OS-aware clustering across the entire ELF corpus that codemap ingests. Future EntityKind audits ("which Android code calls into Java?", "what kernel modules ship in this firmware?") need this attribute to be useful.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

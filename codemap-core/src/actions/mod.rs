@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod elf_os;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,12 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // ELF OS detection cascade (5.38.0 — Ship 5 #2). Ports capa's
+        // 9-heuristic detect_elf_os into Rust: PT_NOTE / SHT_NOTE /
+        // PT_INTERP / GLIBC verneed / NEEDED libs / .comment GCC /
+        // symtab / Go buildinfo / OS-ABI byte. Tags every ElfBinary
+        // node with `os` + `os_source` + `language` attributes.
+        "elf-os" | "os" | "detect-os" => Ok(elf_os::elf_os(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
