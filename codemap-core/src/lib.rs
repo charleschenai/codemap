@@ -39,6 +39,7 @@ pub mod strings;
 pub mod disasm;
 pub mod disasm_jt;
 pub mod dataflow_local;
+pub mod cfg;
 
 use std::path::PathBuf;
 use types::Graph;

@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (BB-CFG infrastructure for v2 detectors)
+- **New `cfg` module** (`codemap-core/src/cfg/`) — basic-block CFG construction, dominator tree, natural-loop discovery, SCC. Foundational layer that v2 detectors (CFF v2, opaque-pred v2, vtable v2, decoder-find, xor-loops, rc4-detect, duplicate-subgraphs) all share.
+- **`build_cfg(insns: &[Instruction]) -> BbCfg`** — leader-set algorithm over a flat iced-x86 instruction stream. Splits at branches/calls/rets, classifies each block (`Normal`, `IndJump`, `Ret`, `NoRet`, `CndRet`, `ENoRet`, `Extern`, `Error`) and each edge (`JumpUncond`, `JumpCond`, `JumpIndir`, `Call`, `CallIndir`, `Fall`). Vocabulary tracks Quokka's `Block.BlockType`/`Edge.EdgeType` taxonomy.
+- **`dominators(cfg, entry) -> Dominators<usize>`** — thin wrapper over `petgraph::algo::dominators::simple_fast`. Re-exports `petgraph`'s `Dominators` so downstream detectors don't need their own petgraph dep.
+- **`natural_loops(cfg, doms) -> Vec<Loop>`** — back-edge detection (header dominates tail) + reverse-BFS body discovery. Multiple back-edges to the same header are merged into one Loop.
+- **`sccs(cfg) -> Vec<Vec<usize>>`** — direct passthrough to `petgraph::algo::tarjan_scc` for callers needing cyclomatic-complexity / loop-count.
+- **`Bb`/`BbCfg` helpers** — `block_at(va)` (O(log n) VA → BB lookup), `succs(idx)`, `preds(idx)`.
+- **Internal flow-control classifier** — instead of pulling in iced-x86's heavy `instr_info` feature (deliberately disabled across the codebase, see `dataflow_local.rs`), `cfg::build` enumerates the small set of branch/call/ret/interrupt mnemonics directly. Same approach as the existing disasm.rs scanner.
+
+### Dependencies
+- **petgraph 0.6** — pure-Rust graph crate; provides dominators, tarjan SCC, DiGraphMap. MIT/Apache, zero system deps.
+
+### Tests
+- 14 new unit tests across `cfg::{build,dominators,loops}`. Synthetic instruction fixtures cover linear, if-then, if-then-else, while-loop, nested-loop, switch-style indirect, unreachable-block, multi-back-edge SCC, and dominator/natural-loop discovery.
+- All 182 existing tests pass.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
