@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.47.0] — 2026-05-01
+
+### Added (Ship 2 #11 — signsrch corpus port)
+- **New `signsrch` action** (aliases: `sigscan`, `signature-scan`, `find-sigs`). 22 → 2,338 byte-pattern crypto/compression/anti-debug/EC-seed signatures (30× expansion).
+- **Vendored corpus** at `codemap-core/data/signsrch.xml` (3.4 MB / 2,338 entries) from Auriemma's signsrch. Build-time XML→bincode.
+- **Aho-Corasick** for single-chunk + multi-chunk matcher for `&`-flagged entries.
+- **Tag classifier** routes `anti-debug:` subset (53 rules) into AntiAnalysis; rest emit CryptoConstant.
+
+### Tests
+- 368 → **380 tests** (+12).
+
+---
+
 ## [5.46.0] — 2026-05-01
 
 ### Added (Ship 5 #2 — ELF OS detection cascade)
