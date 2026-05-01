@@ -47,6 +47,7 @@ fn register_into_graph(graph: &mut Graph, target: &str, r: &DisasmResult) {
     graph.ensure_typed_node(&bin_id, bin_kind, &[
         ("path", target),
         ("bitness", &bitness),
+        ("arch", r.arch),
         ("entry_va", &entry),
         ("disasm_functions", &r.functions.len().to_string()),
     ]);
@@ -70,6 +71,7 @@ fn register_into_graph(graph: &mut Graph, target: &str, r: &DisasmResult) {
             ("size", &size),
             ("instruction_count", &icnt),
             ("indirect_calls", &icalls),
+            ("binary_format", r.arch),
         ];
         if func.is_entry { attrs.push(("is_entry", "true")); }
         // Always include the raw mangled name as fallback if demangling changed it

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.24.0] — 2026-05-01
+
+### Added
+- **ARM / AArch64 ELF support in `bin-disasm`.** `e_machine` = `0x28` (EM_ARM) and `0xb7` (EM_AARCH64) join `0x03` / `0x3E` in the supported list. Function discovery is symbol-table-only (walks `STT_FUNC` entries from `.symtab` / `.dynsym`), with size from `st_size` and instruction count estimated as size/4 (AArch64 instructions are always 4 bytes; ARM is mostly 4-byte ARM instead of mixed Thumb).
+- New `arch` field on `DisasmResult` (`x86` / `x64` / `arm` / `aarch64`) — `bin-disasm` writes it as the `binary_format` attr on every `BinaryFunction` node.
+- Brings Android native libs (`lib/arm64-v8a/*.so`, `lib/armeabi-v7a/*.so`) and ARM/embedded firmware into the same `BinaryFunction`-graph treatment as x86 binaries. Pairs with 5.23.0 DEX walker for full APK coverage on both Java and native sides.
+- No new dependencies — keeps codemap pure-Rust without pulling `yaxpeax-arm`. Real disasm with intra-binary call edges is a v2 if demand emerges.
+- Tests +3 (204 total): zero-`st_size` defaulting, unknown-machine error message includes ARM/AArch64, `DisasmFunction` Debug round-trip.
+
+### Changed
+- `disasm_elf` now branches on arch after parsing `e_machine`; symbol-table walk extended to capture `st_size` (was previously discarded). `DisasmResult` gained `arch: &'static str`.
+
+---
+
 ## [5.23.0] — 2026-05-01
 
 ### Added

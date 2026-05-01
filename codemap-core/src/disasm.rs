@@ -34,6 +34,7 @@ pub struct DisasmFunction {
     pub is_entry: bool,
 }
 
+#[derive(Debug)]
 pub struct DisasmResult {
     pub format: &'static str,
     pub bitness: u32,
@@ -44,6 +45,9 @@ pub struct DisasmResult {
     pub text_size: u64,
     /// Symbol-table-driven (true) vs linear-sweep fallback (false).
     pub from_symbols: bool,
+    /// Architecture string for graph annotation: "x86", "x64", "arm",
+    /// "aarch64". Used by `bin_disasm` to set `binary_format` attr.
+    pub arch: &'static str,
 }
 
 const MAX_FUNCTIONS: usize = 50_000;
@@ -59,7 +63,7 @@ pub fn disasm_binary(data: &[u8]) -> Result<DisasmResult, String> {
             return disasm_pe(data);
         }
     }
-    Err("Unsupported format. v1 covers PE (x86/x64) + ELF (x86/x64).".to_string())
+    Err("Unsupported format. v1 covers PE (x86/x64) + ELF (x86/x64/ARM/AArch64).".to_string())
 }
 
 // ── PE ─────────────────────────────────────────────────────────────
@@ -171,6 +175,7 @@ fn disasm_pe(data: &[u8]) -> Result<DisasmResult, String> {
 
     let entry_va = image_base + entry_rva;
     let funcs = decode_functions(text_bytes, text_va, bitness, &starts, entry_va);
+    let arch = if bitness == 64 { "x64" } else { "x86" };
     Ok(DisasmResult {
         format: "pe",
         bitness,
@@ -180,6 +185,7 @@ fn disasm_pe(data: &[u8]) -> Result<DisasmResult, String> {
         text_start_va: text_va,
         text_size,
         from_symbols,
+        arch,
     })
 }
 
@@ -208,9 +214,21 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
     } else {
         u16::from_be_bytes([data[0x12], data[0x13]])
     };
-    if machine != 3 && machine != 0x3E {
-        return Err(format!("ELF machine {machine:#x} not supported by v1 disasm (need 3=x86 or 0x3E=x86_64)"));
-    }
+    // Supported ELF machines: 3=EM_386 (x86), 0x3E=EM_X86_64 (x64),
+    // 0x28=EM_ARM (32-bit ARM), 0xb7=EM_AARCH64 (64-bit ARM). 5.24.0
+    // adds ARM/AArch64 via symbol-table-only function discovery
+    // (no instruction decoding — would need yaxpeax-arm). Function
+    // sizes come from STT_FUNC st_size; intra-binary call edges
+    // unavailable without disasm.
+    let arch: &'static str = match (machine, is_64) {
+        (3, _)         => "x86",
+        (0x3E, _)      => "x64",
+        (0x28, _)      => "arm",
+        (0xb7, _)      => "aarch64",
+        _ => return Err(format!(
+            "ELF machine {machine:#x} not supported by v1 disasm (need 3=x86, 0x3E=x86_64, 0x28=ARM, 0xb7=AArch64)"
+        )),
+    };
     let bitness: u32 = if is_64 { 64 } else { 32 };
 
     let read_u32 = |off: usize| -> u32 {
@@ -271,8 +289,11 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
     let text_end = (text_off + text_size as usize).min(data.len());
     let text_bytes = &data[text_off..text_end];
 
-    // Read .symtab + .strtab if present, else .dynsym + .dynstr
-    let mut starts: Vec<(String, u64)> = Vec::new();
+    // Read .symtab + .strtab if present, else .dynsym + .dynstr.
+    // Each entry: (name, va, st_size). st_size is used by the ARM/AArch64
+    // path (no disasm) to set function size; the x86/x64 path ignores it
+    // and lets decode_functions compute size from instruction bytes.
+    let mut starts: Vec<(String, u64, u64)> = Vec::new();
     let symtab = sections.iter().find(|s| s.name == ".symtab")
         .or_else(|| sections.iter().find(|s| s.name == ".dynsym"));
     if let Some(sym) = symtab {
@@ -309,17 +330,29 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
                 while end < strtab_data.len() && strtab_data[end] != 0 { end += 1; }
                 let name = String::from_utf8_lossy(&strtab_data[st_name..end]).to_string();
                 if name.is_empty() { continue; }
-                let _ = st_size;
-                starts.push((name, st_value));
+                starts.push((name, st_value, st_size));
             }
         }
     }
     let from_symbols = !starts.is_empty();
     if !from_symbols && entry_va != 0 {
-        starts.push(("_start".to_string(), entry_va));
+        starts.push(("_start".to_string(), entry_va, 0));
     }
 
-    let funcs = decode_functions(text_bytes, text_va, bitness, &starts, entry_va);
+    // Branch on arch. x86/x64 use the existing iced-x86 path which
+    // computes size + call edges from real instruction decoding. ARM
+    // and AArch64 v1 use a symbol-table-only path: function size from
+    // STT_FUNC st_size, instruction_count estimated as size/4 (most ARM
+    // instructions are 4 bytes; AArch64 always 4 bytes), no call edges.
+    let funcs = if arch == "x86" || arch == "x64" {
+        // decode_functions still expects (name, va) tuples — strip size.
+        let starts_xy: Vec<(String, u64)> = starts.iter()
+            .map(|(n, v, _)| (n.clone(), *v))
+            .collect();
+        decode_functions(text_bytes, text_va, bitness, &starts_xy, entry_va)
+    } else {
+        functions_from_symbols(&starts, text_va, text_size, entry_va, arch)
+    };
     Ok(DisasmResult {
         format: "elf",
         bitness,
@@ -329,7 +362,46 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
         text_start_va: text_va,
         text_size,
         from_symbols,
+        arch,
     })
+}
+
+/// ARM/AArch64 function discovery — no instruction decoding (would need
+/// yaxpeax-arm). Builds a `DisasmFunction` per STT_FUNC symbol using the
+/// symbol's st_size for function length, and estimates instruction_count
+/// as size/4 (AArch64 instructions are always 4 bytes; ARM Thumb mixes
+/// 2/4 byte but most code is 4-byte ARM). Calls list is empty —
+/// intra-binary call edges require real disasm. Sufficient for `pagerank
+/// --type bin_func` filtering on `binary_format=arm/aarch64` and for
+/// "what's in this .so file" inventory queries on Android native libs.
+fn functions_from_symbols(
+    starts: &[(String, u64, u64)],
+    text_va: u64,
+    text_size: u64,
+    entry_va: u64,
+    _arch: &'static str,
+) -> Vec<DisasmFunction> {
+    let mut out: Vec<DisasmFunction> = Vec::with_capacity(starts.len());
+    for (name, va, st_size) in starts {
+        if *va < text_va || *va >= text_va + text_size { continue; }
+        if out.len() >= MAX_FUNCTIONS { break; }
+        // Some ELF producers emit st_size=0 for symbols at known boundaries
+        // (rare on ARM but possible). Default to 4 bytes (one ARM/AArch64
+        // instruction) so the node still registers and isn't culled by the
+        // size==0 check below.
+        let size = if *st_size == 0 { 4 } else { *st_size };
+        let instr_count = (size / 4) as usize;
+        out.push(DisasmFunction {
+            name: name.clone(),
+            address: *va,
+            size,
+            instruction_count: instr_count,
+            calls: Vec::new(),
+            indirect_calls: 0,
+            is_entry: *va == entry_va,
+        });
+    }
+    out
 }
 
 // ── Decoder / boundary detection ───────────────────────────────────
@@ -407,3 +479,68 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 5.24.0: ARM/AArch64 functions_from_symbols builds DisasmFunction
+    /// nodes from STT_FUNC entries without instruction decoding. Default
+    /// st_size=0 still produces a valid 4-byte node so the function is
+    /// not silently dropped by downstream callers.
+    #[test]
+    fn functions_from_symbols_handles_zero_size_and_default_4_bytes() {
+        let starts = vec![
+            ("normal_func".to_string(),  0x1000, 64),  // 16 instructions
+            ("zero_size".to_string(),    0x1100, 0),   // becomes 1 instruction
+            ("out_of_text".to_string(),  0x9999, 32),  // dropped (outside .text)
+            ("entry".to_string(),        0x1200, 100),
+        ];
+        let funcs = functions_from_symbols(&starts, 0x1000, 0x500, 0x1200, "aarch64");
+        assert_eq!(funcs.len(), 3, "out-of-text symbol should be filtered: {funcs:?}");
+
+        let normal = funcs.iter().find(|f| f.name == "normal_func").unwrap();
+        assert_eq!(normal.size, 64);
+        assert_eq!(normal.instruction_count, 16);
+        assert!(!normal.is_entry);
+
+        let zero = funcs.iter().find(|f| f.name == "zero_size").unwrap();
+        assert_eq!(zero.size, 4, "zero st_size must default to 4");
+        assert_eq!(zero.instruction_count, 1);
+
+        let entry = funcs.iter().find(|f| f.name == "entry").unwrap();
+        assert!(entry.is_entry, "function at entry_va should set is_entry=true");
+
+        for f in &funcs {
+            assert!(f.calls.is_empty(), "ARM v1 should not produce call edges");
+            assert_eq!(f.indirect_calls, 0);
+        }
+    }
+
+    #[test]
+    fn disasm_binary_rejects_unknown_elf_machine() {
+        let mut elf = vec![0u8; 64];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[4] = 2;
+        elf[5] = 1;
+        elf[0x12] = 0x99;
+        elf[0x13] = 0x00;
+        let result = disasm_binary(&elf);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("ARM") && err.contains("AArch64"),
+            "error should list newly-supported archs: {err}");
+    }
+
+    /// Ensure the existing DisasmFunction Debug derive is enough — used
+    /// by the assertion message in functions_from_symbols_handles_*.
+    #[test]
+    fn disasm_function_debug_round_trip() {
+        let f = DisasmFunction {
+            name: "x".to_string(), address: 0, size: 0, instruction_count: 0,
+            calls: vec![], indirect_calls: 0, is_entry: false,
+        };
+        let _ = format!("{f:?}");
+    }
+}
+

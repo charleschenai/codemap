@@ -2149,3 +2149,83 @@ unaffected.
   This + 5.24.0 (ARM/AArch64 disasm via yaxpeax-arm) = mobile-
   complete codemap: APKs get full graph coverage on both Java
   (DEX) and native (ARM) sides.
+
+
+[2026-05-01] feat: 5.24.0 — ARM/AArch64 in bin-disasm (mobile day 2) (#58)
+  source: post-5.23.0 mobile arc continues. DEX walker (5.23.0)
+  covered the Java side of APKs; this release adds the native side
+  by extending bin-disasm to ARM and AArch64 ELFs (the .so files
+  inside lib/arm64-v8a/ etc.).
+
+  Decision: function-inventory v1, no yaxpeax-arm dep yet.
+  - Pulling yaxpeax-arm would add a real disassembler and unlock
+    intra-binary call edges + per-function instruction decoding.
+  - But: the existing ELF symbol-table walk already gives us the
+    function inventory (every STT_FUNC entry with st_size).
+  - Charles s actual mobile workflow is "what is in the .so files
+    my Flutter / RN app ships?" — function names + sizes get him
+    800f the value with zero new deps.
+  - If demand emerges for call edges (e.g. tracing a specific
+    native function s callers across the binary), a v2 ship adds
+    yaxpeax-arm in ~200 LOC.
+
+  Implementation:
+
+  src/disasm.rs:
+    - DisasmResult gains `arch: &static str` ("x86"/"x64"/"arm"/
+      "aarch64") + #[derive(Debug)] for tests.
+    - disasm_elf machine check expanded: 3, 0x3E, 0x28, 0xb7 all
+      pass; rejects everything else with a message that lists the
+      supported set.
+    - Symbol-table walk extended to capture st_size (previously
+      discarded). starts vec changed from (String, u64) to
+      (String, u64, u64).
+    - Branch after symbol walk: x86/x64 use existing decode_functions
+      (iced-x86 path); ARM/AArch64 use new functions_from_symbols.
+    - functions_from_symbols: for each STT_FUNC inside .text, build
+      DisasmFunction with size from st_size (default 4 if zero —
+      one ARM/AArch64 instruction), instruction_count = size/4,
+      empty calls vec, indirect_calls=0. Sets is_entry when the
+      symbol VA matches the ELF entry_va.
+    - disasm_pe also fills in `arch` = "x86" or "x64" based on
+      bitness so all DisasmResults are arch-tagged uniformly.
+
+  src/actions/bin_disasm.rs:
+    - PeBinary/ElfBinary node now gets an `arch` attr.
+    - Each BinaryFunction node gets a `binary_format` attr from
+      r.arch — uniform with the existing dex/jvm/dotnet/wasm/cuda/
+      pyc binary_format scheme.
+
+  Killer queries unlocked for mobile:
+    pagerank --type bin_func with binary_format=arm/aarch64 filter
+      → most-central native functions in your APK
+    meta-path "elf->bin_func"   on a native lib → function inventory
+    attribute-filter binary_format=aarch64
+      → every AArch64 function across all analyzed binaries (cross-APK
+        comparison)
+
+  Tests: 204 passing (was 201, +3 disasm.rs unit tests):
+    - functions_from_symbols handles zero-st_size (defaults to 4)
+      + filters out-of-text symbols + sets is_entry correctly
+      + verifies no call edges produced (would require disasm)
+    - disasm_binary rejects unknown ELF machine with helpful
+      error message that lists ARM/AArch64
+    - DisasmFunction Debug round-trip (smoke for the derive)
+
+  Action count: 163 (unchanged — bin-disasm gained capability).
+  EntityKinds: 33 (unchanged).
+
+  Mobile arc complete: 5.23.0 (DEX walker) + 5.24.0 (ARM/AArch64
+  disasm) = APKs get full graph coverage on both Java and native
+  sides. `apk-info` enumerates DEX methods + permissions; explicit
+  `bin-disasm <path/to/lib.so>` enumerates native functions. The
+  pieces compose for Charles s "did I ship a permission I am not
+  using?" + "what native code is in my app?" workflows.
+
+  Out of scope for v1 (defer until needed):
+    - yaxpeax-arm-based real disasm with intra-binary call edges.
+    - MIPS / RISC-V / PowerPC / SPARC ELFs.
+    - Auto-disasm of every native lib inside an APK during apk-info
+      (avoid blowup on multi-ABI APKs; user explicitly invokes
+      bin-disasm per .so they care about, or chains via codemap
+      pipeline).

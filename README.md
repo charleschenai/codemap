@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.23.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.24.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -304,7 +304,7 @@ For analyzing compiled binaries across platforms — ELF (Linux), Mach-O (macOS)
 
 | Action | What it does |
 |--------|-------------|
-| `bin-disasm <file>` | **(5.13.0+)** Full disassembly of PE / ELF x86 / x86-64 binaries via [iced-x86](https://github.com/icedland/iced) (pure Rust, no system libs). Symbol-table-driven function boundary detection — each function becomes a `BinaryFunction` node with name (auto-demangled), address, size, instruction count, indirect-call count, is_entry flag. Direct call targets emit `bin_func → bin_func` edges (intra-binary call graph). After running, every graph algorithm — PageRank / Leiden / Fiedler / betweenness / spectral-cluster — works at the function-within-binary level. Cached across CLI runs via the bincode cache. ARM / MIPS deferred to future releases. |
+| `bin-disasm <file>` | **(5.13.0+)** Full disassembly of PE / ELF x86 / x86-64 binaries via [iced-x86](https://github.com/icedland/iced) (pure Rust, no system libs). Symbol-table-driven function boundary detection — each function becomes a `BinaryFunction` node with name (auto-demangled), address, size, instruction count, indirect-call count, is_entry flag. Direct call targets emit `bin_func → bin_func` edges (intra-binary call graph). After running, every graph algorithm — PageRank / Leiden / Fiedler / betweenness / spectral-cluster — works at the function-within-binary level. Cached across CLI runs via the bincode cache. **(5.24.0+)** ARM / AArch64 ELFs (e_machine = 0x28 / 0xb7) supported via symbol-table-only function discovery — function size from `STT_FUNC` `st_size`, instruction count estimated as size/4. Brings Android native libs (`lib/arm64-v8a/*.so`) and ARM/embedded firmware into the same `BinaryFunction`-graph treatment. No new deps (real disasm with intra-binary call edges deferred to a v2 if needed — would add `yaxpeax-arm`). MIPS / RISC-V still deferred. `binary_format` attr on each node = `x86` / `x64` / `arm` / `aarch64`. |
 
 ### Binary triage / fingerprinting (4)
 
