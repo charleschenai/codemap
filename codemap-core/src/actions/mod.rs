@@ -34,6 +34,7 @@ pub mod cert;
 pub mod apk;
 pub mod dex;
 pub mod recon;
+pub mod think;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -172,6 +173,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "handoff" => Ok(composite::handoff(graph, target)),
         "pipeline" => Ok(composite::pipeline(graph, target)),
         "audit" => Ok(composite::audit(graph, target)),
+        "think" => Ok(think::think(graph, target)),
         // Centrality (4) — modern measures from NetworkX catalog. `target`
         // doubles as a comma-separated kind filter ("table,field").
         "betweenness" => Ok(centrality::betweenness(graph, &centrality::parse_kinds(target))),

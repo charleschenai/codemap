@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.25.0] — 2026-05-01
+
+### Added
+- **`think "<goal>"` natural-language goal router (action count 163 → 164).** With 163 prior actions, both humans and AI agents hit choice paralysis. `think` is the new "I don't know what to use" entry point: takes a plain-English goal, classifies it via case-insensitive keyword match against ~18 intent buckets, runs the matching pipeline, and shows the chosen pipeline at the top of output so the user knows what was selected (and can run the constituent actions directly next time).
+- **Intent catalog (~18 buckets):** `audit`, `load-bearing`, `security review`, `secrets`, `supply chain`, `dead code`, `hotspots`, `structure`, reverse PE / ELF / Mach-O, Android APK, ML model, web recon, find endpoints, diff binaries, graph layout, plus `Fallback` for unmatched.
+- **Path detection in goal string** — any token that exists on disk becomes the pipeline target. Common surrounding punctuation stripped.
+- **Live URL guard** — any `http://` or `https://` token in the goal is rejected with a "codemap is pure-static; capture the artifact first" message (`curl -o ... ; codemap think "recon /tmp/file"`). This enforces the no-active-network invariant uniformly so neither humans nor AI agents have to remember it. Was the #1 weakness flagged by the post-5.22.0 review.
+- **Fallback guidance** — when the goal doesn't match any intent, `think` lists the closest matches as suggestions instead of guessing.
+- New module `actions/think.rs` (~370 LOC). Calls existing `dispatch()` for each pipeline step — same code path as direct CLI invocation.
+- Promoted to **Tier 0** in SKILL.md (the new entry point above all 163 specific actions).
+- Tests +5 (209 total): intent classification covering 16 representative goal strings, fallback behavior, path detection (existing + nonexistent + trailing punctuation), URL rejection with passive-only message, empty-goal usage output.
+
+### Killer use cases
+- Vague goal → fast routing: `codemap think "audit this codebase"` runs `audit + summary`.
+- Mobile workflow: `codemap think "android apk ./app.apk"` → `apk-info` (DEX walker + permission heuristics from 5.23, native-lib disasm from 5.24).
+- Web recon without the bitchiness: `codemap think "recon /tmp/captured.html"` → `web-dom + web-fingerprint`. Live URLs are firmly rejected.
+- Cross-version diff: `codemap think "compare /tmp/v1.exe /tmp/v2.exe"` → `binary-diff` with cross-graph promotion (5.22.0).
+
+---
+
 ## [5.24.0] — 2026-05-01
 
 ### Added

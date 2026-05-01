@@ -2229,3 +2229,65 @@ unaffected.
       (avoid blowup on multi-ABI APKs; user explicitly invokes
       bin-disasm per .so they care about, or chains via codemap
       pipeline).
+
+
+[2026-05-01] feat: 5.25.0 — `codemap think` natural-language goal router (#59)
+  source: post-5.22.0 second-opinion review identified the #1
+  critical gap: with 163 actions, even AI agents hit choice
+  paralysis and default to safe-but-wrong picks. The "passive
+  recon" workflow specifically suffered because the right path
+  (download + web-dom + web-blueprint + js-api-extract) was not
+  obviously easier than the wrong path (curl + grep, or worse,
+  live scrape). This release ships the orchestrator that fixes
+  both problems in one action.
+
+  Design:
+
+  - Goal classifier: case-insensitive substring match against ~18
+    intent buckets. Order-sensitive (specific intents first).
+    No embedding model, no LLM call inside the binary — just a
+    deterministic keyword table. Fast, easy to test, easy to
+    extend.
+
+  - Pipeline catalog: each Intent maps to a Vec<PipelineStep> with
+    (action, target). Targets are either the user-provided file
+    path (for actions like pe-imports) or empty (for graph-walking
+    actions like audit/pagerank).
+
+  - Path detection: tokens in the goal that exist on disk become
+    the pipeline target. Common surrounding punctuation stripped.
+
+  - Live URL guard: any http:// or https:// token in the goal is
+    rejected up-front with "codemap is pure-static; capture the
+    artifact first" + a copy-pasteable curl + think invocation.
+    Enforces the no-active-network invariant uniformly without
+    relying on user/AI memory.
+
+  - Fallback guidance: when no intent matches, list closest intents
+    as suggestions instead of guessing.
+
+  Output: header (Intent / Goal / Target / Pipeline) + per-step
+  body + footer recap of the pipeline so the user can run the
+  same actions directly next time.
+
+  Implementation: src/actions/think.rs (~370 LOC). Calls existing
+  super::dispatch() per step — same code path the CLI uses for
+  explicit invocations. No special casing, no recursion.
+
+  Promoted to Tier 0 in plugin SKILL.md — the new "I don't know
+  what to use" entry point above all 163 specific actions.
+
+  Tests: 209 passing (was 204, +5):
+    - classify_goal_covers_common_intents (16 strings)
+    - classify_goal_falls_back_when_no_keywords_match
+    - detect_path_in_finds_existing_files
+    - live_urls_are_rejected_with_passive_only_message
+    - empty_goal_returns_usage
+
+  Action count: 163 -> 164 (+think). EntityKinds: 33 (unchanged).
+
+  Closes the highest-leverage usability gap from the post-arc
+  audit. Both Mobile and Think (the two review-flagged criticals)
+  are now shipped. What's left is housekeeping — examples/
+  directory + CONTRIBUTING.md, plus deferred ARM-call-edges via
+  yaxpeax-arm if demand emerges.

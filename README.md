@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 163 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, spectral analysis (Fiedler bisection + Shi-Malik clustering + eigengap), backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 164 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, spectral analysis (Fiedler bisection + Shi-Malik clustering + eigengap), backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.24.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.25.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -34,7 +34,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **Tree-sitter AST for every supported language.** Imports, exports, function definitions, call sites, and data-flow nodes are all extracted from real parse trees. Not regex. Not heuristics. The regex path is a fallback only for YAML/CMake and for files tree-sitter fails to parse.
 
-- **163 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
+- **164 actions, one dispatch.** Every analysis is a single CLI verb. `codemap --dir src pagerank` ranks files. `codemap --dir src taint req.body db.query` traces taint. `codemap --dir src risk HEAD~3` scores a PR. No sub-commands, no flags trees to memorize.
 
 - **Heterogeneous graph (5.2.0+).** One graph holds source files, PE/ELF/Mach-O binaries, DLL/dylib imports, function symbols, HTTP endpoints, web forms, schema tables/fields, Protobuf messages, GraphQL types, OpenAPI paths, Docker services, Terraform resources, ML model files, **(5.17.0+) hardcoded secrets**, **(5.19.0+) package-manifest dependencies**, **(5.20.0+) ML tensors + operators**, and **(5.21.0+) binary sections** — all as typed nodes. Every graph algorithm (PageRank, betweenness, Leiden, etc.) runs uniformly across kinds. `meta-path SourceFile->HttpEndpoint` finds every code file that ends in an API call. `pagerank --type pe` ranks the central binaries. `pagerank --type secret` ranks files by credential-risk concentration. `pagerank --type dependency` ranks the most-used deps in a monorepo. `pagerank --type ml_operator` ranks dominant op types across an ONNX-model corpus. `meta-path "model->tensor"` inventories tensor shapes across SafeTensors / GGUF model files. `attribute-filter entropy>7.0` on `--type section` finds packed/encrypted binaries across a corpus. `audit` synthesizes betweenness + brokers + clusters into a one-page architectural risk overview, flagging "load-bearing wall" nodes (chokepoint AND broker). 33 EntityKind variants modeled on GitHub stack-graphs; pass-based mutation modeled on Joern.
 
@@ -157,7 +157,7 @@ Target arguments are joined with spaces, so `codemap why a.rs b.rs` and `codemap
 
 ## Actions
 
-All 163 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
+All 164 actions grouped by category. Every action runs against the full graph unless it takes a target. Targets are files, function names, git refs, or patterns depending on the action.
 
 ### Analysis (14)
 
@@ -447,12 +447,13 @@ For finding *missing* edges — files that should know about each other but don'
 |--------|-------------|
 | `meta-path "<k1>-><k2>->..."` | DFS through typed edges following a kind sequence. The killer feature: cross-domain queries spanning every EntityKind. Examples: `"source->endpoint"` (which code calls APIs), `"pe->dll->symbol"` (binary-internal call resolution), `"source->binary->dll->cve"` (vulnerable transitive deps after `cve-match`), `"apk->permission"` (Android attack surface), `"elf->bin_func->string"` (function-to-string xrefs after `bin-disasm`). Capped at 200 paths. **Quote the arrow** in bash to avoid `>` redirection. |
 
-### Composite (5)
+### Composite (6)
 
 Higher-level workflows that chain multiple actions.
 
 | Action | What it does |
 |--------|-------------|
+| `think "<goal>"` | **(5.25.0+)** Natural-language goal router. Takes plain English ("audit this codebase" / "reverse this windows binary /path/to/app.exe" / "android apk /path/to/app.apk" / "recon /tmp/captured.html" / "find load-bearing files" / "ml model /tmp/llama.gguf" / "compare /tmp/v1.exe /tmp/v2.exe" / etc.), classifies it against ~18 intent buckets via case-insensitive keyword match, runs the matching pipeline, and shows the chosen pipeline at the top of output for transparency. Path detection: any token in the goal that exists on disk becomes the pipeline target. **Live URLs are rejected** with a "capture the artifact first" message — enforces codemap's no-active-network invariant uniformly so users (and AI agents) don't have to remember it. When the goal doesn't match, lists closest intents instead of guessing. |
 | `audit` | One-page architectural risk overview. Top chokepoints (betweenness) + top brokers + 🚨 dual-risk nodes (chokepoint AND broker = "load-bearing walls") + Leiden cluster summary + per-EntityKind census. The first action to run on any unfamiliar codebase. |
 | `validate` | Pass/fail health check for CI. Exits non-zero if health < threshold. |
 | `changeset <ref>` | Full PR/change analysis. Diff + risk + impact + dead-function check in one report. |
@@ -776,7 +777,7 @@ codemap/
 │       ├── cpg.rs                 # Code property graph — def/use edges, forward/backward, tree render
 │       ├── utils.rs               # format_number, truncate, pad_end
 │       └── actions/
-│           ├── mod.rs             # dispatch(action, target) -> String (163 actions)
+│           ├── mod.rs             # dispatch(action, target) -> String (164 actions)
 │           ├── analysis.rs        # 14 file-level actions + health
 │           ├── insights.rs        # summary, decorators, rename, context
 │           ├── navigation.rs      # why, paths, subgraph, similar, structure
