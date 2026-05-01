@@ -302,6 +302,29 @@ pub enum EntityKind {
     /// vtable` ranks the most-shared vtables; `meta-path
     /// "vtable->bin_func"` enumerates virtual methods per class.
     VTable,
+    /// Windows COM component class (CLSID). Detected by scanning a
+    /// PE binary's data/strings/resources for either an ASCII GUID
+    /// matching `[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-
+    /// [0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}` or a raw 16-byte form (groups
+    /// 1/2/3 little-endian-swapped) whose value appears in the capa
+    /// CLSID database (3,639 unique GUIDs). Edges: binary → com_class
+    /// (instantiates). attrs: clsid (canonical uppercase GUID), name
+    /// (capa display name; multiple capa names sharing one GUID are
+    /// joined with `|`), source (`ascii` / `raw`), offset (hex
+    /// position in file). Killer queries: `meta-path "pe->com_class"`
+    /// enumerates COM-using binaries; attribute filter on `name`
+    /// finds every binary instantiating Outlook/Office/Shell objects.
+    ComClass,
+    /// Windows COM interface (IID). Same detection mechanism as
+    /// ComClass but matched against capa's IID database (25,306
+    /// unique GUIDs). Indicates the binary either uses or implements
+    /// the interface. Edges: binary → com_interface. attrs: iid
+    /// (canonical uppercase GUID), name (capa display name), source
+    /// (`ascii` / `raw`), offset. Killer queries: `meta-path
+    /// "pe->com_interface"` for COM surface inventory; attribute
+    /// filter on `name` finds binaries handling specific shell /
+    /// scripting / office automation interfaces.
+    ComInterface,
 }
 
 impl EntityKind {
@@ -346,6 +369,8 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::ComClass => "com_class",
+            EntityKind::ComInterface => "com_interface",
         }
     }
 
@@ -392,6 +417,8 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "com_class" | "comclass" | "clsid" | "comcls" => EntityKind::ComClass,
+            "com_interface" | "cominterface" | "iid" | "comif" | "com_iface" | "interface" => EntityKind::ComInterface,
             _ => return None,
         })
     }

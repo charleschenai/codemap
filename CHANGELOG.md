@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #1 — COM CLSID/IID GUID database, capa-derived)
+- **New `com-scan` action** (aliases: `com`, `com-guids`, `clsid-iid`, `windows-com`). Identifies which Windows COM component classes (CLSIDs) and interfaces (IIDs) a binary instantiates / implements — primary triage pivot for Windows malware. Codemap can now answer "this binary instantiates `Outlook.Application`" and "this DLL uses `IShellWindows`."
+- **Two-pass detection.**
+  - **ASCII GUID regex:** matches the canonical `[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}` form across the whole file (data, rsrc, strings).
+  - **Raw 16-byte:** Microsoft COM stores GUIDs in a packed binary form with groups 1/2/3 little-endian-swapped. The runtime undoes the byte-order rearrangement (lifted from `capa/rules/__init__.py:340-376`) before lookup, so on-disk binary `IID_*` constants resolve too.
+- **New `EntityKind::ComClass`** (aliases: `com_class`, `comclass`, `clsid`, `comcls`).
+- **New `EntityKind::ComInterface`** (aliases: `com_interface`, `cominterface`, `iid`, `comif`, `com_iface`).
+- **Edges:** PE → ComClass (instantiates), PE → ComInterface (uses/implements). Per-node attrs: GUID, capa name, source (`ascii` / `raw` / `ascii+raw`), file offset.
+- **Bundled database** (vendored from capa, Apache-2.0): 3,639 unique CLSIDs + 25,306 unique IIDs. Stored as bincode-v1 in `codemap-core/data/com/{classes,interfaces}.bin` (~1.4 MB combined) and embedded into the binary via `include_bytes!`. When multiple capa names share a single GUID, names are joined with `|`. `data/com/build.py` regenerates the blobs from the upstream Python sources; `data/com/ATTRIBUTION.md` documents the license.
+- **Killer queries.**
+  - `codemap meta-path "pe->com_class"` — cross-binary CLSID inventory.
+  - `codemap meta-path "pe->com_interface"` — cross-binary IID inventory.
+  - `codemap pagerank --type com_class` — most-instantiated COM classes across a corpus.
+  - Attribute filter on `name` finds every binary touching Outlook / Office / Shell / scripting automation interfaces.
+
+### Tests
+- 283 → **294 tests** (+11). Catalog loading + 10 known CLSIDs round-trip, ASCII GUID match in synthetic buffer, raw 16-byte (LE-swapped) match, ASCII+raw dedup into a single graph node with combined `source=ascii+raw`, GUID byte-order helpers self-inverse, bad-input rejection, IID match, binary→com_iface edge emission, empty-data + PRNG-data noise bounds.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
