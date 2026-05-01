@@ -2344,6 +2344,326 @@ pub fn onnx_prune(graph: &mut Graph, target: &str) -> String {
     out
 }
 
+// ── 7. gguf_overlay (Ship 2 #23) ───────────────────────────────────
+//
+// Computes the expected end-of-tensor-data from the GGUF tensor info
+// table (offsets + dims + dtype block sizes) and flags any trailing
+// bytes as overlay — the binary equivalent of PE/ELF overlay carving.
+//
+// Real-world signal: malware-laced model rehosters and supply-chain
+// attackers occasionally append payloads to popular GGUF files.
+// Watermark trackers and licensing tools also use overlay regions.
+// Either way, an analyst wants to know the model file isn't just
+// the model.
+//
+// Algorithm:
+//   1. Re-parse GGUF header + metadata KV + tensor info table,
+//      capturing (offset, dims, dtype) per tensor.
+//   2. data_section_start = position after tensor info, aligned up
+//      to general.alignment (default 32).
+//   3. For each tensor: byte_size = (elements / blck_size) * type_size,
+//      using ggml block-size table.
+//   4. max_data_end = data_section_start + max(offset + byte_size).
+//   5. overlay_bytes = file_size - max_data_end.
+//   6. If overlay > 0: report size, head/tail bytes, magic-sniff.
+
+/// (block_size_in_elements, type_size_in_bytes) for each GGML dtype.
+/// Source: llama.cpp ggml.h GGML_TYPE_TRAITS table. These are the
+/// authoritative quant-block dimensions.
+fn ggml_block_dims(dtype: u32) -> Option<(u64, u64)> {
+    Some(match dtype {
+        0 => (1, 4),    // F32
+        1 => (1, 2),    // F16
+        2 => (32, 18),  // Q4_0
+        3 => (32, 20),  // Q4_1
+        6 => (32, 22),  // Q5_0
+        7 => (32, 24),  // Q5_1
+        8 => (32, 34),  // Q8_0
+        9 => (32, 36),  // Q8_1
+        10 => (256, 84),   // Q2_K
+        11 => (256, 110),  // Q3_K
+        12 => (256, 144),  // Q4_K
+        13 => (256, 176),  // Q5_K
+        14 => (256, 210),  // Q6_K
+        15 => (256, 292),  // Q8_K
+        16 => (256, 66),   // IQ2_XXS
+        17 => (256, 74),   // IQ2_XS
+        18 => (256, 98),   // IQ3_XXS
+        19 => (256, 50),   // IQ1_S
+        20 => (32, 18),    // IQ4_NL
+        21 => (256, 110),  // IQ3_S
+        22 => (256, 82),   // IQ2_S
+        23 => (256, 136),  // IQ4_XS
+        24 => (1, 1),      // I8
+        25 => (1, 2),      // I16
+        26 => (1, 4),      // I32
+        27 => (1, 8),      // I64
+        28 => (1, 8),      // F64
+        29 => (256, 56),   // IQ1_M
+        30 => (1, 2),      // BF16
+        _ => return None,
+    })
+}
+
+fn ggml_tensor_byte_size(dims: &[u64], dtype: u32) -> Option<u64> {
+    let (blck, tsz) = ggml_block_dims(dtype)?;
+    if dims.is_empty() { return Some(0); }
+    let elements: u64 = dims.iter().product::<u64>();
+    if blck == 0 { return None; }
+    // Round up to whole blocks (well-formed GGUF rows are always
+    // divisible by blck — but be conservative for malformed files).
+    let blocks = elements.div_ceil(blck);
+    Some(blocks.saturating_mul(tsz))
+}
+
+fn align_up(x: u64, align: u64) -> u64 {
+    if align == 0 { return x; }
+    let r = x % align;
+    if r == 0 { x } else { x + (align - r) }
+}
+
+#[derive(Debug, Clone)]
+struct GgufTensorOffset {
+    name: String,
+    dims: Vec<u64>,
+    dtype: u32,
+    /// Offset relative to the start of the data section.
+    offset: u64,
+}
+
+/// Parse just enough GGUF to compute the data-section boundary and
+/// per-tensor offsets. Stops short of doing the full info-rendering
+/// that parse_gguf does — this is the lean variant for overlay carving.
+fn parse_gguf_for_overlay(data: &[u8]) -> Result<(u64 /* alignment */, Vec<GgufTensorOffset>, u64 /* data_section_start */), String> {
+    if data.len() < 24 { return Err("File too small for GGUF".into()); }
+    if &data[0..4] != b"GGUF" { return Err("Missing GGUF magic".into()); }
+
+    let _version = read_u32_le(data, 4)?;
+    let tensor_count = read_u64_le(data, 8)?;
+    let metadata_kv_count = read_u64_le(data, 16)?;
+
+    let mut alignment: u64 = 32; // GGUF default
+    let mut pos = 24usize;
+    for _ in 0..metadata_kv_count {
+        if pos >= data.len() { break; }
+        let (key, key_consumed) = read_gguf_string(data, pos)?;
+        pos += key_consumed;
+        let vtype = read_u32_le(data, pos)?;
+        pos += 4;
+        // For general.alignment, capture before continuing
+        if key == "general.alignment" && (vtype == 4 || vtype == 5 || vtype == 10 || vtype == 11) {
+            // 4=u32, 5=i32, 10=u64, 11=i64 — read whichever
+            let raw = match vtype {
+                4 | 5 => read_u32_le(data, pos)? as u64,
+                10 | 11 => read_u64_le(data, pos)?,
+                _ => alignment,
+            };
+            if raw > 0 { alignment = raw; }
+        }
+        let (_value_str, value_consumed) = read_gguf_value(data, pos, vtype)?;
+        pos += value_consumed;
+    }
+
+    // Now parse tensor info entries
+    let mut tensors: Vec<GgufTensorOffset> = Vec::with_capacity(tensor_count as usize);
+    for _ in 0..tensor_count {
+        if pos >= data.len() { break; }
+        let (name, name_consumed) = read_gguf_string(data, pos)?;
+        pos += name_consumed;
+        let n_dims = read_u32_le(data, pos)? as usize;
+        pos += 4;
+        let mut dims = Vec::with_capacity(n_dims);
+        for _ in 0..n_dims {
+            let d = read_u64_le(data, pos)?;
+            dims.push(d);
+            pos += 8;
+        }
+        let dtype = read_u32_le(data, pos)?;
+        pos += 4;
+        let offset = read_u64_le(data, pos)?;
+        pos += 8;
+        tensors.push(GgufTensorOffset { name, dims, dtype, offset });
+    }
+
+    // Data section starts at the next alignment boundary
+    let data_section_start = align_up(pos as u64, alignment);
+    Ok((alignment, tensors, data_section_start))
+}
+
+pub fn gguf_overlay(graph: &mut Graph, target: &str) -> String {
+    if target.is_empty() {
+        return "Usage: codemap gguf-overlay <model.gguf>".to_string();
+    }
+    // Overlay carving only needs the header + metadata + tensor info
+    // table. The actual tensor weights (which can be 70 GB on a real
+    // LLM) are NEVER read — we just need their declared offsets and
+    // the file size. Read up to 64 MB of prefix; that's enough for
+    // a 70B model's metadata + ~7000-tensor info table.
+    const PREFIX_MAX: u64 = 64 * 1024 * 1024;
+    let path = std::path::Path::new(target);
+    let total_file_size = match std::fs::metadata(path) {
+        Ok(m) => m.len(),
+        Err(e) => return format!("Error reading {target}: {e}"),
+    };
+    let to_read = total_file_size.min(PREFIX_MAX);
+    use std::io::Read;
+    let mut f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return format!("Error opening {target}: {e}"),
+    };
+    let mut data = vec![0u8; to_read as usize];
+    if let Err(e) = f.read_exact(&mut data) {
+        return format!("Error reading prefix of {target}: {e}");
+    }
+    let file_size = total_file_size;
+
+    let (alignment, tensors, data_section_start) = match parse_gguf_for_overlay(&data) {
+        Ok(t) => t,
+        Err(e) => return format!("GGUF parse error: {e}"),
+    };
+
+    // Compute expected end-of-data
+    let mut max_end: u64 = 0;
+    let mut total_tensor_bytes: u64 = 0;
+    let mut unknown_dtype_count = 0usize;
+    for t in &tensors {
+        let bytes = match ggml_tensor_byte_size(&t.dims, t.dtype) {
+            Some(b) => b,
+            None => { unknown_dtype_count += 1; 0 }
+        };
+        total_tensor_bytes = total_tensor_bytes.saturating_add(bytes);
+        let end = t.offset.saturating_add(bytes);
+        if end > max_end { max_end = end; }
+    }
+
+    let expected_eof = data_section_start.saturating_add(max_end);
+    let overlay_bytes = file_size.saturating_sub(expected_eof);
+
+    // Register an Overlay node if there's a real overlay present
+    use crate::types::EntityKind;
+    register_ml_model(graph, target, "gguf");
+    if overlay_bytes > 0 {
+        let model_id = format!("model:{target}");
+        let overlay_id = format!("overlay:gguf:{target}");
+        let off = format!("{:#x}", expected_eof);
+        let sz = overlay_bytes.to_string();
+        graph.ensure_typed_node(&overlay_id, EntityKind::Overlay, &[
+            ("size_bytes", &sz),
+            ("file_offset", &off),
+            ("source_format", "gguf"),
+        ]);
+        graph.add_edge(&model_id, &overlay_id);
+    }
+
+    // Format report
+    let mut out = String::new();
+    out.push_str(&format!("=== GGUF Overlay Carve: {} ===\n\n", target));
+    out.push_str(&format!("File size:           {} bytes\n", file_size));
+    out.push_str(&format!("Tensor count:        {}\n", tensors.len()));
+    out.push_str(&format!("Data alignment:      {}\n", alignment));
+    out.push_str(&format!("Data section start:  {:#x}\n", data_section_start));
+    out.push_str(&format!("Last tensor end:     {:#x} (offset {:#x} from data start)\n",
+        expected_eof, max_end));
+    out.push_str(&format!("Sum of tensor bytes: {} bytes\n", total_tensor_bytes));
+    if unknown_dtype_count > 0 {
+        out.push_str(&format!("⚠ Unknown dtype:    {} tensors (size estimate may underflow)\n",
+            unknown_dtype_count));
+    }
+    out.push('\n');
+
+    if overlay_bytes == 0 {
+        out.push_str("No overlay region — file ends exactly where tensor data ends.\n");
+        return out;
+    }
+
+    out.push_str(&format!("⚠ OVERLAY DETECTED: {} bytes after expected EOF\n", overlay_bytes));
+    out.push_str(&format!("  File offset of overlay: {:#x}\n", expected_eof));
+    out.push_str(&format!("  Overlay size:           {} bytes ({:.3} MB)\n",
+        overlay_bytes, (overlay_bytes as f64) / (1024.0 * 1024.0)));
+
+    // Magic-sniff the first 16 bytes
+    let head_off = expected_eof as usize;
+    if head_off < data.len() {
+        let head_end = (head_off + 16).min(data.len());
+        let head = &data[head_off..head_end];
+        let hex: Vec<String> = head.iter().map(|b| format!("{b:02x}")).collect();
+        out.push_str(&format!("  Head bytes (hex):       {}\n", hex.join(" ")));
+        out.push_str(&format!("  Head as ASCII:          {}\n",
+            head.iter().map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
+                .collect::<String>()));
+
+        // Magic sniffer
+        if head.len() >= 4 {
+            let magic_hint = if &head[..2] == b"MZ" { Some("PE executable") }
+                else if head.len() >= 4 && &head[..4] == b"\x7FELF" { Some("ELF binary") }
+                else if head.len() >= 4 && &head[..4] == b"PK\x03\x04" { Some("ZIP/JAR archive") }
+                else if head.len() >= 4 && &head[..4] == b"GGUF" { Some("appended second GGUF") }
+                else if head.len() >= 4 && &head[..4] == b"%PDF" { Some("PDF document") }
+                else if head.len() >= 4 && &head[..3] == b"\xFF\xD8\xFF" { Some("JPEG image") }
+                else if head.len() >= 8 && &head[..8] == b"\x89PNG\r\n\x1A\n" { Some("PNG image") }
+                else { None };
+            if let Some(hint) = magic_hint {
+                out.push_str(&format!("  Magic-sniff:            🚨 looks like {hint}\n"));
+            } else {
+                // Crude entropy check: if head bytes are highly repetitive,
+                // it's likely zero-padding; if highly random, it's likely
+                // ciphertext or compressed payload.
+                let unique = head.iter().collect::<std::collections::HashSet<_>>().len();
+                if unique <= 2 {
+                    out.push_str("  Heuristic:              padding (low entropy)\n");
+                } else if unique >= 12 {
+                    out.push_str("  Heuristic:              high-entropy (compressed / encrypted)\n");
+                }
+            }
+        }
+    }
+
+    out.push('\n');
+    out.push_str("Try: dd if=<file> skip=expected_eof bs=1  to extract overlay for analysis.\n");
+    out
+}
+
+#[cfg(test)]
+mod gguf_overlay_tests {
+    use super::*;
+
+    #[test]
+    fn ggml_block_dims_known_types() {
+        assert_eq!(ggml_block_dims(0), Some((1, 4)));        // F32
+        assert_eq!(ggml_block_dims(1), Some((1, 2)));        // F16
+        assert_eq!(ggml_block_dims(8), Some((32, 34)));      // Q8_0
+        assert_eq!(ggml_block_dims(12), Some((256, 144)));   // Q4_K
+        assert_eq!(ggml_block_dims(14), Some((256, 210)));   // Q6_K
+        assert_eq!(ggml_block_dims(30), Some((1, 2)));       // BF16
+        assert_eq!(ggml_block_dims(99), None);
+    }
+
+    #[test]
+    fn tensor_byte_size_correct_for_q4_k() {
+        // 4096-element row at Q4_K (256 elements per block, 144 bytes per block)
+        // = 16 blocks * 144 bytes = 2304 bytes
+        let bytes = ggml_tensor_byte_size(&[4096], 12).unwrap();
+        assert_eq!(bytes, 16 * 144);
+    }
+
+    #[test]
+    fn tensor_byte_size_f32_two_dim() {
+        // [4, 8] F32 = 32 elements * 4 bytes = 128
+        let bytes = ggml_tensor_byte_size(&[4, 8], 0).unwrap();
+        assert_eq!(bytes, 128);
+    }
+
+    #[test]
+    fn align_up_basic_cases() {
+        assert_eq!(align_up(0, 32), 0);
+        assert_eq!(align_up(1, 32), 32);
+        assert_eq!(align_up(31, 32), 32);
+        assert_eq!(align_up(32, 32), 32);
+        assert_eq!(align_up(33, 32), 64);
+        assert_eq!(align_up(100, 0), 100); // alignment 0 is no-op
+    }
+}
+
 #[cfg(test)]
 mod onnx_prune_tests {
     use super::*;

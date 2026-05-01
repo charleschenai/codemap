@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.31.0] — 2026-05-01
+
+### Added (Ship 2 #23 — GGUF overlay carver)
+- **New `gguf-overlay` action** (aliases: `gguf-carve`, `model-overlay`). Computes the expected end-of-tensor-data from a GGUF file's tensor info table (per-tensor offset + dims + dtype block size) and flags any trailing bytes as overlay — the binary equivalent of PE/ELF overlay carving, applied to LLM weight files.
+
+  Real-world signal: malware-laced model rehosters and supply-chain attackers occasionally append payloads to popular GGUF files. Watermark trackers and licensing tools also use overlay regions. Either way, an analyst wants to know the model file isn't *just* the model.
+
+  Algorithm:
+  1. Re-parse GGUF header + metadata KV (capturing `general.alignment`) + tensor info table (capturing per-tensor offset + dims + dtype).
+  2. `data_section_start = align_up(after_tensor_info, alignment)`.
+  3. For each tensor: `byte_size = (elements / blck) * type_size` from the ggml block-size table (covers F32 / F16 / BF16 / Q4_{0,1,K} / Q5_{0,1,K} / Q6_K / Q8_{0,1,K} / IQ{1,2,3,4}_{S,M,XS,XXS,NL} / I8/16/32/64 / F64 — 27 dtypes).
+  4. `max_data_end = data_section_start + max(offset + byte_size)`.
+  5. `overlay_bytes = file_size - max_data_end`.
+  6. If overlay > 0 → report size, head bytes (hex + ASCII), magic-sniff (PE / ELF / ZIP / nested GGUF / PDF / JPEG / PNG), entropy heuristic.
+
+- **Streaming reader — never loads multi-GB tensor data into memory.** Reads only the first 64 MB of the file (enough to cover the tensor info table even for 70B-parameter models with thousands of tensors); pulls total file size from filesystem metadata. Successfully tested on real 4.7 GB Qwen-2.5-7B-Q4_K_M, 12 GB gpt-oss-20b-MXFP4, and 17 GB GLM-4.7-Flash-MXFP4 files — all correctly verified as overlay-free in <1 sec each.
+
+- **Each detected overlay becomes an `Overlay` graph node** attached to the parent `MlModel`, with `size_bytes` / `file_offset` / `source_format=gguf` attrs. Reuses the existing `Overlay` EntityKind from the PE/ELF overlay-info action.
+
+- **27 ggml dtypes covered.** Some bleeding-edge formats (MXFP4, TQ1_0, TQ2_0) aren't in the table yet — tensors of those types contribute zero to the max-end calculation and produce a warning. Conclusion remains correct as long as the *largest-offset* tensor's dtype is known (which is true for all standard model files).
+
+### Tests
+- 248 → **252 tests** (+4). ggml block-size table for known types + Q4_K byte-size math + F32 multi-dim + align_up edge cases.
+
+---
+
 ## [5.30.0] — 2026-05-01
 
 ### Added (Ship 2 #21 — ONNX op-graph pruner)

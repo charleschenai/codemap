@@ -269,6 +269,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // operators in an ONNX graph by reverse-reachability from the
         // model's declared outputs.
         "onnx-prune" | "op-prune" | "prune-ops" | "ml-dead-ops" => Ok(ml::onnx_prune(graph, target)),
+        // GGUF overlay carver (5.31.0 — Ship 2 #23). Computes expected
+        // EOF from tensor offsets + ggml block sizes; flags trailing
+        // bytes as overlay (hidden payload, watermark, signature).
+        "gguf-overlay" | "gguf-carve" | "model-overlay" => Ok(ml::gguf_overlay(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
