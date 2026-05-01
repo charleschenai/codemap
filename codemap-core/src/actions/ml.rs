@@ -1109,7 +1109,17 @@ fn parse_onnx(data: &[u8], target: &str) -> Result<(String, BTreeMap<String, usi
                     graph_name = proto_string(gdata, gf);
                 }
                 5 if gf.wire_type == 2 => {
-                    // Input (ValueInfoProto) - field 1 is name
+                    // GraphProto.initializer = TensorProto (field 5).
+                    // Bug fix (5.33.1): old code had this labeled "Input"
+                    // and treated field 11 as initializer — field numbers
+                    // were swapped. Per onnx/onnx GraphProto.proto:
+                    //   field 5  = repeated TensorProto initializer
+                    //   field 11 = repeated ValueInfoProto input
+                    initializer_count += 1;
+                }
+                11 if gf.wire_type == 2 => {
+                    // GraphProto.input = ValueInfoProto (field 11). Name
+                    // is field 1 of ValueInfoProto.
                     let vi_data = &gdata[gf.data_offset..gf.data_offset + gf.data_len];
                     let vi_fields = collect_proto_fields(vi_data);
                     for vf in &vi_fields {
@@ -1120,12 +1130,8 @@ fn parse_onnx(data: &[u8], target: &str) -> Result<(String, BTreeMap<String, usi
                         }
                     }
                 }
-                11 if gf.wire_type == 2 => {
-                    // Initializer (TensorProto)
-                    initializer_count += 1;
-                }
                 12 if gf.wire_type == 2 => {
-                    // Output (ValueInfoProto)
+                    // GraphProto.output = ValueInfoProto (field 12)
                     let vi_data = &gdata[gf.data_offset..gf.data_offset + gf.data_len];
                     let vi_fields = collect_proto_fields(vi_data);
                     for vf in &vi_fields {
@@ -2401,6 +2407,11 @@ fn ggml_block_dims(dtype: u32) -> Option<(u64, u64)> {
         28 => (1, 8),      // F64
         29 => (256, 56),   // IQ1_M
         30 => (1, 2),      // BF16
+        // 5.33.1: newer quantizations from llama.cpp 2024+
+        34 => (256, 54),   // TQ1_0
+        35 => (256, 64),   // TQ2_0
+        38 => (32, 17),    // MXFP4 (block of 32 elements; 16 nibbles + 1 byte E8M0 scale)
+        39 => (32, 17),    // MXFP4_INTERLEAVED (same byte cost; just different layout)
         _ => return None,
     })
 }

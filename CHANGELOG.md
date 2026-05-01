@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.33.1] — 2026-05-01
+
+### Fixed
+- **`onnx-info`: GraphProto field 5 vs 11 swap.** The proto-walking code was treating field 5 as `input` (mislabeled) and field 11 as `initializer count`. Per the official ONNX `onnx/onnx GraphProto.proto`:
+  - field **5** = `repeated TensorProto initializer`
+  - field **11** = `repeated ValueInfoProto input`
+  Reports were showing initializer count under "Inputs" and input ValueInfos contributing to "Initializers". Existing `onnx-prune` (5.30.0) was already correct; this brings `onnx-info` in line.
+- **`gguf-overlay`: MXFP4 + TQ dtypes added to ggml block-size table.** Three more entries that the v1 table missed:
+  - dtype 34 = `TQ1_0` → (256, 54)
+  - dtype 35 = `TQ2_0` → (256, 64)
+  - dtype 38 = `MXFP4` → (32, 17)
+  - dtype 39 = `MXFP4_INTERLEAVED` → (32, 17)
+  
+  Real-world impact: `gpt-oss-20b-mxfp4.gguf` now reports `Sum of tensor bytes: 12,096,558,336` (12.1 GB — accurate) instead of the previous `1,944,212,736` which dropped 72 MXFP4 tensors. Overlay verdict was already correct (largest-offset tensor had a known dtype) but the size accounting is now honest.
+
+---
+
 ## [5.33.0] — 2026-05-01
 
 ### Added (Ship 3 #9b — crypto-loop detector)
