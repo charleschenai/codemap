@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.28.0] — 2026-05-01
+
+### Added (Ship 1 #8 — anti-analysis scanner)
+- **New `anti-analysis` action** (aliases: `anti-tech`, `evasion`, `anti-debug`). Detects malware-evasion techniques in PE binaries by matching imports + section names + embedded strings against a hardcoded ruleset modelled on Mandiant's capa-rules anti-analysis corpus.
+- **35 rules across 7 categories** — anti-debugging (15), anti-vm (8), packer (6), anti-forensic (3), anti-disasm (1), anti-av (1), anti-emulation (1). Coverage targets: IsDebuggerPresent / NtQueryInformationProcess / hardware breakpoints / TLS callbacks / debugger window classes / debugger process names / VirtualBox / VMware / QEMU / Hyper-V / Parallels / sandbox detection / WMI VM probes / UPX / ASPack / Themida / VMProtect / PECompact / FSG/MEW/MPRESS / Heaven's Gate / event-log clearing / self-delete / MBR wipe / AV process termination / Wine.
+- **AND semantics across feature sets, OR within** — a rule with both `imports` and `strings` requires at least one match in each (capa's typical shape: e.g., "find debugger window" needs both `FindWindow` API AND a known debugger class string). Within a set, items are OR'd. Reduces false positives on legitimate binaries that import generic APIs.
+- **Confidence levels** — high / medium / low. Low-confidence rules surface API-only signals (timing APIs, SEH filter registration) that can fire on benign code; analysts can filter them out.
+- **New `EntityKind::AntiAnalysis`** (alias: `anti_tech`). Each detected technique becomes a graph node attached to the binary, with attrs `name`, `namespace` (capa rule namespace, e.g. `anti-analysis/anti-debugging/debugger-detection`), `category`, `confidence`, `reference` (link to the al-khaser .cpp or capa-rules YAML it mirrors).
+- **Killer queries** enabled:
+  - `meta-path "pe->anti_tech"` — cross-binary technique inventory.
+  - `pagerank --type anti_tech` — most-prevalent techniques across a corpus.
+  - Filter by `category=packer` — every packed binary in the graph.
+  - Filter by `confidence=high` — high-signal techniques only.
+- **PE imports + section names + strings** are extracted with the existing `parse_pe_imports_structured` pipeline (made `pub(crate)` for cross-module reuse) plus a small ASCII + UTF-16LE string scanner (≥ 4 char strings, capped at 20 K).
+- ELF / Mach-O coverage = v2 — ruleset is Windows-centric today.
+
+### Notes
+- This is a **subset scanner**, not a full capa engine — implements ~35 high-confidence rules from the 90-rule anti-analysis corpus. Full YAML rule loading + instruction-level matching is the next ship (5.29.0). Will reuse the bounded backward constant-propagator from Ship 1 #7.
+
+### Tests
+- 223 → **232 tests** (+9). Coverage: API-import rule firing, AND-semantics across imports + strings + sections, case-insensitive DLL/function names, multi-rule firing on simulated malware corpus, ASCII + UTF-16LE string extraction, ruleset minimum-coverage smoke test.
+
+---
+
 ## [5.27.0] — 2026-05-01
 
 ### Added (Ship 1 #7 — jump-table resolver)

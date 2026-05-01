@@ -604,6 +604,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         MlTensor          => "shape=cylinder, fillcolor=\"#ffe0b2\", style=filled, fontsize=9",
         MlOperator        => "shape=hexagon, fillcolor=\"#ce93d8\", style=filled, fontsize=10",
         BinarySection     => "shape=folder, fillcolor=\"#cfd8dc\", style=filled, fontsize=9",
+        AntiAnalysis      => "shape=octagon, fillcolor=\"#ef9a9a\", style=filled, fontsize=10",
     }
 }
 
@@ -757,6 +758,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         MlTensor          => "tensor",
         MlOperator        => "ml_operator",
         BinarySection     => "section",
+        AntiAnalysis      => "anti_tech",
     }
 }
 

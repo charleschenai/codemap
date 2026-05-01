@@ -175,6 +175,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             MlTensor          => (255, 224, 178),
             MlOperator        => (206, 147, 216),
             BinarySection     => (207, 216, 220),
+            AntiAnalysis      => (239, 154, 154),
         }
     }
 

@@ -235,6 +235,18 @@ pub enum EntityKind {
     /// binary layout, `pagerank --type section` ranks shared
     /// section names across vendor product families.
     BinarySection,
+    /// Anti-analysis technique fingerprint (Ship 1 #8). Edges:
+    /// binary → anti_tech. attrs: name (e.g. "check for windows
+    /// debugger via PEB"), namespace (capa rule namespace, e.g.
+    /// "anti-analysis/anti-debugging/debugger-detection"), category
+    /// (anti-debugging / anti-vm / packer / anti-forensic / anti-av
+    /// / obfuscation / anti-disasm / anti-emulation), evidence
+    /// (the matched feature: API name, section name, mnemonic, etc.),
+    /// confidence (high / medium / low). Killer queries:
+    /// `meta-path "pe->anti_tech"` enumerates malware-relevant
+    /// behaviors across a binary corpus; attribute filter on
+    /// category surfaces specific evasion families.
+    AntiAnalysis,
 }
 
 impl EntityKind {
@@ -274,6 +286,7 @@ impl EntityKind {
             EntityKind::MlTensor => "tensor",
             EntityKind::MlOperator => "ml_operator",
             EntityKind::BinarySection => "section",
+            EntityKind::AntiAnalysis => "anti_tech",
         }
     }
 
@@ -315,6 +328,7 @@ impl EntityKind {
             "tensor" | "mltensor" | "weight" => EntityKind::MlTensor,
             "ml_operator" | "mlop" | "op" | "operator" => EntityKind::MlOperator,
             "section" | "binsection" | "binarysection" => EntityKind::BinarySection,
+            "anti_tech" | "anti" | "anti-analysis" | "antitech" | "technique" => EntityKind::AntiAnalysis,
             _ => return None,
         })
     }

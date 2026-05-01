@@ -398,9 +398,9 @@ fn register_pe_imports_into_graph(graph: &mut Graph, target: &str, dlls: &[Impor
 }
 
 /// Represents a single imported DLL and its functions.
-struct ImportedDll {
-    name: String,
-    functions: Vec<String>,
+pub(crate) struct ImportedDll {
+    pub(crate) name: String,
+    pub(crate) functions: Vec<String>,
 }
 
 /// Format parsed PE imports into a human-readable report.
@@ -2582,7 +2582,7 @@ pub fn binary_diff(graph: &mut Graph, target: &str) -> String {
     out
 }
 
-fn parse_pe_imports_structured(data: &[u8]) -> Result<Vec<ImportedDll>, String> {
+pub(crate) fn parse_pe_imports_structured(data: &[u8]) -> Result<Vec<ImportedDll>, String> {
     if data.len() < 64 {
         return Err("File too small".to_string());
     }

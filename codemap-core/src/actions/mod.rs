@@ -35,6 +35,7 @@ pub mod apk;
 pub mod dex;
 pub mod recon;
 pub mod think;
+pub mod anti_analysis;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -255,6 +256,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "web-sitemap-parse" | "sitemap-parse" => Ok(recon::web_sitemap_parse(graph, target)),
         "web-fingerprint" | "fingerprint-web" => Ok(recon::web_fingerprint(graph, target)),
         "crt-parse" | "crt-sh"           => Ok(recon::crt_parse(graph, target)),
+        // Anti-analysis scanner (5.27.0 — Ship 1 #8). Capa-rules-style
+        // detection of anti-debug / anti-vm / packer / anti-forensic /
+        // anti-av techniques from PE imports + section names + strings.
+        "anti-analysis" | "anti-tech" | "evasion" | "anti-debug" => Ok(anti_analysis::anti_analysis(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

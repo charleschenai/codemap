@@ -1,5 +1,5 @@
 pub(crate) mod common;
-mod pe;
+pub(crate) mod pe;
 mod schema;
 mod web;
 
