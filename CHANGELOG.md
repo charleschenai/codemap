@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 — Source-language identification)
+- **New `lang-id` action** (aliases: `language`, `detect-language`, `source-lang`). Tags PE / ELF / Mach-O binaries with `language=rust|go|dotnet|unknown`, plus `language_version` when a rustc commit-hash or Go pclntab magic is present. Modeled on FLARE FLOSS's `floss/language/identify.py` but extended past FLOSS's PE-only scope: Rust commit-hash strings and Go pclntab magic bytes appear identically in ELF / Mach-O, so the detector works cross-OS.
+- **Three independent detectors:**
+  - **Rust** — substring scan for `rustc/<40-hex>/library` (commit hash, looked up in the bundled DB → version) or `rustc/<x.y.z>/library` (explicit version). Covers stripped builds where the commit hash is the only forensic anchor.
+  - **Go** — pclntab magic-byte scan with header validation (pc_quantum ∈ {1,2,4} and pointer_size ∈ {4,8} at offsets +6/+7). Magic → version mapping: `\xfb…` → 1.12, `\xfa…` → 1.16, `\xf0…` → 1.18, `\xf1…` → 1.20. Fallback: scan for any of 8 known runtime function strings (`runtime.main`, `runtime.morestack_noctxt`, etc.).
+  - **.NET** — PE optional header data directory entry 14 (COM_DESCRIPTOR) has non-zero VA + size. Both PE32 and PE32+ variants supported.
+- **Bundled `data/rustc_versions.toml`** — 119 commit-hash → version mappings covering rustc 1.0 .. 1.74. Sourced from FLOSS's `rust_version_database.py` (Apache-2.0). Loaded lazily via `OnceLock` + a tiny line-based parser; no `toml` crate dependency added.
+- **Auto-attribute** — the action ensures the PE/ELF/Mach-O binary node exists (creating it if needed) and writes `language` + `language_version` attributes onto the existing node. No new EntityKind — language is metadata, not structure.
+
+### Why this ships now
+Rust ransomware (BlackCat/ALPHV) and Go malware are increasingly common in modern samples. Knowing the source language is the load-bearing first step for downstream tool selection — Go strings live in length-sorted blobs (classic `strings(1)` finds maybe 5%), Rust strings span xref-bounded UTF-8 segments. `lang-id` answers "which extractor do I run next?" and the rustc commit-hash DB is forensic gold when version strings are stripped but commit hashes remain.
+
+### Tests
+- 283 → **296 tests** (+13). Rustc DB loads 119 entries with correct lookups, commit-hash detection, explicit-version detection, unknown-hash returns `version=unknown`, Go pclntab 1.18 + 1.20 detection, invalid pc_quantum rejected, runtime-string fallback, .NET COM descriptor, unknown when no signals, Rust precedence over Go, BinFmt detect for PE/ELF/Mach-O/unknown, end-to-end action writes attrs onto the binary node.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

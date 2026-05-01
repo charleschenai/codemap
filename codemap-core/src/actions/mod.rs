@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod lang_id;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // Source-language identification (5.38.0 — Ship 5). Tags PE /
+        // ELF / Mach-O binaries with language=rust|go|dotnet, plus
+        // version when a rustc commit-hash or Go pclntab magic is
+        // present. FLOSS-derived but extended past PE-only.
+        "lang-id" | "language" | "detect-language" | "source-lang" => Ok(lang_id::lang_id(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
