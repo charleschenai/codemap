@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.29.0] — 2026-05-01
+
+### Added (Ship 1 #9a — crypto constants scanner)
+- **New `crypto-const` action** (aliases: `crypto-scan`, `find-crypto`, `crypto`). Identifies the cryptographic algorithms a binary implements by scanning for well-known init values, S-boxes, polynomial constants, and magic numbers — modelled on the [findcrypt-yara](https://github.com/polymorf/findcrypt-yara) ruleset.
+- **22 signatures across 13 algorithms** — MD5, MD2, SHA-1, SHA-224, SHA-256, SHA-384, SHA-512, RIPEMD-160, Whirlpool, AES (Rcon + S-box + inverse S-box), DES (IP table), Blowfish (P-array LE+BE), RC6 (P32+Q32), TEA/XTEA, CRC-32 (reflected+forward poly + lookup table), CRC-32C.
+- **Naive linear scan with non-overlapping match enumeration** — fast enough for typical binaries (~50 ns per pattern per MB on modern CPUs). `Endian::Both` patterns scan both byte orders. Hard cap at non-overlapping matches per pattern (no runaway on data sections that happen to contain repeated bytes).
+- **New `EntityKind::CryptoConstant`** (alias: `crypto`). Each match becomes a graph node with attrs `algorithm`, `constant_name`, `offset`, `endian` (le/be/le|be), `confidence` (high/medium/low). De-duplicated by (algorithm, constant_name) — multiple matches of the same constant collapse to one node.
+- **Killer queries** enabled:
+  - `meta-path "pe->crypto"` — cross-binary crypto inventory.
+  - `pagerank --type crypto` — most-prevalent crypto algorithms across a corpus.
+  - Filter by `algorithm=AES` — every binary using AES, etc.
+  - Filter by `confidence=high` — high-signal hits only (S-box / IP-table prefixes, full SHA init blocks).
+- **Confidence levels** — high for distinctive patterns (full SHA-256 init, AES S-box prefix, Blowfish P-array). Medium for shorter or shared patterns (single CRC polynomial word, RIPEMD init which overlaps SHA-1's first 4 words). Low for very common 4-byte constants (TEA delta = 0x9E3779B9, also RC6's Q32 — the analyst has to disambiguate).
+
+### Notes
+- Scanner is byte-pattern-only — it sees a constant *somewhere* in the binary but doesn't verify the surrounding code actually implements the algorithm. False positives possible on binaries that embed crypto-test data without using it (e.g., `codemap` itself self-detects all 13 algorithms from its own embedded scanner constants — expected).
+- v2 will vendor the full signsrch.xml corpus (2,338 patterns at `~/reference/codemap-research-targets/11-ida-signsrch/signsrch.xml`) as a bincode blob (~50-100 KB embedded), expanding coverage to every CRC variant, every XFER table, and dozens of additional cipher constants.
+
+### Tests
+- 232 → **241 tests** (+9). Coverage: MD5/SHA-256/AES S-box/CRC-32 polynomial/Blowfish detection at known offsets, pseudo-random data yields ≤2 false positives, signature catalog covers expected algorithm families, non-overlapping match enumeration.
+
+---
+
 ## [5.28.0] — 2026-05-01
 
 ### Added (Ship 1 #8 — anti-analysis scanner)

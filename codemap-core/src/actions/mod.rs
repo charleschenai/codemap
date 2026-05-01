@@ -36,6 +36,7 @@ pub mod dex;
 pub mod recon;
 pub mod think;
 pub mod anti_analysis;
+pub mod crypto_const;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -260,6 +261,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // detection of anti-debug / anti-vm / packer / anti-forensic /
         // anti-av techniques from PE imports + section names + strings.
         "anti-analysis" | "anti-tech" | "evasion" | "anti-debug" => Ok(anti_analysis::anti_analysis(graph, target)),
+        // Crypto-constants scanner (5.29.0 — Ship 1 #9a). Identifies
+        // AES/SHA/MD5/Blowfish/RC6/TEA/DES/CRC algorithms by their
+        // hardcoded init values, S-boxes, and polynomial constants.
+        "crypto-const" | "crypto-scan" | "find-crypto" | "crypto" => Ok(crypto_const::crypto_const(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

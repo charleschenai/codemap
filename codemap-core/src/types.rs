@@ -247,6 +247,18 @@ pub enum EntityKind {
     /// behaviors across a binary corpus; attribute filter on
     /// category surfaces specific evasion families.
     AntiAnalysis,
+    /// Cryptographic constant signature (Ship 1 #9a). Identifies
+    /// the algorithm a binary implements by matching well-known
+    /// init values, S-boxes, polynomial constants, or magic
+    /// numbers (MD5/SHA1/SHA256/SHA512/Blowfish/RC6/TEA/AES/DES
+    /// /CRC32/RIPEMD160/Whirlpool). Edges: binary → crypto.
+    /// attrs: algorithm (e.g. "SHA-256"), constant_name (e.g.
+    /// "init H0"), offset (where it was found), endian (le/be),
+    /// confidence (high / medium / low). Killer queries:
+    /// `meta-path "pe->crypto"` enumerates crypto algorithms
+    /// across a binary corpus; attribute filter on `algorithm`
+    /// finds every binary using AES, etc.
+    CryptoConstant,
 }
 
 impl EntityKind {
@@ -287,6 +299,7 @@ impl EntityKind {
             EntityKind::MlOperator => "ml_operator",
             EntityKind::BinarySection => "section",
             EntityKind::AntiAnalysis => "anti_tech",
+            EntityKind::CryptoConstant => "crypto",
         }
     }
 
@@ -329,6 +342,7 @@ impl EntityKind {
             "ml_operator" | "mlop" | "op" | "operator" => EntityKind::MlOperator,
             "section" | "binsection" | "binarysection" => EntityKind::BinarySection,
             "anti_tech" | "anti" | "anti-analysis" | "antitech" | "technique" => EntityKind::AntiAnalysis,
+            "crypto" | "cryptoconst" | "crypto-const" | "cryptographic" => EntityKind::CryptoConstant,
             _ => return None,
         })
     }
