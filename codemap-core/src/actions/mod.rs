@@ -43,6 +43,8 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod apk_fingerprint;
+pub mod endpoint_enrich;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +305,16 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // APK protector / packer / library fingerprint (5.38.0 — Ship A).
+        // Matches ZIP archive entry names against signatures mined from
+        // Detect-It-Easy's APK rule set.
+        "apk-fingerprint" | "apk-protector" | "apk-fp" | "android-fingerprint"
+            => Ok(apk_fingerprint::apk_fingerprint(graph, target)),
+        // LOLBin scanner (5.38.0 — Ship B). Scans a PE for embedded
+        // references to known living-off-the-land binaries (certutil,
+        // bitsadmin, …). Tags the PE node with `uses_lolbin` + `lolbins`.
+        "lolbin-scan" | "find-lolbins" | "lolbins"
+            => Ok(endpoint_enrich::lolbin_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

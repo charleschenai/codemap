@@ -163,7 +163,8 @@ fn load_cache(dir: &str) -> Option<CacheData> {
 /// - Loopback / placeholder hosts (localhost, 127.0.0.1, *.example.*,
 ///   *.test, *.invalid).
 fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
-    let mut new_endpoints: Vec<(String, String, String)> = Vec::new(); // (src_id, ep_id, url)
+    // (src_id, ep_id, url, dyndns)
+    let mut new_endpoints: Vec<(String, String, String, bool)> = Vec::new();
     let skip_hosts = ["localhost", "127.0.0.1", "0.0.0.0",
         "example.com", "example.org", "example.net",
         "example.gov", "example.edu", "example.io",
@@ -272,13 +273,28 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
                 || host.ends_with(".example") {
                 continue;
             }
+            // 5.38.0 — Ship B #3: TLD whitelist. Reject host-shaped
+            // strings whose last dot-segment is not a real TLD
+            // (e.g. `config.json`, `weights.bin`, `foo.notatld`).
+            // Bare-host extractions like these are common in JSON
+            // config files where a key looks like a hostname; the
+            // TLD check filters them out without dropping legitimate
+            // public endpoints.
+            if !crate::actions::endpoint_enrich::host_has_valid_tld(host) {
+                continue;
+            }
+            // 5.38.0 — Ship B #1: dyndns suffix detection. Tag the
+            // endpoint when its host ends in a known dynamic-DNS
+            // provider; analysts filtering for C2-shaped traffic can
+            // then `attribute-filter dyndns=true`.
+            let dyndns = crate::actions::endpoint_enrich::host_is_dyndns(host);
 
             let ep_id = format!("ep:GET:{url}");
-            new_endpoints.push((src_id.clone(), ep_id, url.clone()));
+            new_endpoints.push((src_id.clone(), ep_id, url.clone(), dyndns));
         }
     }
 
-    for (src_id, ep_id, url) in new_endpoints {
+    for (src_id, ep_id, url, dyndns) in new_endpoints {
         // Skip if this id is already claimed by an RE action (it might
         // have a richer method like POST). Don't downgrade.
         if nodes.contains_key(&ep_id) { continue; }
@@ -286,6 +302,9 @@ fn promote_urls_to_endpoints(nodes: &mut HashMap<String, GraphNode>) {
         attrs.insert("method".to_string(), "GET".to_string());
         attrs.insert("url".to_string(), url.clone());
         attrs.insert("source".to_string(), "scanner-url-promotion".to_string());
+        if dyndns {
+            attrs.insert("dyndns".to_string(), "true".to_string());
+        }
         nodes.insert(ep_id.clone(), GraphNode {
             id: ep_id.clone(),
             imports: Vec::new(),

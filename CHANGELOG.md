@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship A — APK protector / packer / library fingerprint)
+- **New `apk-fingerprint` action** (aliases: `apk-protector`, `apk-fp`, `android-fingerprint`). Identifies Android DRM, anti-tamper, and packaging products by matching ZIP archive entry names against signatures mined from Detect-It-Easy's APK rule set.
+- **Bundled signature corpus** — 46 families (~190 distinct paths) covering protectors (Alibaba, Bangcle, Ijiami, Jiagu, DexProtector, AppSolid, NetEase EasyShield, Yidun, Virbox, …), packers (Kony), and libraries (IL2CPP / Unity, SandHook, UnicomSDK). Source: `codemap-core/data/apk-protectors.json`, regex-mined from upstream `.sg` rule files at build time.
+- **Match policy:** signature paths with a `/` match against the full ZIP entry name; bare filenames (e.g. `libsandhook.so`) match against the entry's basename so detectors fire regardless of the `lib/<arch>/` directory prefix.
+- **Tags the existing `AndroidPackage` node** with attributes keyed by signature kind: `protector=<comma-list>`, `packer=<comma-list>`, `library=<comma-list>`. `apk_fingerprint=clean|detected` summarizes the run for attribute-filter queries. No new EntityKinds.
+
+### Added (Ship B — endpoint enrichment)
+- **dyndns provider tag** (33 suffixes from unprotect's `network_evasion.yar:network_dyndns`). The URL→endpoint promotion pass in `scanner.rs` now tags `HttpEndpoint` nodes with `dyndns=true` when the host ends in a known dynamic-DNS suffix (no-ip.org, dynu.com, afraid.org, …). Lets analysts filter for C2-shaped traffic via attribute query.
+- **TLD whitelist** (1,381 TLDs from unprotect's `domain_suffixes.txt`). The promotion pipeline now rejects host-shaped strings whose last dot-segment is not a recognized TLD (e.g. `config.json`, `weights.bin`). IP literals short-circuit the check. Significantly cleaner endpoint extraction in JSON-heavy repos.
+- **New `lolbin-scan` action** (aliases: `find-lolbins`, `lolbins`). Scans a PE for embedded references to known living-off-the-land binaries (100 entries from unprotect's `signature/lolbin.txt` — certutil, bitsadmin, rundll32, regsvr32, wmic, …). Tags the PE node with `uses_lolbin=true` + `lolbins=<comma-list>` + `lolbin_count`. Word-boundary check on the right side avoids matching inside longer identifiers.
+- **All three lookups bundled at compile time** via `include_str!` and lazily parsed into `HashSet`. Pure data drops + small wiring; zero new dependencies.
+
+### File layout
+- New: `codemap-core/src/actions/apk_fingerprint.rs` (~280 LOC incl. tests).
+- New: `codemap-core/src/actions/endpoint_enrich.rs` (~230 LOC incl. tests; LOLBin action + dyndns/TLD helpers used by `scanner.rs`).
+- New: `codemap-core/data/apk-protectors.json`.
+- New: `codemap-core/data/endpoint-enrichment/{dyndns.txt, lolbins.txt, tlds.txt}`.
+- Updated: `codemap-core/src/actions/mod.rs`, `codemap-core/src/scanner.rs`.
+- Updated: `codemap-core/tests/integration.rs` — fixture host renamed `real.api` → `real-api.com` (`api` is not in the ICANN TLD list, so the new TLD filter correctly rejected it).
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

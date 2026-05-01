@@ -1248,7 +1248,7 @@ fn test_url_promotion_skips_localhost_and_examples() {
         "fetch('http://localhost:8080/dev')\n",
         "fetch('http://127.0.0.1/local')\n",
         "fetch('https://example.com/placeholder')\n",
-        "fetch('https://real.api/endpoint')\n",
+        "fetch('https://real-api.com/endpoint')\n",
     )).unwrap();
 
     let mut g = scan(ScanOptions {
@@ -1261,7 +1261,7 @@ fn test_url_promotion_skips_localhost_and_examples() {
     let _ = fs::remove_dir_all(&tmp);
 
     // Only the real endpoint should land in the graph
-    assert!(result.contains("real.api"), "real endpoint missing: {result}");
+    assert!(result.contains("real-api.com"), "real endpoint missing: {result}");
     assert!(!result.contains("localhost"), "localhost leaked into graph: {result}");
     assert!(!result.contains("127.0.0.1"), "127.0.0.1 leaked into graph: {result}");
     assert!(!result.contains("example.com"), "example.com leaked: {result}");
