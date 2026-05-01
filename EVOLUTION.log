@@ -2434,3 +2434,65 @@ unaffected.
   Charles dropped #1 (DB) and #2 (MCP) explicitly. #4 (native
   file watcher) deferred until he personally feels the polling
   pain. Codemap is now genuinely at a natural stopping point.
+
+
+[2026-05-01] docs: 5.26.1 — README per-action examples + measured-perf lead-in (#62)
+  source: Charles asked for two doc improvements after seeing
+  the v5.26.0 BENCHMARKS.md ship: "be more detailed in the
+  README" + "ideally give example for each action."
+
+  Both addressed in this docs-only patch.
+
+  README expansions:
+
+  1. "Why codemap?" leads with measured performance now:
+     - Inline benchmark table from BENCHMARKS.md
+       (862ms Joern audit, 519ms CGC load-bearing, 1007ms
+        Continue endpoints) — same numbers as the standalone
+       BENCHMARKS.md.
+     - "vs the field" callout listing what codemap does that
+       the OSS competitors don't (every architectural peer is
+       source-only; codemap mixes source + binary RE + supply
+       chain + ML + recon + diff + LSP under 33 EntityKinds
+       in a single in-memory graph with no DB / API keys).
+     - Pointer to ~/reference/codemap-competition/COMPETITION.md
+       for the full competitor analysis.
+
+  2. Per-action examples now in every category:
+     - Light categories (Analysis, Insights, Navigation, Graph
+       theory, Function-level, Data flow, Cross-language,
+       Comparison): added an `Example` column to each table
+       with one inline invocation per row (e.g. `codemap --dir
+       src trace src/auth/session.rs`).
+     - Heavy categories (Reverse engineering, LSP, Binary
+       formats, Binary disasm, Binary triage, Schemas, Security,
+       Web, Temporal, Spectral, Centrality, Classical
+       algorithms, Link prediction, Community detection, Meta-
+       path, Composite, Graph export, ML, Supply chain / SBOM,
+       Android, Recon parsers): added a section-level fenced
+       code-block with 5-10 representative invocations above
+       the table. Keeps tables narrow (2-column) and gives
+       multiple examples per topic.
+     - Total inline examples added: ~120, covering all 164
+       actions either directly or via section template.
+
+  SKILL.md updates (~/.claude/plugins/marketplaces/codemap/
+                    plugin/skills/codemap/SKILL.md):
+     - description: "163 actions" → "164 actions (incl. `think`
+       natural-language goal router)"
+     - body: "AST-powered call graphs across 15 languages" →
+       "across 18 languages (incl. Scala / Swift / Dart added
+       in 5.26.0)"
+     - body: "15 languages via tree-sitter AST" → "18 languages"
+       + measured-perf one-liner with BENCHMARKS link
+
+  CHANGELOG entry added for 5.26.1 (docs-only).
+
+  Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+  Tests: 209 (unchanged — docs-only ship).
+
+  This addresses Charles's specific ask to make codemap more
+  approachable from the README — every category now has copy-
+  pasteable examples a user can run immediately, and the
+  performance / competitive-position story leads the document
+  rather than being buried in linked-out files.

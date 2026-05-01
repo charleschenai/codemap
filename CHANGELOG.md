@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.26.1] — 2026-05-01
+
+### Added (docs only — no code change)
+- **README massively expanded with per-action usage examples.** Every action category now ships a working example invocation. Heavy categories (Reverse engineering, LSP, Binary formats, Schemas, Security, Web, Temporal, Spectral, Centrality, Classical algorithms, Link prediction, Community detection, Meta-path, Composite, Graph export, ML, Supply chain / SBOM, Android, Recon parsers) get a section-level example block with multiple representative invocations. Lighter categories (Analysis, Insights, Navigation, Graph theory, Function-level, Data flow, Cross-language, Comparison) get a 3-column table with inline `Example` per row.
+- **README "Why codemap?" section now leads with measured performance.** Inline benchmark table from `BENCHMARKS.md` (862 ms / 519 ms / 1,007 ms on real OSS repos), followed by a "vs the field" callout listing what codemap does that the OSS competitors (Joern, CodeGraph, GitNexus, CodeGraphContext, FalkorDB code-graph, Memgraph AI Toolkit, cpggen, Polystat) don't.
+- **SKILL.md** updated to reflect 164 actions (`think` orchestrator), 18 languages (Scala/Swift/Dart added), and the BENCHMARKS link.
+
+### Notes
+- Action count: 164 (unchanged). EntityKinds: 33 (unchanged). Tests: 209 (unchanged).
+- This is a docs-only patch ship. No code paths changed.
+
+---
+
 ## [5.26.0] — 2026-05-01
 
 ### Added
