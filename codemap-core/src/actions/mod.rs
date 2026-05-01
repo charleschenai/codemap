@@ -44,6 +44,7 @@ pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
 pub mod pe_carve;
+pub mod com_scan;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -304,11 +305,15 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
-        // Embedded-PE XOR carver (5.38.0). Brute-forces every single-
+        // Embedded-PE XOR carver (5.39.0). Brute-forces every single-
         // byte XOR key for "MZ"/"PE\0\0" sentinel pairs to surface
         // staged / dropper-style payloads hidden inside a larger
         // binary. Mirrors the GGUF overlay carve (Ship 2 #23).
         "pe-carve" | "carve-pe" | "embedded-pe" | "pe-extract" => Ok(pe_carve::pe_carve(graph, target)),
+        // COM CLSID/IID scanner (5.41.0 — Ship 5 #1). 3,639 CLSIDs +
+        // 25,306 IIDs from capa (Apache-2.0). Two-pass: ASCII GUID
+        // regex + raw 16-byte (with Microsoft byte-order swap).
+        "com-scan" | "com" | "com-guids" | "clsid-iid" | "windows-com" => Ok(com_scan::com_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

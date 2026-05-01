@@ -180,6 +180,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             CudaKernel        => (118, 185,   0), // NVIDIA green
             SwitchTable       => (179, 157, 219),
             VTable            => (128, 203, 196),
+            ComClass          => (144, 202, 249),
+            ComInterface      => (179, 157, 219),
         }
     }
 

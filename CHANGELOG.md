@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.41.0] — 2026-05-01
+
+### Added (Ship 5 #1 — COM CLSID/IID GUID database, capa-derived)
+- **New `com-scan` action** (aliases: `com`, `com-guids`, `clsid-iid`, `windows-com`). Identifies which Windows COM component classes (CLSIDs) and interfaces (IIDs) a binary instantiates / implements.
+- **Two-pass detection.** ASCII GUID regex + raw 16-byte (Microsoft byte-order swap).
+- **New `EntityKind::ComClass`** + **`EntityKind::ComInterface`**. Edges: PE → ComClass (instantiates), PE → ComInterface (uses/implements).
+- **Bundled database** (capa, Apache-2.0): 3,639 unique CLSIDs + 25,306 unique IIDs (~1.4 MB bincode).
+- **Killer queries.** `meta-path "pe->com_class"`, `pagerank --type com_class`, attribute filter on COM name.
+
+### Tests
+- 296 → **307 tests** (+11).
+
+---
+
 ## [5.40.0] — 2026-05-01
 
 ### Added (crypto-const expansion — modern stream ciphers + extras)
@@ -92,6 +106,25 @@ A separate work-stream (`signsrch` pane) is integrating the full signsrch.xml co
 
 ### Source data attribution
 All signature bytes are algorithm constants (facts) re-derived from public references: capa-rules `data-manipulation/encryption/*.yml` (Apache 2.0), findcrypt3.rules (used as documentation only, not copied), original algorithm specifications (Salsa20 / ChaCha20 / Sosemanuk / Twofish / Camellia / SkipJack RFCs and papers). No GPL source code was incorporated.
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #1 — COM CLSID/IID GUID database, capa-derived)
+- **New `com-scan` action** (aliases: `com`, `com-guids`, `clsid-iid`, `windows-com`). Identifies which Windows COM component classes (CLSIDs) and interfaces (IIDs) a binary instantiates / implements — primary triage pivot for Windows malware. Codemap can now answer "this binary instantiates `Outlook.Application`" and "this DLL uses `IShellWindows`."
+- **Two-pass detection.**
+  - **ASCII GUID regex:** matches the canonical `[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}` form across the whole file (data, rsrc, strings).
+  - **Raw 16-byte:** Microsoft COM stores GUIDs in a packed binary form with groups 1/2/3 little-endian-swapped. The runtime undoes the byte-order rearrangement (lifted from `capa/rules/__init__.py:340-376`) before lookup, so on-disk binary `IID_*` constants resolve too.
+- **New `EntityKind::ComClass`** (aliases: `com_class`, `comclass`, `clsid`, `comcls`).
+- **New `EntityKind::ComInterface`** (aliases: `com_interface`, `cominterface`, `iid`, `comif`, `com_iface`).
+- **Edges:** PE → ComClass (instantiates), PE → ComInterface (uses/implements). Per-node attrs: GUID, capa name, source (`ascii` / `raw` / `ascii+raw`), file offset.
+- **Bundled database** (vendored from capa, Apache-2.0): 3,639 unique CLSIDs + 25,306 unique IIDs. Stored as bincode-v1 in `codemap-core/data/com/{classes,interfaces}.bin` (~1.4 MB combined) and embedded into the binary via `include_bytes!`. When multiple capa names share a single GUID, names are joined with `|`. `data/com/build.py` regenerates the blobs from the upstream Python sources; `data/com/ATTRIBUTION.md` documents the license.
+- **Killer queries.**
+  - `codemap meta-path "pe->com_class"` — cross-binary CLSID inventory.
+  - `codemap meta-path "pe->com_interface"` — cross-binary IID inventory.
+  - `codemap pagerank --type com_class` — most-instantiated COM classes across a corpus.
+  - Attribute filter on `name` finds every binary touching Outlook / Office / Shell / scripting automation interfaces.
+
+### Tests
+- 283 → **294 tests** (+11). Catalog loading + 10 known CLSIDs round-trip, ASCII GUID match in synthetic buffer, raw 16-byte (LE-swapped) match, ASCII+raw dedup into a single graph node with combined `source=ascii+raw`, GUID byte-order helpers self-inverse, bad-input rejection, IID match, binary→com_iface edge emission, empty-data + PRNG-data noise bounds.
 
 ---
 
