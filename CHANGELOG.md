@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.34.1] — 2026-05-01
+
+### Refactored
+- **Extracted bounded backward constant-propagator from `disasm_jt.rs` into a new `dataflow_local.rs` module.** Originally introduced in 5.27.0 inside `disasm_jt.rs` for jump-table resolution, the propagator (`RegFile`, `RegState`, `ElemKind`, `record_instr`, `MAX_HISTORY`) became a shared primitive once 5.33.0's crypto-loop detector landed as the second consumer. Per the original handoff plan, this extraction was the planned next step at 2 consumers.
+- **Backwards-compatible:** `disasm_jt.rs` re-exports the moved items via `pub use crate::dataflow_local::{...}`, so existing `use crate::disasm_jt::{RegFile, RegState, record_instr, ...}` imports continue to work unchanged.
+- **What stayed in `disasm_jt.rs`:** the jump-table-specific bits — `SectionMap`, `SectionView`, `MAX_TABLE_ENTRIES`, `resolve_indirect_jmp`, plus all 6 resolver-specific tests (Pattern A/B/C, single-indirection negative, etc.).
+- **What moved to `dataflow_local.rs`:** the propagator itself + 5 propagator-only tests (LEA / MOVSXD / ADD / unknown-MOV / CMP-doesn't-disturb) + 3 new tests confirming the public API (`ElemKind::size`, `RegFile::reset`, GPR subreg aliasing).
+- **Pure refactor — no behavior change.** All 265 prior tests still pass; the 3 new tests in `dataflow_local.rs` document the public API that future consumers (Ship 3 #5/#6, Ship 2 #14 v2) will rely on.
+
+### Tests
+- 265 → **268 tests** (+3, all new in `dataflow_local.rs`).
+
+---
+
 ## [5.34.0] — 2026-05-01
 
 ### Added (Ship 4 #24 — switch table recovery)

@@ -1,6 +1,6 @@
 [package]
 name = "codemap-cli"
-version = "5.34.0"
+version = "5.34.1"
 edition = "2021"
 license = "MIT"
 description = "CLI for codemap — heterogeneous-graph codebase analysis with 164 actions (incl. `think` orchestrator) and 33 EntityKinds"
