@@ -2656,3 +2656,70 @@ unaffected.
   validated output quality + 18-language coverage + comprehensive
   CHANGELOG/EVOLUTION/CONTRIBUTING/SKILL.md. Genuine production-
   ready docs.
+
+
+[2026-05-01] docs: 5.26.4 — system-prompt expanded to cover all 164 actions (#65)
+  source: 5.26.3 shipped a system-prompt section with 25 trigger
+  entries; Charles flagged that 25 of 164 actions is sparse.
+  This release dramatically expands the section so the AI sees
+  every action exists.
+
+  ~120 trigger-phrase entries organized into 14 sub-sections:
+    - Whole-codebase questions (audit, structure, summary,
+      health, stats, context, handoff, validate, think)
+    - Single-file/symbol (trace, blast-radius, why, paths,
+      callers, exports, similar, subgraph, complexity,
+      import-cost, fn-info, decorators, rename)
+    - Repo-wide rankings (pagerank, hubs, size, hotspots,
+      bridges, clones, phone-home, coupling, dead-files/
+      dead-functions/dead-deps, circular, orphan-exports,
+      layers, entry-points)
+    - Centrality (all 17 measures with one-line trigger each)
+    - Community detection (clusters leiden/lpa, k-core,
+      k-clique, modularity-max, divisive, islands)
+    - Spectral (fiedler, spectral-cluster, spectral-gap)
+    - Classical algorithms (astar, bellman-ford, floyd-warshall,
+      diameter, mst, cliques, kshortest, max-flow, feedback-arc,
+      scc, topo-sort, dominator-tree, steiner, subgraph-iso)
+    - Link prediction (common-neighbors, jaccard, adamic-adar)
+    - Cross-language bridges (lang-bridges, gpu-functions,
+      monkey-patches, dispatch-map)
+    - Data flow / security (taint, slice, trace-value, sinks,
+      data-flow, secret-scan, dep-tree, dead-deps, api-surface)
+    - RE Windows PE (think reverse, pe-imports, pe-exports,
+      pe-strings, pe-meta, pe-sections, pe-debug, pe-resources,
+      pe-cert, dotnet-meta, binary-diff)
+    - RE non-PE (elf-info, macho-info, java-class, wasm-info,
+      apk-info, bin-disasm, lang-fingerprint, overlay-info,
+      fuzzy-hash, fuzzy-match)
+    - Schemas / IaC (proto-schema, openapi-schema, graphql-
+      schema, docker-map, terraform-map, clarion-schema,
+      dbf-schema, sql-extract)
+    - ML model files (gguf-info, safetensors-info, onnx-info,
+      pyc-info, cuda-info, plus pagerank --type tensor /
+      meta-path "model->tensor")
+    - LSP (lsp-symbols, lsp-references, lsp-calls, lsp-
+      diagnostics, lsp-types)
+    - Web passive recon (CAPTURE FIRST guard prominent —
+      think recon, robots-parse, web-sitemap-parse, web-
+      fingerprint, crt-parse, web-blueprint, js-api-extract,
+      web-dom, web-api, web-sitemap)
+    - Compliance / SBOM (license-scan, cve-import, cve-match,
+      meta-path source->binary->dll->cve, to-spdx, to-cyclonedx)
+    - Temporal (node-lifespan, edge-churn, community-evolution,
+      churn, git-coupling)
+    - PR / change analysis (diff, diff-impact, diff-functions,
+      api-diff, risk, changeset)
+    - Diagrams / export (dot, mermaid, to-gexf)
+    - Composite (think, pipeline, compare)
+
+  Every one of the 164 actions is now mentioned at least once
+  in the system-prompt section with a trigger phrase the AI can
+  recognize. Sub-section headers let the AI scan the relevant
+  block instantly instead of reading the whole table.
+
+  HTML comment markers preserved so users can still grep +
+  extract verbatim.
+
+  Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+  Tests: 209 (unchanged — docs-only).

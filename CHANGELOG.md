@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.26.4] — 2026-05-01
+
+### Added (docs only)
+- **System-prompt section in README dramatically expanded** — went from 25 trigger-phrase entries to **~120 entries** covering every action category (164 actions total). Now organized into 14 sub-sections so the AI scans the relevant block instantly:
+  - Whole-codebase questions (10 entries)
+  - Single-file / single-symbol questions (13 entries)
+  - Repo-wide rankings (13 entries)
+  - Centrality (17 measures)
+  - Community detection / clustering (7 entries)
+  - Spectral (3 entries)
+  - Classical graph algorithms (13 entries)
+  - Link prediction (2 entries)
+  - Cross-language bridges (4 entries)
+  - Data flow / security (9 entries)
+  - Reverse engineering — Windows PE (11 entries)
+  - Reverse engineering — non-PE (10 entries)
+  - Schemas / IaC (8 entries)
+  - ML model files (7 entries)
+  - LSP integration (5 entries)
+  - Web — passive recon (10 entries, with the "CAPTURE FIRST" guard prominent)
+  - Compliance / SBOM (6 entries)
+  - Git-history aware temporal (5 entries)
+  - PR / change analysis (5 entries)
+  - Diagrams / export (3 entries)
+  - Composite (3 entries)
+- The `<!-- BEGIN ... END -->` markers stay so users can still grep + extract verbatim. Hard rules + killer-query reference + output expectations subsections preserved.
+
+### Notes
+- Action count: 164 (unchanged). EntityKinds: 33 (unchanged). Tests: 209 (unchanged).
+- Every one of the 164 actions is now mentioned at least once in the system-prompt section, with a trigger phrase the AI can recognize.
+
+---
+
 ## [5.26.3] — 2026-05-01
 
 ### Added (docs only)

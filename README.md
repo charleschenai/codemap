@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.26.3 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.26.4 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -30,37 +30,280 @@ questions. Pure-static — never makes network requests.
 **Always pass `--dir <small_path>`.** Without it, codemap walks CWD recursively;
 from `~` that's 192K+ files and ~50 GB heap before OOM.
 
-### "When the user asks X, use Y" — quick reference
+### "When the user asks X, use Y" — comprehensive trigger-phrase reference
+
+The agent should reach for the matching action **immediately** when the user's wording matches a trigger. Don't fall through to grep/find/Read.
+
+#### Whole-codebase questions
 
 | User says... | Reach for | Why |
 |--------------|-----------|-----|
-| "audit", "review the codebase", "high-level overview", "what is this" | `codemap --dir <path> think "audit this codebase"` OR `codemap --dir <path> audit` | One-page architectural risk overview: chokepoints + brokers + dual-risk + Leiden clusters + per-EntityKind census. |
-| "find load-bearing files", "critical files", "bottleneck", "what would break X" | `codemap --dir <path> think "find load-bearing files"` | Runs `audit + betweenness + bridges` — surfaces the architectural walls. |
-| "what changed recently", "hotspots", "active files" | `codemap --dir <path> hotspots` + `codemap --dir <path> churn HEAD~30` | Coupling-weighted file ranking + git-history churn heat. |
-| "trace user input to the database", "is this taint vulnerable" | `codemap --dir <path> taint <source-pattern> <sink-pattern>` | CPG-backed interprocedural taint paths. |
-| "what breaks if I change file X" | `codemap --dir <path> blast-radius X` | BFS over reverse-import edges. |
-| "rank files by importance" | `codemap --dir <path> pagerank` | 20-iter PageRank on import graph, top 30. |
-| "find load-bearing functions", "rank functions" | `codemap --dir <path> bin-disasm <binary>` then `codemap pagerank --type bin_func` | First disassemble (registers BinaryFunction nodes), then rank. |
-| "compare two binaries", "what changed between v1 and v2" | `codemap binary-diff /path/to/v1.exe /path/to/v2.exe` | Cross-graph promotion under `diff:{session}:` namespace; `attribute-filter diff_status=added` for new functions. |
-| "reverse this windows binary" | `codemap think "reverse this windows binary /path/to/app.exe"` | Routes to `pe-meta + pe-imports + pe-exports + pe-strings + pe-sections + pe-debug + bin-disasm`. |
-| "reverse this linux binary" / ".so" | `codemap think "reverse /path/to/lib.so"` (ELF) OR `codemap elf-info` + `codemap bin-disasm` | x86/x64/ARM/AArch64 ELF support. |
-| "reverse this mac binary" / ".dylib" | `codemap macho-info /path/to/lib.dylib` | LC_LOAD_DYLIB → Dll graph + LC_MAIN entry. |
-| "android apk", ".apk", "what permissions does this app use", "did I leak permissions" | `codemap think "android apk /path/to/app.apk"` OR `codemap apk-info <apk>` | Full DEX walker + permission heuristics. `meta-path "permission->method"` answers "what code uses CAMERA?" After running, `attribute-filter discovered_via=dex --type permission` finds permissions used in code but not declared in manifest. |
-| "what's in my flutter / react-native app" | `unzip app.apk lib/arm64-v8a/libapp.so -d /tmp` then `codemap bin-disasm /tmp/lib/arm64-v8a/libapp.so` | AArch64 function inventory from native libs. |
-| "ml model architecture", ".gguf / .safetensors / .onnx" | `codemap think "ml model /path/to/model.gguf"` OR direct `codemap gguf-info` / `codemap safetensors-info` / `codemap onnx-info` | Tensors → MlTensor nodes; ONNX operators → MlOperator nodes (aggregated by op_type). `meta-path "model->tensor"` for cross-model architecture inventory. |
-| "find hardcoded secrets", "credential leaks", "AWS keys / GitHub PATs in this repo" | `codemap --dir <path> secret-scan` | Each finding promotes to a `Secret` graph node. `meta-path "source->secret"` for inventory; `pagerank --type secret` ranks files by credential-risk concentration. |
-| "what dependencies does this project have", "dep tree" | `codemap --dir <path> dep-tree` | Parses Cargo.toml / package.json / pyproject.toml / go.mod / pom.xml / Gemfile / Pipfile. Each dep → `Dependency(ecosystem-namespaced)` graph node. |
-| "find unused dependencies" | `codemap --dir <path> dead-deps` | Cross-references manifests vs actual imports; marks dead deps with `is_dead=true` attr. |
-| "supply chain audit", "SBOM", "vulnerable deps" | `codemap --dir <path> license-scan` then `codemap cve-import nvd.json` then `codemap cve-match` then `codemap meta-path "source->binary->dll->cve"` | Licenses + CVEs as graph nodes; emit SPDX 2.3 (`to-spdx`) or CycloneDX 1.5 (`to-cyclonedx`). All offline — no network. |
-| "find all api endpoints", "what HTTP routes does this expose" | `codemap --dir <path> think "find all api endpoints"` | Routes Flask/FastAPI/Express to `api-surface + meta-path "source->endpoint"`. Each route promotes to `HttpEndpoint` graph node. |
-| "recon a website", "what tech stack is this site on" | **CAPTURE FIRST** then `codemap think "recon /tmp/captured.html"` | codemap will **REJECT live URLs** with a "capture the artifact first" message. Use `curl -o /tmp/index.html <URL>` then point `think` at the file. For JS-rendered sites, capture a HAR via Playwright/Burp/wget. |
-| "parse this HAR / sitemap.xml / robots.txt / crt.sh dump" | `codemap web-blueprint <har>`, `codemap web-sitemap-parse <xml>`, `codemap robots-parse <txt>`, `codemap crt-parse <json>` | Each parser registers HttpEndpoint / Compiler / Cert graph nodes. |
-| "decompile this .pyc" | `codemap pyc-info /path/to/foo.cpython-312.pyc` | Recursive marshal walker. Each function → BinaryFunction with `binary_format=pyc`. |
-| "diagram", "render graph", "visualize architecture" | `codemap --dir <path> dot \| dot -Tsvg > graph.svg` OR `codemap --dir <path> mermaid > docs/arch.md` | Graphviz DOT or Mermaid for GitHub-rendered docs. `to-gexf` for Gephi. |
-| "what's the natural fault line", "where does this codebase split", "Fiedler" | `codemap --dir <path> fiedler` | λ₂ + sign-cut bisection. Bottleneck detector. |
-| "PR risk", "is this commit risky", "review impact" | `codemap --dir <path> risk HEAD~5` OR `codemap --dir <path> changeset HEAD~5` | Composite 0-100 score: blast radius + coupling + complexity + scope. |
-| "dead code", "unused exports", "cleanup" | `codemap --dir <path> dead-files` + `codemap --dir <path> dead-functions` + `codemap --dir <path> dead-deps` | Three-pass cleanup audit. |
-| **Don't know what to use** | `codemap --dir <path> think "<plain English goal>"` | Goal router. Picks the right pipeline + shows it at the top of output. |
+| "audit", "review the codebase", "high-level overview", "what is this", "explain this repo" | `codemap --dir <path> think "audit this codebase"` OR `codemap --dir <path> audit` | One-page architectural risk overview: chokepoints + brokers + dual-risk + Leiden clusters + per-EntityKind census. |
+| "find load-bearing files", "critical files", "bottleneck", "what would break X", "load bearing walls" | `codemap --dir <path> think "find load-bearing files"` | Runs `audit + betweenness + bridges`. |
+| "structure", "outline", "what's in this repo", "file tree" | `codemap --dir <path> structure [pattern]` | File tree with per-function outlines. |
+| "summary", "dashboard", "high-level metrics" | `codemap --dir <path> summary` | Box-drawn dashboard: file/line/fn counts + language mix + cycle count + top hottest files. |
+| "health", "code quality score", "letter grade" | `codemap --dir <path> health` | 0-100 across cycles/coupling/dead-files/complexity. Letter grade A-F. |
+| "stats", "how big", "line count" | `codemap --dir <path> stats` | File/line/import-edge totals + extension breakdown. |
+| "context for an LLM", "repo map for chat" | `codemap --dir <path> context [budget]` | PageRank-ranked, token-budgeted (default 8K). |
+| "handoff", "resume summary", "session pickup" | `codemap --dir <path> handoff [budget]` | Resume-where-you-left-off summary fitted to a token budget. |
+| "validate", "CI gate", "pass/fail check" | `codemap --dir <path> validate` | Exits non-zero below health threshold. |
+| **Don't know what to use** | `codemap --dir <path> think "<plain English goal>"` | Goal router. Picks the right pipeline + shows it at the top. |
+
+#### Single-file / single-symbol questions
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "what does X import / who imports X" | `codemap --dir <path> trace <file>` | Imports + importers + URLs + exports. |
+| "what breaks if I change X" | `codemap --dir <path> blast-radius <file>` | BFS over reverse-import edges. |
+| "where does X come from", "shortest path A→B" | `codemap --dir <path> why <A> <B>` | BFS shortest path A→B; falls back to reverse if no forward path. |
+| "all paths A→B" | `codemap --dir <path> paths <A> <B>` | DFS all paths, depth ≤ 10, cap 20. |
+| "callers of X", "who calls X" | `codemap --dir <path> callers <symbol>` | Word-boundary regex across all files. |
+| "exports of X", "what does X export" | `codemap --dir <path> exports <file>` | List exported symbols. |
+| "files similar to X" | `codemap --dir <path> similar <file>` | Top 20 by Jaccard similarity over imports + importers. |
+| "what's the cluster around X", "subgraph for X" | `codemap --dir <path> subgraph <pattern>` | BFS connected component around a keyword. |
+| "complexity of X", "how complex is one file" | `codemap --dir <path> complexity <file>` | Cyclomatic complexity + nesting depth per function. |
+| "import cost of X", "transitive import weight" | `codemap --dir <path> import-cost <file>` | Total files + lines pulled in. |
+| "functions in X", "fn list for one file" | `codemap --dir <path> fn-info <file>` | Per-function start/end line + outgoing calls. |
+| "decorators matching X", "@route usages" | `codemap --dir <path> decorators <pattern>` | Python `@decorator` / Rust `#[attribute]`. |
+| "preview rename X→Y" | `codemap --dir <path> rename <old> <new>` | Word-boundary unified diff. No files modified. |
+
+#### Repo-wide rankings
+
+| User says... | Reach for |
+|--------------|-----------|
+| "rank files by importance" | `codemap --dir <path> pagerank` |
+| "hubs vs authorities", "HITS", "orchestrators" | `codemap --dir <path> hubs` |
+| "biggest files", "files by line count" | `codemap --dir <path> size` |
+| "most-coupled files" | `codemap --dir <path> hotspots` |
+| "what's a bridge / articulation point" | `codemap --dir <path> bridges` |
+| "all duplicate function bodies" | `codemap --dir <path> clones` |
+| "files that talk to the internet" | `codemap --dir <path> phone-home` |
+| "files that match a substring in their imports" | `codemap --dir <path> coupling <substring>` |
+| "dead files / dead functions / dead deps" | `codemap --dir <path> dead-files` / `dead-functions` / `dead-deps` |
+| "circular imports / cycles" | `codemap --dir <path> circular` |
+| "exported symbols never used" | `codemap --dir <path> orphan-exports` |
+| "layer violations", "where's the architecture broken" | `codemap --dir <path> layers` |
+| "entry points", "CLI / test / route entries" | `codemap --dir <path> entry-points` |
+
+#### Centrality (17 measures — all take optional `--type <kind>` filter)
+
+| User says... | Reach for |
+|--------------|-----------|
+| "rank by importance" | `codemap pagerank` |
+| "chokepoints", "betweenness" | `codemap betweenness` |
+| "influence-weighted ranking", "eigenvector centrality" | `codemap eigenvector` |
+| "Katz centrality" | `codemap katz` |
+| "closeness", "1/avg-shortest-path" | `codemap closeness` (or `harmonic` for disconnected) |
+| "load centrality" | `codemap load` |
+| "structural holes", "Burt brokers" | `codemap structural-holes` |
+| "VoteRank", "top-k spreaders" | `codemap voterank` |
+| "percolation centrality" | `codemap percolation` |
+| "current-flow centrality" | `codemap current-flow-betweenness` / `current-flow-closeness` |
+| "edge betweenness" | `codemap edge-betweenness` |
+| "second-order centrality" | `codemap second-order` |
+| "in-degree / out-degree / degree" | `codemap in-degree` / `out-degree` / `degree` |
+
+For non-source-file rankings, append a kind: `pagerank --type bin_func`, `betweenness --type endpoint`, etc.
+
+#### Community detection / clustering
+
+| User says... | Reach for |
+|--------------|-----------|
+| "find communities", "Leiden", "default clustering" | `codemap clusters leiden` |
+| "fast clustering", "label propagation" | `codemap clusters lpa` |
+| "k-core skeleton", "dense subgraph" | `codemap k-core <k>` |
+| "overlapping communities", "k-clique percolation" | `codemap k-clique <k>` |
+| "modularity-max greedy", "Clauset-Newman-Moore" | `codemap modularity-max` |
+| "Girvan-Newman edge-betweenness clustering" | `codemap divisive` (small graphs only) |
+| "connected components", "islands" | `codemap islands` |
+
+#### Spectral
+
+| User says... | Reach for |
+|--------------|-----------|
+| "natural fault line", "Fiedler", "λ₂ bisection" | `codemap fiedler` |
+| "spectral clustering k", "Shi-Malik" | `codemap spectral-cluster [k=8]` |
+| "eigengap", "recommended cluster count" | `codemap spectral-gap` |
+
+#### Classical graph algorithms
+
+| User says... | Reach for |
+|--------------|-----------|
+| "shortest path A→B" | `codemap astar <src> <tgt>` (or `bellman-ford` for negative weights) |
+| "all-pairs shortest paths" | `codemap floyd-warshall` |
+| "longest shortest path", "graph diameter" | `codemap diameter` |
+| "MST", "minimum spanning tree" | `codemap mst` |
+| "max cliques" | `codemap cliques` |
+| "k-shortest paths" | `codemap kshortest <src> <tgt> [k]` |
+| "max flow A→B" | `codemap max-flow <src> <sink>` |
+| "feedback arcs", "edges to cut to make DAG" | `codemap feedback-arc` |
+| "strongly-connected components" | `codemap scc` |
+| "topological order" | `codemap topo-sort` |
+| "dominator tree" | `codemap dominator-tree [entry]` |
+| "Steiner tree", "min subgraph connecting N nodes" | `codemap steiner <a,b,c,...>` |
+| "subgraph isomorphism", "find pattern" | `codemap subgraph-iso "<k1>-><k2>->..."` |
+
+#### Link prediction
+
+| User says... | Reach for |
+|--------------|-----------|
+| "missing imports", "files that should know about each other" | `codemap common-neighbors` |
+| "Jaccard / Adamic-Adar similarity" | `codemap jaccard` / `codemap adamic-adar` |
+
+#### Cross-language bridges (PyTorch / Triton / CUDA / PyO3 / pybind11 / etc.)
+
+| User says... | Reach for |
+|--------------|-----------|
+| "all cross-language edges" | `codemap lang-bridges [file]` |
+| "CUDA / Triton kernels" | `codemap gpu-functions` |
+| "Python monkey patches", "module.X = Y reassignments" | `codemap monkey-patches` |
+| "PyTorch dispatch map", "op→device implementations" | `codemap dispatch-map` |
+
+#### Data flow / security (CPG-backed)
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "trace user input to db / fs / shell", "is this taint vulnerable" | `codemap --dir <path> taint <source-pattern> <sink-pattern>` | Forward trace ∩ backward slice. |
+| "backward slice", "what feeds this line" | `codemap --dir <path> --tree slice <file>:<line>` | Up to 20 hops back through CPG. |
+| "forward reachability", "where does this value go" | `codemap --dir <path> --tree trace-value <file>:<line>:<name>` | Marks `SINK` for matching nodes. |
+| "all sink points", "where could this taint" | `codemap --dir <path> sinks [file]` | Sinks grouped by category (filesystem/database/xss/etc). |
+| "def/use edges per function" | `codemap --dir <path> data-flow <file> [fn]` | Params→uses, locals→uses, returns. |
+| "find hardcoded secrets" | `codemap --dir <path> secret-scan` | AWS keys / GitHub PATs / private keys / JWTs / passwords / etc. → `Secret` graph nodes. |
+| "what dependencies does this have" | `codemap --dir <path> dep-tree` | Cargo / npm / pypi / go / composer / maven / rubygems / Pipfile → `Dependency` graph nodes. |
+| "find unused dependencies" | `codemap --dir <path> dead-deps` | Marks dead `Dependency` nodes with `is_dead=true`. |
+| "public API surface" | `codemap --dir <path> api-surface [file]` | Exports + HTTP routes + GraphQL resolvers + CLI commands. Routes → `HttpEndpoint` graph nodes. |
+
+#### Reverse engineering — Windows PE binaries
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "reverse this windows binary", "what's in this exe", "decompile .exe / .dll" | `codemap think "reverse /path/to/app.exe"` | Routes to `pe-meta + pe-imports + pe-exports + pe-strings + pe-sections + pe-debug + bin-disasm`. |
+| "what DLLs / APIs does this exe call" | `codemap pe-imports /path/to/app.exe` | DLL → Symbol graph. |
+| "exported symbols of this DLL" | `codemap pe-exports /path/to/lib.dll` | Demangled `Symbol` nodes. |
+| "strings in this exe", "URLs / SQL / paths in binary" | `codemap pe-strings /path/to/app.exe` | Each string → `StringLiteral` (URL strings auto-promote to `HttpEndpoint`). |
+| "what compiler made this", "Rich header", "MSVC version" | `codemap pe-meta /path/to/app.exe` | Rich header + TLS callbacks + entry RVA. Per-version MSVC stamps → `Compiler` nodes. |
+| "section table", "is this packed", "section entropy" | `codemap pe-sections /path/to/app.exe` | Each section → `BinarySection` node with entropy. `attribute-filter entropy>7.0 --type section` finds packed. |
+| "PDB path", "match stripped binary to symbol-server" | `codemap pe-debug /path/to/app.exe` | PDB filename → `Symbol(kind_detail=pdb_path)` + CodeView GUID. |
+| "version info", "company name", "file version" | `codemap pe-resources /path/to/app.exe` | VS_VERSION_INFO → `vsinfo_*` attrs on `PeBinary`. |
+| "is this signed", "Authenticode", "code signing cert" | `codemap pe-cert /path/to/signed.exe` | Walks WIN_CERTIFICATE / PKCS#7 → `Cert` nodes. |
+| ".NET assembly metadata", "CIL methods" | `codemap dotnet-meta /path/to/app.dll` | MethodDef rows → `BinaryFunction(binary_format=dotnet)`. |
+| "compare two exe versions", "diff binaries" | `codemap binary-diff /path/to/v1.exe /path/to/v2.exe` | Cross-graph under `diff:{session}:` namespace. `attribute-filter diff_status=added` for new functions. |
+
+#### Reverse engineering — non-PE binaries
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "linux binary", "ELF analysis", ".so file" | `codemap elf-info /path/to/lib.so` | Sections + DT_NEEDED → `Dll` edges + symbols. Entry → `BinaryFunction(kind_detail=entry_point)`. |
+| "mac binary", "Mach-O", ".dylib" | `codemap macho-info /path/to/lib.dylib` | Load commands + LC_LOAD_DYLIB → `Dll` graph + LC_MAIN entry. |
+| "Java .class / .jar" | `codemap java-class /path/to/lib.jar` | Constant pool + methods → `BinaryFunction(binary_format=jvm)`. |
+| "WebAssembly module" | `codemap wasm-info /path/to/runtime.wasm` | Walks Code section → `BinaryFunction` per WASM function + intra-module call edges. |
+| "android apk", ".apk", "what permissions" | `codemap apk-info /path/to/app.apk` | Full DEX walker. `meta-path "permission->method"` answers "what code uses CAMERA?" |
+| "android native lib", "Flutter / RN .so", "AArch64 binary" | `unzip app.apk lib/arm64-v8a/libapp.so -d /tmp` then `codemap bin-disasm /tmp/lib/arm64-v8a/libapp.so` | AArch64 function inventory from STT_FUNC. |
+| "disassemble x86 / x64 / ARM / AArch64 binary" | `codemap bin-disasm /path/to/binary` | iced-x86 disasm + intra-binary call graph (x86/x64). Symbol-table-only function discovery (ARM/AArch64). |
+| "what language is this binary", "Go / Rust / .NET / PyInstaller / Electron" | `codemap lang-fingerprint /path/to/binary` | Section names + signature strings. → `Compiler` node. |
+| "is this packed", "NSIS / Inno / PyInstaller / 7z self-extract" | `codemap overlay-info /path/to/binary` | Detects appended data past EOS + classifies. |
+| "find binary variants in a fleet", "fuzzy match malware" | `codemap fuzzy-hash /path/to/bin` per binary, then `codemap fuzzy-match` | TLSH + ssdeep. Adds `similar_binary` edges. |
+
+#### Schemas / IaC
+
+| User says... | Reach for |
+|--------------|-----------|
+| "parse protobuf .proto" | `codemap proto-schema /path/to/api.proto` |
+| "OpenAPI / Swagger spec" | `codemap openapi-schema /path/to/spec.yaml` |
+| "GraphQL schema" | `codemap graphql-schema /path/to/schema.graphql` |
+| "docker-compose dependency graph", "service startup order" | `codemap docker-map /path/to/docker-compose.yml` |
+| "Terraform resources / modules / cross-refs" | `codemap terraform-map /path/to/main.tf` |
+| "Clarion .CLW DDL → tables / keys / FKs" | `codemap clarion-schema /path/to/file.clw` |
+| "dBASE / FoxPro .dbf field descriptors" | `codemap dbf-schema /path/to/file.dbf` |
+| "extract SQL queries + table access matrix" | `codemap sql-extract /path/to/file.sql` |
+
+#### ML model files
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "GGUF model", "llama.cpp model" | `codemap gguf-info /path/to/model.gguf` | Tensors → `MlTensor` nodes (capped 5K/model). |
+| "SafeTensors model" | `codemap safetensors-info /path/to/model.safetensors` | Same — `MlTensor` per tensor with `size_bytes`. |
+| "ONNX model", "operator architecture" | `codemap onnx-info /path/to/model.onnx` | Operators aggregated by op_type → `MlOperator` nodes. |
+| "Python .pyc bytecode" | `codemap pyc-info /path/to/foo.cpython-312.pyc` | Recursive marshal walker → `BinaryFunction(binary_format=pyc)`. |
+| "CUDA cubin / fatbin", "kernel symbols" | `codemap cuda-info /path/to/kernel.cubin` | Each kernel → `BinaryFunction(binary_format=cuda)`. |
+| "rank tensors across a corpus" | `codemap pagerank --type tensor` |
+| "model architecture inventory" | `codemap meta-path "model->tensor"` |
+
+#### LSP integration (5 actions, all take `<server-cmd>` then file/position)
+
+| User says... | Reach for |
+|--------------|-----------|
+| "document symbols via LSP" | `codemap lsp-symbols "rust-analyzer" src/main.rs` |
+| "find references via LSP" | `codemap lsp-references "rust-analyzer" src/main.rs:42:10` |
+| "call hierarchy via LSP" | `codemap lsp-calls "rust-analyzer" src/main.rs:42:10` |
+| "diagnostics / errors via LSP" | `codemap lsp-diagnostics "pylsp" .` |
+| "type signatures via LSP hover" | `codemap lsp-types "typescript-language-server --stdio" src/api.ts` |
+
+All five register graph nodes (5K-symbol, 1K-ref, 500-call-edge caps).
+
+#### Web — passive recon (CAPTURE FIRST, then parse)
+
+⚠️ **codemap NEVER makes network requests.** Use `curl`, `playwright codegen`, `wget`, or Burp to capture the artifact, THEN feed the saved file. The `think` action will reject any goal containing a live URL.
+
+| User says... | Capture, then... |
+|--------------|------------------|
+| "recon a website", "what tech stack is this" | `curl -o /tmp/index.html <url>` then `codemap think "recon /tmp/index.html"` |
+| "parse robots.txt" | `codemap robots-parse /tmp/robots.txt` |
+| "parse sitemap.xml" | `codemap web-sitemap-parse /tmp/sitemap.xml` |
+| "fingerprint web stack" | `codemap web-fingerprint /tmp/index.html` |
+| "parse crt.sh JSON" | `codemap crt-parse /tmp/crt.json` |
+| "extract API endpoints from a HAR" | `codemap web-blueprint /tmp/capture.har` |
+| "API endpoints from a JS bundle" | `codemap js-api-extract /tmp/bundle.min.js` |
+| "DOM forms / handlers / scripts" | `codemap web-dom /tmp/index.html` |
+| "API endpoint map from HAR" | `codemap web-api /tmp/capture.har` |
+| "build sitemap from saved HTML directory" | `codemap web-sitemap /tmp/saved-html-dir` |
+
+#### Compliance / SBOM / supply chain
+
+| User says... | Reach for |
+|--------------|-----------|
+| "license scan" | `codemap --dir <path> license-scan` |
+| "import CVE feed (offline)" | `codemap --dir <path> cve-import nvd.json` |
+| "match Dlls to CVEs" | `codemap --dir <path> cve-match` |
+| "vulnerable transitive deps" | `codemap meta-path "source->binary->dll->cve"` |
+| "SPDX SBOM" | `codemap --dir <path> to-spdx > sbom.spdx.json` |
+| "CycloneDX SBOM" | `codemap --dir <path> to-cyclonedx > sbom.cdx.json` |
+
+#### Git-history aware (temporal)
+
+| User says... | Reach for |
+|--------------|-----------|
+| "young hotspots vs ancient stable", "file age buckets" | `codemap node-lifespan` |
+| "vestigial imports", "true coupling vs imports without co-change" | `codemap edge-churn [N=500]` |
+| "how clusters formed over time", "BIRTH/DEATH/SPLIT/MERGE" | `codemap community-evolution [N=4]` |
+| "churn risk per file" | `codemap churn HEAD~30` |
+| "co-change pairs without import link", "hidden coupling" | `codemap git-coupling [N=200]` |
+
+#### PR / change analysis
+
+| User says... | Reach for |
+|--------------|-----------|
+| "what changed since X", "diff impact" | `codemap diff <git-ref>` OR `codemap diff-impact <git-ref>` |
+| "function-level diff" | `codemap diff-functions <git-ref>` |
+| "added / removed exports vs ref" | `codemap api-diff <git-ref>` |
+| "PR risk score 0-100" | `codemap risk <git-ref>` |
+| "full PR analysis", "changeset" | `codemap changeset <git-ref>` |
+
+#### Diagrams / export
+
+| User says... | Reach for |
+|--------------|-----------|
+| "render graph as SVG" | `codemap dot \| dot -Tsvg > graph.svg` |
+| "Mermaid for GitHub docs" | `codemap mermaid > docs/architecture.md` |
+| "GEXF for Gephi" | `codemap to-gexf > graph.gexf` |
+
+#### Composite (chained pipelines)
+
+| User says... | Reach for |
+|--------------|-----------|
+| "DON'T KNOW what to use" | `codemap think "<plain English goal>"` |
+| "chain multiple actions" | `codemap pipeline "act1:t1,act2:t2,..."` |
+| "compare two repos / dirs" | `codemap --dir ./v2 compare ./v1` |
 
 ### Hard rules
 
