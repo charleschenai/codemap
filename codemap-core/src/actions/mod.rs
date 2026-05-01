@@ -43,6 +43,8 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod section_entropy;
+pub mod disalign_bytes;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +305,19 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // Section-entropy scanner (5.38.0 — Ship 5 #2). Per-section
+        // Shannon byte entropy across PE/ELF/Mach-O. Sections at ≈8.0
+        // bits/byte = packed/encrypted (UPX, Themida, VMProtect). Tags
+        // BinarySection nodes with `entropy:f32` + flags binaries with
+        // `packed:true` when any section exceeds 7.0 bits/byte.
+        "section-entropy" | "entropy" | "pe-entropy" => Ok(section_entropy::section_entropy(graph, target)),
+        // Disalign-bytes anti-disasm detector (5.38.0 — Ship 5 #3).
+        // Linear-sweep .text → role-marks every byte as Start or
+        // Interior. Recursive-descent (function entries + branch
+        // targets + jump tables) that lands on an Interior byte is
+        // an overlap = canonical opaque-predicate jump-into-mid-
+        // instruction trick (VMProtect / Themida / Adylkuzz).
+        "disalign-bytes" | "disalign" | "anti-disasm" | "instruction-overlap" => Ok(disalign_bytes::disalign_bytes(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

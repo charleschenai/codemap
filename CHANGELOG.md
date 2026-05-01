@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #2 — Section-entropy scanner, clean-room port)
+- **New `section-entropy` action** (aliases: `entropy`, `pe-entropy`). Per-section Shannon byte entropy `Σ −p·log₂(p)` across PE / ELF / Mach-O. Sections at ≈8.0 bits/byte are random-looking → packed / encrypted / compressed payloads (UPX, MPRESS, Themida, VMProtect; embedded encrypted resources; obfuscated data blobs).
+- **Updates existing `BinarySection` nodes** (or registers them if missing) with `entropy: f32` attribute. Composes with `pe-sections` / `elf-info` / `macho-info` — those produce the section nodes; this attaches entropy.
+- **Auto-flags binary `packed: true`** when any section exceeds 7.0 bits/byte, plus a `max_section_entropy` attribute on the binary node for range queries (`attribute-filter max_section_entropy>7.5`).
+- **Pure-static** — reads only raw section bytes, no execution, no disasm prereq, no BB-CFG dependency.
+
+### Added (Ship 5 #3 — Disalign-bytes anti-disassembly detector)
+- **New `disalign-bytes` action** (aliases: `disalign`, `anti-disasm`, `instruction-overlap`). Linear-sweep `.text` once seeding a per-byte role map (Start vs Interior). Recursive-descent (function entries + direct branch targets + jump-table targets from Ship 1 #7) that lands on an Interior byte = canonical opaque-predicate jump-into-mid-instruction trick used by VMProtect / Themida / Adylkuzz to fool linear-sweep disassemblers.
+- **Tags affected `BinaryFunction` nodes** with `anti_disasm: true` + `overlap_count`, and the parent binary node with `anti_disasm: true` + `instruction_overlaps`.
+- **Emits one `AntiAnalysis` finding per overlap** under namespace `anti-analysis/obfuscation/instruction-overlap` (composes with the existing opaque-predicate / VTable / anti-analysis surface in `meta-path "pe->anti_tech"`).
+- **x86 / x64 only** (uses iced-x86); ARM / AArch64 binaries skip with a clear message.
+
+### Reference attribution
+Both algorithms are clean-room ports of Tim Blazytko's published heuristics from `obfuscation_detection` (GPL-2.0). Shannon entropy is textbook (Shannon 1948, not copyrightable); linear-sweep / recursive-descent overlap detection is the classic anti-disassembly indicator described in his REcon23 talk + synthesis.to blog series. No GPL source copied.
+
+### Honest limitations
+- `disalign-bytes` doesn't yet detect overlap from indirect branches whose targets the resolver couldn't compute (jump tables not stored in `.rdata` / `.data.rel.ro`). A second pass once full BB-CFG ships will close that gap.
+- `section-entropy` reports raw bytes only — won't notice "this section is 7.9-entropy pseudorandom but actually encoded English text run through base64". Add classification on top in a later ship if needed.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
