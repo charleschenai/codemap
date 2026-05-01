@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 2 #11 — signsrch corpus absorption, 22 → 2,338 sigs)
+- **New `signsrch` action** (aliases: `sigscan`, `signature-scan`, `find-sigs`). Scans PE/ELF/Mach-O binaries against the full vendored signsrch byte-pattern corpus — 2,338 entries covering crypto / hash / cipher / CRC / EC seed / compression table / anti-debug ASM / file-format constants. ~106× expansion over the existing 22-entry hand-curated `crypto-const` catalog.
+- **Pre-authorized in-tree** — `crypto_const.rs:14-17` had carried the comment "vendoring signsrch.xml as a bincode blob is the v2 plan" since 5.29.0. This release is that v2.
+- **Vendored corpus:** `codemap-core/data/signsrch.xml` (3.4 MB, 2017-vintage frozen snapshot) + `signsrch.LICENSE.md` reproducing the GPL-2-or-later notice and Auriemma + Sirmaus (Signsrch2XML) attribution. Build script parses the XML once into a 1.84 MB bincode blob in `OUT_DIR`; the blob is `include_bytes!`-d into codemap-core. No net dependency on the XML at runtime.
+- **Single Aho-Corasick automaton** built lazily over all single-chunk patterns (~2,200) plus the first chunk of every multi-chunk pattern (~136 with the `&` flag). Multi-chunk hits trigger a `memchr::memmem::find` walk over remaining chunks requiring each to appear in order with arbitrary gaps — port of `signsrch.py:111-125`.
+- **Tag classifier** (build-time) lifts each entry's `<p t>` text into one of: AntiDebug, EllipticCurve, Compression, Hash, Cipher, Crc, FileFormat, Other. The 53-entry **anti-debug subset** routes into `EntityKind::AntiAnalysis` nodes (closes a known gap — codemap's existing anti-analysis scanner detects API-name strings; signsrch catches the inlined ASM bodies that bypass import-table scanning). Everything else emits `EntityKind::CryptoConstant` nodes with `category` / `algorithm` / `endian` / `confidence` / `source=signsrch` attributes.
+- **Confidence scoring:** ≥ 32 bytes → High; 16–31 bytes → Medium; < 16 bytes → Low; multi-chunk → High (the chunk-walk gates false-fire on prefix collisions).
+- **Dedup at registration time** — many corpus entries are 4-8 byte-order/size variants of the same constant. Graph nodes are unique per (sig idx); the report prints variant counts so analysts can see redundancy without it polluting `meta-path "pe->crypto"` queries.
+
+### Why this matters
+- Before 5.38.0, codemap's algorithm-fingerprinting was a curated curiosity (22 sigs, 14 algorithm families). After 5.38.0, it is industrial — competitive with FindCrypt-YARA + signsrch + Detect-It-Easy combined, in pure-Rust, no IDA / radare runtime required.
+- `meta-path "pe->crypto"` now returns dense per-binary algorithm inventories. `pagerank --type crypto` ranks the most-prevalent algorithms across the indexed binary corpus — useful for SBOM enrichment and compliance scanning.
+
+### Honest limitations
+- **Frozen 2017 corpus.** Post-2017 algorithms (ChaCha20-Poly1305 IETF AEAD, BLAKE2/3, Argon2, Falcon/Dilithium PQC) are absent from signsrch. Mitigation: the curated 22-sig `crypto-const` array stays as the "modern additions" layer and continues to fire alongside signsrch on every scan.
+- **False positives on short entries.** ~140 corpus entries are < 16 bytes; these get tagged `confidence=low` and can be filtered with `--min-confidence` (next minor) or via the `confidence` graph attribute.
+- **No SBOM-table integration yet.** Compression-table matches currently emit as `category=compression` CryptoConstant nodes — promoting them to `EmbeddedLibrary` edges on the binary's PE/ELF node is a clean follow-on.
+
+### License
+- codemap remains MIT. The signsrch corpus is shipped as a runtime-loaded data file under GPL-2-or-later (see `codemap-core/data/signsrch.LICENSE.md`). Same pattern codemap already uses for capa-rules and FLOSS — corpus license is independent of the consuming tool's license.
+
+### Files touched
+- `codemap-core/build.rs` — new (XML → bincode at build time, ~200 LOC).
+- `codemap-core/data/signsrch.xml` — vendored (3.4 MB).
+- `codemap-core/data/signsrch.LICENSE.md` — new (GPL-2 + attribution).
+- `codemap-core/src/actions/signsrch.rs` — new (~360 LOC including tests).
+- `codemap-core/src/actions/mod.rs` — `pub mod signsrch;` + dispatch arm with 4 aliases.
+- `codemap-core/Cargo.toml` — `aho-corasick`, `memchr` direct deps; `serde`/`bincode`/`regex` build-deps.
+
+### Tests
+- `corpus_loads_full_count` — round-trip 2,338 entries ±20 slack.
+- `corpus_entries_are_well_formed`, `category_coverage`.
+- `finds_sha256_init_in_synthetic_blob` — known IV at offset 0x100 must fire.
+- `multi_chunk_match_fires_with_gaps` + `multi_chunk_does_not_fire_with_missing_chunks` — proves chunk-walk works AND gates correctly.
+- `random_data_yields_few_matches` — false-positive ceiling at 50 unique sigs over 64 KB PRNG noise.
+- `confidence_tiers_by_length`, `anti_debug_routes_to_anti_analysis_kind`, `empty_data_yields_no_matches`.
+
+10 new tests passing. codemap-core lib total: 178 (was 168). codemap-cli integration: 115 unchanged.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod signsrch;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -271,6 +272,14 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // AES/SHA/MD5/Blowfish/RC6/TEA/DES/CRC algorithms by their
         // hardcoded init values, S-boxes, and polynomial constants.
         "crypto-const" | "crypto-scan" | "find-crypto" | "crypto" => Ok(crypto_const::crypto_const(graph, target)),
+        // signsrch corpus scanner (5.38.0 — Ship 2 #11). Vendored
+        // 2,338-entry byte-pattern database (Auriemma's signsrch via
+        // Sirmaus's Signsrch2XML, GPL-2-or-later) covering crypto,
+        // hashes, CRCs, EC seeds, compression tables, and anti-debug
+        // ASM bodies. Single-pass Aho-Corasick + memmem chunk-walk for
+        // multi-fragment entries. Routes anti-debug subset to
+        // AntiAnalysis nodes; everything else to CryptoConstant.
+        "signsrch" | "sigscan" | "signature-scan" | "find-sigs" => Ok(signsrch::signsrch(graph, target)),
         // ONNX op-graph pruner (5.30.0 — Ship 2 #21). Identifies dead
         // operators in an ONNX graph by reverse-reachability from the
         // model's declared outputs.
