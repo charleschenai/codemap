@@ -1,0 +1,14 @@
+capa-rules
+Copyright 2020-2025 Mandiant, Inc.
+
+This product includes software developed at Mandiant
+(https://www.mandiant.com/).
+
+Vendored into codemap from https://github.com/mandiant/capa-rules
+under the Apache License 2.0 (see LICENSE.txt). The rule corpus is
+data, not code; codemap parses the YAML at runtime in
+codemap-core/src/actions/capa.rs.
+
+Vendored snapshot date: 2026-05-01
+Source repo SHA: see git log of capa-rules upstream (not pinned in
+codemap; refresh by re-copying from a fresh clone).

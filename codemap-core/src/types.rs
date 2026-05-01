@@ -382,6 +382,20 @@ pub enum EntityKind {
     /// packers; attribute filter on `category=protector` finds
     /// every commercially-protected sample.
     Packer,
+    /// capa-rules YAML rule match (Ship 5 #13). Emitted by the
+    /// `capa-scan` action when a vendored Mandiant capa-rules YAML
+    /// (codemap-core/data/capa-rules/, Apache 2.0) fires against the
+    /// features codemap extracts (PE imports, sections, exports, file
+    /// strings, format/os/arch tags). Edges: binary → capa_match.
+    /// attrs: rule_name, namespace (capa rule path, e.g.
+    /// "anti-analysis/packer/upx"), category (top-level capa
+    /// namespace), evidence (matched feature literals), confidence
+    /// (high / medium / low — `low` for nursery rules), attack_ids
+    /// (T1027 etc., `+`-joined), mbc_ids. Killer queries:
+    /// `attribute-filter att&ck:T1027` finds every obfuscated binary,
+    /// `meta-path "pe->capa_match"` enumerates capabilities across a
+    /// binary corpus.
+    CapaMatch,
 }
 
 impl EntityKind {
@@ -432,6 +446,7 @@ impl EntityKind {
             EntityKind::YaraRule => "yara_rule",
             EntityKind::YaraMatch => "yara_match",
             EntityKind::Packer => "packer",
+            EntityKind::CapaMatch => "capa_match",
         }
     }
 
@@ -484,6 +499,7 @@ impl EntityKind {
             "yara_rule" | "yararule" | "yararules" | "yara-rule" | "rule" => EntityKind::YaraRule,
             "yara_match" | "yaramatch" | "yara-match" | "yhit" | "yara_hit" => EntityKind::YaraMatch,
             "packer" | "protector" | "peid" | "fingerprint" => EntityKind::Packer,
+            "capa_match" | "capa" | "capability" | "capabilities" | "capamatch" => EntityKind::CapaMatch,
             _ => return None,
         })
     }

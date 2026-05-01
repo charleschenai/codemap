@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.51.0] — 2026-05-01
+
+### Added (Ship 5 #13 — capa-rules YAML loader, file-scope subset)
+- **New `capa-scan` action** (aliases: `capa`, `capabilities`, `capa-rules`). YAML loader + recursive boolean evaluator for Mandiant's 1,045 capa-rules corpus (Apache-2.0). File-scope subset only in v1.
+- **Vendored corpus** at `codemap-core/data/capa-rules/` via `include_dir!` (~6.5 MB).
+- **New `EntityKind::CapaMatch`** with attrs: rule_name, namespace, category, evidence, confidence, attack_ids, mbc_ids.
+- **Dependencies**: `serde_yaml = "0.9"`, `include_dir = "0.7"`.
+
+### Tests
+- 440 → **460 tests** (+20).
+
+---
+
 ## [5.50.0] — 2026-05-01
 
 ### Added (anti-analysis pack v2 — al-khaser + pafish unified corpus)
