@@ -609,6 +609,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         CudaKernel        => "shape=trapezium, fillcolor=\"#76b900\", style=filled, fontsize=10",
         SwitchTable       => "shape=invhouse, fillcolor=\"#b39ddb\", style=filled, fontsize=10",
         VTable            => "shape=tab, fillcolor=\"#80cbc4\", style=filled, fontsize=10",
+        Packer            => "shape=doubleoctagon, fillcolor=\"#ffab91\", style=filled, fontsize=10",
     }
 }
 
@@ -767,6 +768,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         CudaKernel        => "cuda_kernel",
         SwitchTable       => "switch_table",
         VTable            => "vtable",
+        Packer            => "packer",
     }
 }
 

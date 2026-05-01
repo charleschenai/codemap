@@ -302,6 +302,24 @@ pub enum EntityKind {
     /// vtable` ranks the most-shared vtables; `meta-path
     /// "vtable->bin_func"` enumerates virtual methods per class.
     VTable,
+    /// Packer / protector / installer / compiler / SFX-archive
+    /// fingerprint matched against the Detect-It-Easy PEiD signature
+    /// corpus (5.38.0 — Ship 5 #15/#04/#07 PEiD scanner). 4,445
+    /// wildcarded byte signatures bundled at compile time, broken
+    /// out by category. Most signatures (~88%) are anchored at the
+    /// PE entry point (`ep_only=true`); the rest scan the entire
+    /// file. Edges: binary → packer. attrs: name (full PEiD label
+    /// including author tag, e.g. "UPX 3.91 -> Markus Oberhumer,
+    /// Laszlo Molnar & John Reiser"), category (packer / protector
+    /// / installer / compiler / joiner / sfx_archive / file_format
+    /// / overlay / protection), offset (file offset of the match),
+    /// ep_only (true / false), source_db (which userdb file the
+    /// rule came from). Killer queries: `meta-path "pe->packer"`
+    /// enumerates the packer/installer landscape across a binary
+    /// corpus; `pagerank --type packer` ranks the most-prevalent
+    /// packers; attribute filter on `category=protector` finds
+    /// every commercially-protected sample.
+    Packer,
 }
 
 impl EntityKind {
@@ -346,6 +364,7 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::Packer => "packer",
         }
     }
 
@@ -392,6 +411,7 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "packer" | "protector" | "peid" | "fingerprint" | "binary_fingerprint" => EntityKind::Packer,
             _ => return None,
         })
     }

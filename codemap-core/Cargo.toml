@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.37.0"
+version = "5.38.0"
 edition = "2021"
 license = "MIT"
 description = "Heterogeneous-graph codebase analysis library — 164 actions (incl. `think` natural-language goal router), 33 EntityKinds, across source AST, binary RE (ARM/AArch64 + section-level promotion + diff-namespace cross-graph + DEX bytecode + Android permission heuristics), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, ML model architecture"
@@ -40,3 +40,11 @@ iced-x86 = { version = "1", default-features = false, features = ["std", "decode
 # (real APKs always deflate-compress the large bytecode entries). No
 # system libs, MIT/Apache. Used only inside actions/apk.rs.
 miniz_oxide = "0.8"
+# 5.38.0 — PEiD packer/protector identifier (`peid-scan`) uses
+# Aho-Corasick over the literal anchors of 4445 wildcarded byte
+# signatures, falling back to `memchr` for first-byte filtering when
+# no anchor exists. Both crates are already in the tree transitively
+# via `regex`; declared explicitly so the dependency surface for
+# actions/peid.rs is visible.
+aho-corasick = "1"
+memchr = "2"

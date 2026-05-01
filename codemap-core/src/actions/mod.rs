@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod peid;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // PEiD scanner (5.38.0 — Ship 5 #15/#04/#07). 4,445 wildcarded
+        // byte signatures from Detect-It-Easy's PEiD corpus, split by
+        // category (packer / protector / installer / compiler /…).
+        "peid-scan" | "peid" | "pe-fingerprint" | "packer-id" | "detect-easy" =>
+            Ok(peid::peid_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

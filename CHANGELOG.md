@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #15/#04/#07 — PEiD packer/protector identifier)
+- **New `peid-scan` action** (aliases: `peid`, `pe-fingerprint`, `packer-id`, `detect-easy`). Names ~4,395 historical packers, protectors, installers, compilers, joiners, SFX archives, and overlay markers per scanned PE. Three independent research panes (04-yara-rules, 07-unprotect, 15-die) all flagged this as the highest-value PE-ID gap in codemap.
+- **Vendored corpus** — Detect-It-Easy's pre-categorised PEiD `userdb.txt` splits, ~1.2 MB total bundled at compile time via `include_str!` from `codemap-core/data/peid/`:
+  - `packer.userdb.txt` (992) · `protector.userdb.txt` (1,784) · `protection.userdb.txt` (943) · `installer.userdb.txt` (90) · `compiler.userdb.txt` (429) · `joiner.userdb.txt` (57) · `sfx_archive.userdb.txt` (38) · `file_format.userdb.txt` (97) · `overlay.userdb.txt` (15).
+  - **License** — PEiD's userdb has been a public-domain user-contributed file for ~20 years; DiE redistributes the consolidated corpus under MIT.
+- **Pattern parser** accepts the full PEiD token vocabulary: `HH` exact byte, `??` single-byte wildcard, `H?` / `?H` half-byte wildcard, plus PEiD's jump-tag relics `J1` / `J2` / `J3` (1- / 2- / 4-byte wildcard runs). Unparseable tokens drop the entry on purpose rather than poison the catalogue (50 of 4,445 entries dropped — junk continuation lines like trailing prose tokens; final loaded count is 4,395, >98%).
+- **Two scan paths:**
+  - **EP-anchored (~88% of corpus, `ep_only=true`)** — direct comparison at the binary's entry-point file offset (one comparison per signature). EP file offset resolved by walking DOS → PE → COFF → optional header → section table.
+  - **Whole-file (`ep_only=false`)** — Aho-Corasick over each pattern's longest run of exact bytes (its "anchor literal"). Each anchor hit drives one wildcard-aware verification of the full pattern.
+- **New `EntityKind::Packer`** (aliases: `packer`, `protector`, `peid`, `fingerprint`, `binary_fingerprint`). Each detected signature becomes a graph node attached to the binary, with attrs: `name`, `category`, `offset`, `ep_only`, `source_db`. Killer queries:
+  - `meta-path "pe->packer"` — cross-binary packer/installer landscape.
+  - `pagerank --type packer` — most-prevalent packers across a corpus.
+  - Attribute filter on `category=protector` — every commercially-protected sample.
+
+### New direct dependencies
+- **`aho-corasick = "1"`** and **`memchr = "2"`** declared explicitly on `codemap-core`. Both were already in the tree transitively via `regex`; lifting them to direct deps makes the `peid.rs` dependency surface visible.
+
+### Tests
+- **283 → 292 lib tests (+9)**: parser loads ≥ 4,350 of 4,445 entries, all 9 categories present, wildcard / half-byte / `J3` token handling, broken-token signatures dropped, longest-exact-run anchor extraction, pattern matching with wildcards, synthetic-PE entry-point resolution, end-to-end UPX-EP detection on a hand-built PE32 image.
+- CLI smoke test against `PsExec.exe` (716 KB, real-world signed Sysinternals binary) correctly reports `Microsoft Visual C++ 8` / `VC8 -> Microsoft Corporation` at the entry point.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
