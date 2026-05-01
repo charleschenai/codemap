@@ -611,6 +611,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         VTable            => "shape=tab, fillcolor=\"#80cbc4\", style=filled, fontsize=10",
         ComClass          => "shape=component, fillcolor=\"#90caf9\", style=filled, fontsize=10",
         ComInterface      => "shape=parallelogram, fillcolor=\"#b39ddb\", style=filled, fontsize=10",
+        BinaryFingerprint => "shape=note, fillcolor=\"#f48fb1\", style=filled, fontsize=10",
     }
 }
 
@@ -771,6 +772,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         VTable            => "vtable",
         ComClass          => "com_class",
         ComInterface      => "com_interface",
+        BinaryFingerprint => "fingerprint",
     }
 }
 

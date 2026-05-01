@@ -182,6 +182,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             VTable            => (128, 203, 196),
             ComClass          => (144, 202, 249),
             ComInterface      => (179, 157, 219),
+            BinaryFingerprint => (244, 143, 177),
         }
     }
 

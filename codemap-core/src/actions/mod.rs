@@ -48,6 +48,7 @@ pub mod com_scan;
 pub mod lang_id;
 pub mod section_entropy;
 pub mod disalign_bytes;
+pub mod die_fingerprint;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -318,6 +319,9 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         "section-entropy" | "entropy" | "pe-entropy" => Ok(section_entropy::section_entropy(graph, target)),
         // Disalign-bytes anti-disasm detector (5.43.0 — Ship 5 #3).
         "disalign-bytes" | "disalign" | "anti-disasm" | "instruction-overlap" => Ok(disalign_bytes::disalign_bytes(graph, target)),
+        // DiE fingerprint (5.44.0 — Ship 5 #2). Matches mined DiE
+        // entry-point byte patterns; populates 7-axis fingerprint taxonomy.
+        "die-fingerprint" | "die" | "fingerprint" | "binary-fingerprint" => Ok(die_fingerprint::die_fingerprint(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

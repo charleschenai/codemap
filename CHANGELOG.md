@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.44.0] — 2026-05-01
+
+### Added (Ship 5 #2 — DiE EP-pattern fingerprint detector)
+- **New `die-fingerprint` action** (aliases: `die`, `fingerprint`, `binary-fingerprint`). Matches mined DiE entry-point byte patterns; populates 7-axis fingerprint taxonomy (packer/protector/cryptor/installer/sfx/joiner/patcher/compiler/library/format/tool/sign/game/dotnet/native/marker).
+- **Offline miner** at `tools/die_miner.py` — regex-extracts `compareEP("...")` literals from `.sg` detector scripts.
+- **New `EntityKind::BinaryFingerprint`**.
+- Lossy wildcard handling: `$$/$$$$/$$$$$$$$` (DiE relative-jump tokens) downgraded to `??`.
+
+### Tests
+- 332 → **344 tests** (+12).
+
+---
+
 ## [5.43.0] — 2026-05-01
 
 ### Added (Ship 5 #2 + #3 — section-entropy + disalign-bytes)
