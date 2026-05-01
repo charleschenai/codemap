@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.33.0] — 2026-05-01
+
+### Added (Ship 3 #9b — crypto-loop detector)
+- **New `crypto-loops` action** (aliases: `xor-loops`, `find-decrypt`, `decrypt-loop`). Identifies functions that contain XOR-decryption loops — a strong signal for malware string/payload decryption, custom symmetric crypto, or shellcode unpacking.
+- **Detection runs as a side-effect of the existing disassembly pass** — `decode_functions` already tracks the bounded backward propagator's `RegFile` for jump-table resolution; we add two more streams to the same loop:
+  - **back_edges**: every Jcc/Jmp/Jrcxz/Jcxz/Jecxz/Loop[ne] whose near-branch target lies inside the same function and is < the branch's IP.
+  - **xor_const_sites**: every XOR instruction whose source is either an immediate (non-zero) or a register the propagator tracks as a non-zero constant. The `xor reg, reg` self-zero idiom is correctly excluded.
+- **A function's `crypto_xor_in_loop` is the count of xor_const_sites whose VA falls inside any back_edge range.** `≥ 1 → likely XOR-decryption routine`. Confidence: high (≥ 3 sites), medium (2), low (1).
+- **Each flagged function becomes a `CryptoConstant` graph node** with `algorithm="XOR-loop"`, `function_name`, `xor_count`, `confidence` — joins the Ship 1 #9a constant-anchor scanner under the same `crypto` EntityKind so analysts can filter `algorithm=XOR-loop` to find decryption routines and `algorithm=AES`/`SHA-256` etc. to find standard-crypto users.
+- **Two new fields on `DisasmFunction`**: `crypto_xor_in_loop: usize` and `back_edge_count: usize`. Exposed because they're useful general-purpose function-shape metrics beyond just this action.
+
+### Architectural milestone — second propagator consumer
+
+The bounded backward constant-propagator (`disasm_jt::{RegFile, RegState, record_instr}`) was introduced in 5.27.0 with one consumer (Ship 1 #7 jump-table resolution). 5.32.0's CUDA tracer didn't end up needing it (pattern-match on imports was sufficient). 5.33.0's crypto-loop detector **is the second consumer** — it queries `RegFile::get(reg) == RegState::Const(non-zero)` to recognize XOR keys loaded via `mov reg, imm; xor [mem], reg`.
+
+Per the original handoff plan, the propagator should now extract to `codemap-core/src/dataflow_local.rs`. **Deferring that to 5.34.0** — it's a refactor (no behavior change) and best done after the propagator's API has settled across both consumers.
+
+### Tests
+- 257 → **260 tests** (+3). Confidence-level mapping, report formatting at all 4 hit levels (zero / low / medium / high), empty-hits report.
+
+---
+
 ## [5.32.0] — 2026-05-01
 
 ### Added (Ship 2 #14 — CUDA launch tracer)

@@ -16,7 +16,7 @@
 // action turns into BinaryFunction nodes in the graph.
 
 use iced_x86::{Decoder, DecoderOptions, Instruction, Mnemonic, OpKind};
-use crate::disasm_jt::{RegFile, SectionMap, SectionView, record_instr, resolve_indirect_jmp};
+use crate::disasm_jt::{RegFile, RegState, SectionMap, SectionView, record_instr, resolve_indirect_jmp};
 
 #[derive(Debug, Clone)]
 pub struct DisasmFunction {
@@ -37,6 +37,18 @@ pub struct DisasmFunction {
     /// branch to via a switch table. Empty for stripped binaries
     /// or ARM/AArch64 (resolver is x86/x64 only for v1).
     pub jump_targets: Vec<u64>,
+    /// Crypto-loop signal (Ship 3 #9b): number of XOR instructions
+    /// whose key is a known constant (immediate or const-tracked
+    /// register from the propagator) AND which lie inside a back-edge
+    /// range — i.e., the XOR runs in a loop. ≥ 1 → likely
+    /// XOR-decryption routine. Captured by the same RegFile pass as
+    /// jump-table resolution; ~zero added cost per instruction.
+    pub crypto_xor_in_loop: usize,
+    /// Total back-edges (Jcc / Jmp targeting an earlier address
+    /// inside the same function). Useful as a "complexity of
+    /// looping" indicator and as a denominator for the
+    /// crypto-XOR-in-loop ratio.
+    pub back_edge_count: usize,
     pub is_entry: bool,
 }
 
@@ -423,6 +435,8 @@ fn functions_from_symbols(
             calls: Vec::new(),
             indirect_calls: 0,
             jump_targets: Vec::new(),
+            crypto_xor_in_loop: 0,
+            back_edge_count: 0,
             is_entry: *va == entry_va,
         });
     }
@@ -455,6 +469,9 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
         let mut calls = Vec::new();
         let mut indirect_calls = 0usize;
         let mut jump_targets: Vec<u64> = Vec::new();
+        // Crypto-loop tracking (Ship 3 #9b)
+        let mut back_edges: Vec<(u64, u64)> = Vec::new(); // (target_va, source_va) with target < source
+        let mut xor_const_sites: Vec<u64> = Vec::new();   // VAs of XOR instructions with a known-constant key
         let mut size = 0u64;
         let mut last_ip = *start_va;
         let mut instr = Instruction::default();
@@ -497,6 +514,54 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
                 Mnemonic::Ret | Mnemonic::Retf => {
                     break;
                 }
+                // Conditional branches contribute to back-edge detection
+                // (back-edge = branch whose target is an earlier address
+                // inside this function). Used by crypto-loop detection
+                // to know whether a given XOR site lies inside a loop.
+                Mnemonic::Je | Mnemonic::Jne | Mnemonic::Jl | Mnemonic::Jle
+                | Mnemonic::Jg | Mnemonic::Jge | Mnemonic::Ja | Mnemonic::Jae
+                | Mnemonic::Jb | Mnemonic::Jbe | Mnemonic::Js | Mnemonic::Jns
+                | Mnemonic::Jp | Mnemonic::Jnp | Mnemonic::Jo | Mnemonic::Jno
+                | Mnemonic::Loop | Mnemonic::Loope | Mnemonic::Loopne
+                | Mnemonic::Jcxz | Mnemonic::Jecxz | Mnemonic::Jrcxz => {
+                    if instr.op_count() == 1 && matches!(instr.op0_kind(), OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64) {
+                        let target = instr.near_branch_target();
+                        if target >= *start_va && target < next_start && target < instr.ip() {
+                            back_edges.push((target, instr.ip()));
+                        }
+                    }
+                }
+                // XOR instruction: candidate for crypto-loop detection.
+                // We count XORs whose source operand is either an
+                // immediate or a register the propagator tracks as
+                // a non-zero constant (rules out `xor reg, reg` self-zero).
+                Mnemonic::Xor => {
+                    if instr.op_count() == 2 {
+                        let key_is_const = match instr.op1_kind() {
+                            OpKind::Immediate8 | OpKind::Immediate16 | OpKind::Immediate32
+                            | OpKind::Immediate64 | OpKind::Immediate8to32
+                            | OpKind::Immediate8to64 | OpKind::Immediate32to64 => {
+                                let v = instr.immediate(1);
+                                v != 0
+                            }
+                            OpKind::Register => {
+                                let r = instr.op1_register();
+                                // Skip xor reg, reg (the zeroing idiom)
+                                if instr.op0_kind() == OpKind::Register
+                                    && instr.op0_register() == r
+                                {
+                                    false
+                                } else {
+                                    matches!(rf.get(r), RegState::Const(v) if v != 0)
+                                }
+                            }
+                            _ => false,
+                        };
+                        if key_is_const {
+                            xor_const_sites.push(instr.ip());
+                        }
+                    }
+                }
                 _ => {}
             }
 
@@ -518,6 +583,14 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
         jump_targets.sort_unstable();
         jump_targets.dedup();
 
+        // Compute crypto_xor_in_loop: count of XOR-with-const sites
+        // whose VA falls inside any back-edge range [target, source].
+        let crypto_xor_in_loop = xor_const_sites.iter()
+            .filter(|&&xor_va| {
+                back_edges.iter().any(|&(t, s)| xor_va >= t && xor_va <= s)
+            })
+            .count();
+
         out.push(DisasmFunction {
             name: name.clone(),
             address: *start_va,
@@ -526,6 +599,8 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             calls,
             indirect_calls,
             jump_targets,
+            crypto_xor_in_loop,
+            back_edge_count: back_edges.len(),
             is_entry: *start_va == entry_va,
         });
     }
@@ -711,7 +786,8 @@ mod tests {
     fn disasm_function_debug_round_trip() {
         let f = DisasmFunction {
             name: "x".to_string(), address: 0, size: 0, instruction_count: 0,
-            calls: vec![], indirect_calls: 0, jump_targets: vec![], is_entry: false,
+            calls: vec![], indirect_calls: 0, jump_targets: vec![],
+            crypto_xor_in_loop: 0, back_edge_count: 0, is_entry: false,
         };
         let _ = format!("{f:?}");
     }

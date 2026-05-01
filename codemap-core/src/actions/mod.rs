@@ -38,6 +38,7 @@ pub mod think;
 pub mod anti_analysis;
 pub mod crypto_const;
 pub mod cuda_trace;
+pub mod crypto_loops;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -278,6 +279,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // binaries by Runtime/Driver API imports and enumerates the
         // GPU kernels they reference.
         "cuda-trace" | "cuda-kernels" | "gpu-trace" | "find-cuda" => Ok(cuda_trace::cuda_trace(graph, target)),
+        // Crypto-loop detector (5.33.0 — Ship 3 #9b). Identifies
+        // XOR-decryption loops in disasm output. Second propagator
+        // consumer (after Ship 1 #7's jump-table resolver).
+        "crypto-loops" | "xor-loops" | "find-decrypt" | "decrypt-loop" => Ok(crypto_loops::crypto_loops(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
