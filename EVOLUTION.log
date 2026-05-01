@@ -2064,3 +2064,88 @@ unaffected.
   pe_sections / binary_diff / secret_scan into the heterogeneous
   graph. Tests 187 → 197 (+10). Action count steady at 163 (every
   win was a quality promotion to existing actions).
+
+
+[2026-05-01] feat: 5.23.0 — DEX bytecode walker + permission heuristics (#57)
+  source: post-5.22.0 review identified mobile (specifically full
+  DEX decompilation) as a real weakness. Charles flagged that he
+  plans to build mobile apps and would actually use this — so the
+  workflow shifted from "malware analysis" to "did I ship a
+  permission I am not using / did I forget to declare one I AM
+  using?" That made permission→method linking the centerpiece.
+
+  Implementation:
+
+  New module src/actions/dex.rs (~510 LOC):
+    - DEX file format header validation (`dex\n035` / `dex\n037`
+      etc.) + endian check (0x12345678 little-endian).
+    - String / type / method ID table builders. ULEB128 decoder.
+    - class_def + class_data walk: for each class, read 4 ULEB128
+      sizes (static/instance/direct/virtual fields/methods), then
+      walk the encoded_method list with delta-encoded method_idx.
+      Emits Vec<DexMethod> with class_name (Java FQN), method_name,
+      access_flags, code_off.
+    - Per-method bytecode scan for `invoke-*` opcodes (35c form
+      0x6E-0x72, 3rc form 0x74-0x78). Pulls method_idx from byte
+      offset 2 of each invoke instruction, looks up callee class
+      + name, matches against ~30 well-known protected Android APIs
+      (Camera / LocationManager / TelephonyManager / SmsManager /
+      ContactsContract / BluetoothAdapter / WifiManager / etc.).
+      Per-callsite dedup so a method that calls Camera 10 times
+      only gets one Permission edge.
+    - dex_instruction_width() opcode-width table for resync —
+      unknown opcodes default to 2 bytes (one code unit).
+
+  apk.rs integration:
+    - try_extract_uncompressed extended to handle compression
+      method=8 (deflate) via miniz_oxide. Real APKs always deflate
+      classes.dex; v1 (5.15.3) was stored-only and would silently
+      skip every real-world APK.
+    - apk_info now iterates every classes*.dex entry, calls
+      dex::parse_dex on the inflated bytes, registers each method
+      as bin_func:dex:{target}::{dex_file}::{i} BinaryFunction
+      node with edge from the AndroidPackage. Cap 5000 methods
+      per APK. Multidex (classes2.dex, classes3.dex) supported.
+    - For each heuristic Permission edge, the Permission node
+      auto-registers with discovered_via=dex so the diff between
+      manifest-declared permissions and code-referenced ones is
+      queryable via attribute filter. This is the workflow Charles
+      asked for.
+
+  Killer query unlocked:
+    meta-path "permission->method"
+      → "what code uses CAMERA permission?"
+    attribute-filter discovered_via=dex on --type permission
+      → permissions referenced in code but not declared in manifest
+    pagerank --type bin_func with binary_format=dex filter
+      → most-central methods inside the app
+
+  New dependency: miniz_oxide 0.8 (pure-Rust deflate decoder, MIT/
+  Apache, no system libs, used only inside actions/apk.rs).
+
+  Tests: 201 passing (was 197). +4 unit tests in dex.rs:
+    - jvm_descriptor_round_trip — Landroid/foo/Bar; → android.foo.Bar
+    - uleb128_decodes_canonical_values — wikipedia LEB128 examples
+    - api_to_permission_covers_obvious_cases — Camera/Location/
+      Telephony API → permission mapping with method-name refinement
+    - parse_dex_rejects_non_dex — graceful error on bad magic
+
+  Action count: 163 (unchanged — apk-info gained capability, no
+  new action). EntityKinds: 33 (unchanged — DEX methods reuse
+  BinaryFunction via binary_format=dex attr).
+
+  Out of scope for v1 (deferred):
+    - Full Dalvik opcode catalog (we only decode invoke-* widths
+      precisely; other opcodes resync on next valid opcode).
+    - PScout-style 100K-row method→permission database (v1 is
+      heuristic name-matching against ~30 well-known APIs — gets
+      the obvious cases, misses the long tail).
+    - Method body call-graph edges (intra-DEX). v1 only emits
+      method→permission edges, not method→method. Add later if
+      needed.
+    - Annotations, parameter type signatures, native method
+      signatures.
+
+  This + 5.24.0 (ARM/AArch64 disasm via yaxpeax-arm) = mobile-
+  complete codemap: APKs get full graph coverage on both Java
+  (DEX) and native (ARM) sides.

@@ -94,6 +94,79 @@ pub fn apk_info(graph: &mut Graph, target: &str) -> String {
         graph.add_edge(&apk_id, &perm_id);
     }
 
+    // 5.23.0: DEX bytecode walker. For each `classes*.dex` entry, decode
+    // the DEX (uncompress via miniz_oxide if needed), enumerate methods,
+    // and register each as a `BinaryFunction(binary_format=dex)` node
+    // with edge from the AndroidPackage. Heuristic permission→method
+    // linking adds method→Permission edges based on invoke-* opcode
+    // targets matching ~30 well-known protected Android APIs.
+    let mut total_methods = 0usize;
+    let mut total_perm_edges = 0usize;
+    for entry in &entries {
+        let n = entry.name.as_str();
+        if !(n.starts_with("classes") && n.ends_with(".dex")) { continue; }
+        let dex_bytes = match entry.try_extract_uncompressed(&data) {
+            Some(b) => b,
+            None => continue,  // unsupported compression — skip silently
+        };
+        let info = match crate::actions::dex::parse_dex(&dex_bytes) {
+            Ok(i) => i,
+            Err(_) => continue,  // corrupt or non-DEX-shaped — skip
+        };
+        for (i, m) in info.methods.iter().enumerate() {
+            if total_methods >= 5000 { break; }
+            // Stable ID per method: dex_filename + index keeps multidex
+            // (classes2.dex, classes3.dex) collisions impossible.
+            let func_id = format!("bin_func:dex:{target}::{n}::{i}");
+            let access_str = format!("{:#x}", m.access_flags);
+            let code_off_str = format!("{:#x}", m.code_off);
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", &m.fqn()),
+                ("class_name", &m.class_name),
+                ("method_name", &m.method_name),
+                ("binary_format", "dex"),
+                ("kind_detail", "dex_method"),
+                ("access_flags", &access_str),
+                ("code_off", &code_off_str),
+                ("dex_file", n),
+            ]);
+            graph.add_edge(&apk_id, &func_id);
+            total_methods += 1;
+        }
+        for edge in &info.permission_edges {
+            // Find the matching method node by FQN — we just registered
+            // every method above so the lookup is fast.
+            let caller_fqn = format!("{}.{}", edge.caller_class, edge.caller_method);
+            let perm_id = format!("permission:{}", edge.permission);
+            // Permission node may not have been registered yet (e.g. if
+            // the manifest didn't declare it but the code uses it — this
+            // is exactly the "did I ship a permission I'm not actually
+            // using?" / "did I forget to declare a permission I AM using?"
+            // workflow). Auto-register with a `discovered_via=dex`
+            // attribute so the diff between manifest-declared and code-
+            // referenced is queryable.
+            graph.ensure_typed_node(&perm_id, EntityKind::Permission, &[
+                ("name", edge.permission),
+                ("discovered_via", "dex"),
+            ]);
+            // Walk the just-registered method nodes to find the caller.
+            // Linear scan kept small by 5000-method cap.
+            let caller_node_id = graph.nodes.iter()
+                .find(|(_, node)| node.kind == EntityKind::BinaryFunction
+                    && node.attrs.get("name").map(|s| s.as_str()) == Some(caller_fqn.as_str())
+                    && node.attrs.get("dex_file").map(|s| s.as_str()) == Some(n))
+                .map(|(id, _)| id.clone());
+            if let Some(caller_id) = caller_node_id {
+                graph.add_edge(&caller_id, &perm_id);
+                total_perm_edges += 1;
+            }
+        }
+    }
+    if let Some(node) = graph.nodes.get_mut(&apk_id) {
+        node.attrs.insert("dex_methods".into(), total_methods.to_string());
+        node.attrs.insert("dex_permission_edges".into(), total_perm_edges.to_string());
+    }
+
     // Build report
     let mut lines = vec![
         format!("=== APK Analysis: {target} ==="),
@@ -140,8 +213,11 @@ pub fn apk_info(graph: &mut Graph, target: &str) -> String {
     }
 
     lines.push(String::new());
-    lines.push("v1 scope: APK structure + permissions only. DEX bytecode disasm".to_string());
-    lines.push("(method-level call graph) ships in a follow-up release.".to_string());
+    lines.push(format!("DEX methods (graph): {}", total_methods));
+    lines.push(format!("Heuristic permission→method edges: {}", total_perm_edges));
+    if total_methods >= 5000 {
+        lines.push("(capped at 5000 methods — see attribute filters for the full picture)".to_string());
+    }
 
     lines.join("\n")
 }
@@ -159,16 +235,19 @@ struct ZipEntry {
 }
 
 impl ZipEntry {
-    /// Returns the body bytes if compression_method is 0 (stored).
-    /// Real APKs almost always deflate-compress AndroidManifest, so this
-    /// is a best-effort path — if compressed, we return None and skip
-    /// permission extraction for that entry.
+    /// Returns the body bytes for stored (method=0) or deflated (method=8)
+    /// entries. v1 (5.15.3) was stored-only; 5.23.0 adds deflate via
+    /// pure-Rust miniz_oxide so classes.dex (always compressed in real
+    /// APKs) can be extracted for DEX bytecode walking.
     fn try_extract_uncompressed(&self, data: &[u8]) -> Option<Vec<u8>> {
-        if self.compression_method != 0 { return None; }
         let body_start = self.header_offset + 30 + self.name_len as usize + self.extra_len as usize;
-        let body_end = body_start + self.uncompressed_size as usize;
+        let body_end = body_start + self.compressed_size as usize;
         if body_end > data.len() { return None; }
-        Some(data[body_start..body_end].to_vec())
+        match self.compression_method {
+            0 => Some(data[body_start..body_end].to_vec()),
+            8 => miniz_oxide::inflate::decompress_to_vec(&data[body_start..body_end]).ok(),
+            _ => None,
+        }
     }
 }
 

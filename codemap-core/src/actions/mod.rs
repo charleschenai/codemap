@@ -32,6 +32,7 @@ pub mod sbom;
 pub mod fuzzy;
 pub mod cert;
 pub mod apk;
+pub mod dex;
 pub mod recon;
 
 use crate::types::Graph;

@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.22.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.23.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -497,7 +497,7 @@ Compliance + vulnerability + signing — the supply-chain dimension. Pairs with 
 
 | Action | What it does |
 |--------|-------------|
-| `apk-info <apk>` | **(5.15.3+)** APK structure walker — parses ZIP local file headers (no inflate dep), categorizes entries (DEX files, manifest, resources, native libs, signing files), best-effort permission extraction via pattern-scanning `AndroidManifest.xml` bytes for `android.permission.*` prefixes (UTF-8 + UTF-16). Registers `AndroidPackage` + `Permission` nodes with apk → permission edges. Flags dangerous permissions (CAMERA, READ_SMS, FINE_LOCATION, etc.) with ⚠. DEX bytecode disasm deferred to follow-up. |
+| `apk-info <apk>` | **(5.15.3+)** APK structure walker — parses ZIP local file headers, categorizes entries (DEX files, manifest, resources, native libs, signing files), best-effort permission extraction via pattern-scanning `AndroidManifest.xml` bytes for `android.permission.*` prefixes (UTF-8 + UTF-16). Registers `AndroidPackage` + `Permission` nodes with apk → permission edges. Flags dangerous permissions (CAMERA, READ_SMS, FINE_LOCATION, etc.) with ⚠. **(5.23.0+)** Full DEX bytecode walker — for each `classes*.dex` (deflated via pure-Rust miniz_oxide), enumerates every method as `BinaryFunction(binary_format=dex, kind_detail=dex_method)` with edge from the `AndroidPackage`. Per-method bytecode scan for `invoke-*` opcodes targeting ~30 protected Android APIs (Camera, Location, Telephony, Bluetooth, etc.) emits `BinaryFunction → Permission` heuristic edges. Permissions used in code but NOT declared in the manifest auto-register with `discovered_via=dex` so the diff between manifest-declared and code-referenced becomes queryable — answers "did I ship a permission I'm not actually using?" and "did I forget to declare a permission I AM using?" Capped at 5000 methods per APK. Killer query: `meta-path "permission->method"` answers "what code uses CAMERA?" |
 
 ### Recon-artifact parsers (4)
 

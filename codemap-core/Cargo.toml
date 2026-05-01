@@ -1,9 +1,9 @@
 [package]
 name = "codemap-core"
-version = "5.22.0"
+version = "5.23.0"
 edition = "2021"
 license = "MIT"
-description = "Heterogeneous-graph codebase analysis library — 163 actions, 33 EntityKinds, across source AST, binary RE (incl. section-level promotion + diff-namespace cross-graph), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, and ML model architecture"
+description = "Heterogeneous-graph codebase analysis library — 163 actions, 33 EntityKinds, across source AST, binary RE (incl. section-level promotion, diff-namespace cross-graph, DEX bytecode + Android permission heuristics), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, and ML model architecture"
 repository = "https://github.com/charleschenai/codemap"
 
 [dependencies]
@@ -30,3 +30,7 @@ tree-sitter-lua = "0.5.0"
 # Disasm — pure Rust x86/x64 decoder (no system libs). Default feature
 # set is heavy; pull only what we need: decoder + masm-style formatter.
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "masm"] }
+# Pure-Rust deflate decoder. Needed to extract classes.dex from APKs
+# (real APKs always deflate-compress the large bytecode entries). No
+# system libs, MIT/Apache. Used only inside actions/apk.rs.
+miniz_oxide = "0.8"

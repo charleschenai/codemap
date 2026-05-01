@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.23.0] — 2026-05-01
+
+### Added
+- **DEX bytecode walker (`apk-info` extension).** New `actions/dex.rs` module (~510 LOC) parses Android Dalvik EXecutable files. Header validation + ULEB128 decoder + string/type/method ID tables + class_def + class_data walk → emits one `BinaryFunction(binary_format=dex, kind_detail=dex_method)` per class method with edge from the parent `AndroidPackage`.
+- **Heuristic permission→method linking.** Per-method bytecode scan for `invoke-*` opcodes (35c form `0x6E-0x72`, 3rc form `0x74-0x78`) targeting ~30 well-known protected Android APIs (Camera, LocationManager, TelephonyManager, SmsManager, ContactsContract, BluetoothAdapter, WifiManager, etc.). Each hit emits a `BinaryFunction → Permission` edge.
+- **Manifest-vs-code permission diff.** Permissions discovered from code (but not declared in the manifest) auto-register with `discovered_via=dex` attr. Use `attribute-filter discovered_via=dex on --type permission` to find permissions used in code but not declared, OR query the inverse to find declared-but-unused permissions.
+- **Multidex support** (`classes2.dex`, `classes3.dex`, …). Cap of 5000 methods per APK.
+- New dependency: `miniz_oxide 0.8` (pure-Rust deflate decoder, MIT/Apache) — needed because real APKs always deflate `classes.dex`.
+- Tests +4 (201 total): JVM-descriptor → Java FQN round-trip, ULEB128 canonical values, permission API mapping, parse_dex graceful error handling.
+
+### Killer query unlocked
+- `meta-path "permission->method"` → "what code uses CAMERA permission?"
+
+### Notes
+- Pairs with the upcoming 5.24.0 ARM/AArch64 disasm to give APKs full graph coverage on both Java (DEX) and native (ARM `.so`) sides.
+
+---
+
 ## [5.22.0] — 2026-05-01
 
 ### Added
