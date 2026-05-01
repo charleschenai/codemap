@@ -80,7 +80,12 @@ pub fn think(graph: &mut Graph, target: &str) -> String {
         out.push_str(&format!("── {} ──\n", step.action));
         match super::dispatch(graph, step.action, &step.target, false) {
             Ok(s) => {
-                out.push_str(&s);
+                // Strip the sub-action's own `=== Foo ===` header (and any
+                // immediately-following blank line) since `think` already
+                // labels each section with `── action ──`. Keeps the output
+                // from looking like it has two stacked headers per step.
+                let cleaned = strip_redundant_top_header(&s);
+                out.push_str(cleaned.trim_end());
                 out.push_str("\n\n");
             }
             Err(e) => {
@@ -407,6 +412,29 @@ fn target_path_pair(target: &str) -> Vec<&str> {
         .filter(|t| Path::new(t).exists() && Path::new(t).is_file())
         .take(2)
         .collect()
+}
+
+/// Strip a leading `=== Foo ===` header (and any immediately-following
+/// blank line) from a sub-action's output. Used by `think` to avoid
+/// double-headers when nesting another action's output under a `── action ──`
+/// label.
+fn strip_redundant_top_header(s: &str) -> String {
+    let mut lines = s.lines();
+    let first = match lines.next() {
+        Some(l) => l,
+        None => return String::new(),
+    };
+    let trimmed = first.trim();
+    if trimmed.starts_with("=== ") && trimmed.ends_with(" ===") {
+        // Header line — also drop the next line if it's blank.
+        let mut rest: Vec<&str> = lines.collect();
+        if rest.first().is_some_and(|l| l.trim().is_empty()) {
+            rest.remove(0);
+        }
+        rest.join("\n")
+    } else {
+        s.to_string()
+    }
 }
 
 fn rejected_url_banner(url: &str) -> String {

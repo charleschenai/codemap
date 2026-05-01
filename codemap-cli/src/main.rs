@@ -94,11 +94,19 @@ struct Cli {
 
 #[allow(clippy::too_many_arguments)]
 fn run_once(dirs: &[PathBuf], include_paths: &[PathBuf], no_cache: bool, quiet: bool, action: &str, target: &str, tree: bool, json: bool) -> bool {
+    // Auto-quiet the scanner for actions whose target is an explicit
+    // existing file (pe-sections / bin-disasm / pyc-info / safetensors-info
+    // / etc.). For these the scan dir is incidental and the "Scanned N
+    // files" / "Cache: N/N unchanged" lines are visual noise.
+    let scan_quiet = quiet
+        || target.split_whitespace().next()
+            .map(|t| std::path::Path::new(t).is_file())
+            .unwrap_or(false);
     let options = ScanOptions {
         dirs: dirs.to_vec(),
         include_paths: include_paths.to_vec(),
         no_cache,
-        quiet,
+        quiet: scan_quiet,
     };
 
     let mut graph = match scan(options) {
@@ -164,7 +172,14 @@ fn main() {
             }
         }
 
-        if !cli.quiet {
+        // Skip the warning when target is an existing absolute file path —
+        // for actions like pe-sections / bin-disasm / pyc-info / web-dom
+        // / safetensors-info that operate on an explicit file, the scan
+        // dir is incidental and the "no --dir" message is misleading.
+        let target_is_explicit_file = target.split_whitespace().next()
+            .map(|t| std::path::Path::new(t).is_file())
+            .unwrap_or(false);
+        if !cli.quiet && !target_is_explicit_file {
             eprintln!(
                 "(no --dir given; defaulting to current directory: {})",
                 cwd.display()

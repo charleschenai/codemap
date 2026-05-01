@@ -556,8 +556,12 @@ pub fn audit(graph: &mut Graph, _target: &str) -> String {
     let bt = super::centrality::betweenness(graph, &[]);
     let chokepoints = parse_top_lines(&bt, 10);
     lines.push("── Top chokepoints (betweenness) ──".to_string());
-    for (score, name) in &chokepoints {
-        lines.push(format!("  {score:>8}  {name}"));
+    if chokepoints.is_empty() {
+        lines.push("  (none — graph too small or fully disconnected)".to_string());
+    } else {
+        for (score, name) in &chokepoints {
+            lines.push(format!("  {score:>8}  {name}"));
+        }
     }
     lines.push(String::new());
 
@@ -565,8 +569,12 @@ pub fn audit(graph: &mut Graph, _target: &str) -> String {
     let sh = super::centrality::structural_holes(graph, &[]);
     let brokers = parse_top_lines(&sh, 10);
     lines.push("── Top brokers (structural holes) ──".to_string());
-    for (score, name) in &brokers {
-        lines.push(format!("  {score:>8}  {name}"));
+    if brokers.is_empty() {
+        lines.push("  (none — no nodes connect distinct clusters)".to_string());
+    } else {
+        for (score, name) in &brokers {
+            lines.push(format!("  {score:>8}  {name}"));
+        }
     }
     lines.push(String::new());
 
@@ -594,8 +602,12 @@ pub fn audit(graph: &mut Graph, _target: &str) -> String {
     let cl = super::leiden::clusters_leiden(graph);
     let cluster_summary = parse_cluster_summary(&cl, 3);
     lines.push("── Dominant clusters (Leiden) ──".to_string());
-    for (i, summary) in cluster_summary.iter().enumerate() {
-        lines.push(format!("  #{}: {}", i + 1, summary));
+    if cluster_summary.is_empty() {
+        lines.push("  (none — graph too small for community detection)".to_string());
+    } else {
+        for (i, summary) in cluster_summary.iter().enumerate() {
+            lines.push(format!("  #{}: {}", i + 1, summary));
+        }
     }
     lines.push(String::new());
 

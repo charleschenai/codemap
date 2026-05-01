@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.26.2] — 2026-05-01
+
+### Fixed (visual / output quality — surfaced by an end-to-end test pass)
+
+Six output-formatting fixes after a full e2e exercise pointed out the action output looked rough:
+
+- **Empty section headers in `audit` no longer print bare** — `── Top chokepoints (betweenness) ──` followed by a blank line is replaced with `(none — graph too small or fully disconnected)`. Same fix applied to `Top brokers` and `Dominant clusters` sections. The empty-section-with-just-a-header was the single most visible offender.
+- **`summary` "Hottest files (most coupled)" no longer lists 0-connection entries.** When all files have 0 imports, prints `(no coupling — graph too small or fully isolated files)` instead of a list of meaningless 0s. Same fix applied to "Most complex functions" when no functions parsed.
+- **`dep-tree` text output now shows ecosystem prefix** alongside each manifest path: `Cargo.toml [cargo] (2 deps):` / `package.json [npm] (2 deps):`. Matches the ecosystem prefix used in graph node IDs (`dep:cargo:serde`).
+- **`(no --dir given; defaulting to current directory)` warning suppressed when target is an explicit existing file path.** For actions like `pe-sections` / `bin-disasm` / `pyc-info` / `safetensors-info` where the user passed an absolute file, the directory scan is incidental and the warning is misleading.
+- **Scanner banners (`Scanned N files in Mms`, `Cache: N/N files unchanged`) auto-quieted for explicit-file targets.** Same condition as above — when target is an existing file, the scan is a side-effect of the requested action, so its progress messages are noise.
+- **`think` orchestrator strips redundant `=== Foo ===` headers from sub-action outputs.** Previously a `── audit ──` step would dump the audit's own `=== Codemap Architectural Audit ===` header right under it, double-stacking section headers.
+
+### Notes
+- No code-path behavior changed — all fixes are output-formatting only.
+- Tests: 209 (unchanged).
+
+---
+
 ## [5.26.1] — 2026-05-01
 
 ### Added (docs only — no code change)

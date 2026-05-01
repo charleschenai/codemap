@@ -78,15 +78,24 @@ pub fn summary(graph: &mut Graph) -> String {
     ];
 
     lines.push("\u{2502}  \u{2500}\u{2500} Hottest files (most coupled) \u{2500}\u{2500}".to_string());
-    for (id, c) in coupling.iter().take(5) {
-        lines.push(format!("\u{2502}    {:>3} connections  {}", c, id));
+    let coupled = coupling.iter().take(5).filter(|(_, c)| *c > 0).collect::<Vec<_>>();
+    if coupled.is_empty() {
+        lines.push("\u{2502}    (no coupling — graph too small or fully isolated files)".to_string());
+    } else {
+        for (id, c) in &coupled {
+            lines.push(format!("\u{2502}    {:>3} connections  {}", c, id));
+        }
     }
     lines.push("\u{2502}".to_string());
 
     lines.push("\u{2502}  \u{2500}\u{2500} Most complex functions \u{2500}\u{2500}".to_string());
-    for (file, name, calls) in complex.iter().take(5) {
-        let short = file.rsplit('/').next().unwrap_or(file);
-        lines.push(format!("\u{2502}    {:>3} calls  {}:{}", calls, short, name));
+    if complex.is_empty() {
+        lines.push("\u{2502}    (no functions parsed yet — this language may not have AST extraction)".to_string());
+    } else {
+        for (file, name, calls) in complex.iter().take(5) {
+            let short = file.rsplit('/').next().unwrap_or(file);
+            lines.push(format!("\u{2502}    {:>3} calls  {}:{}", calls, short, name));
+        }
     }
 
     lines.push("\u{2502}".to_string());

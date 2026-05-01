@@ -2496,3 +2496,69 @@ unaffected.
   pasteable examples a user can run immediately, and the
   performance / competitive-position story leads the document
   rather than being buried in linked-out files.
+
+
+[2026-05-01] fix: 5.26.2 — output quality fixes from full e2e test pass (#63)
+  source: Charles ran a full end-to-end test on every feature
+  shipped 5.16.2 -> 5.26.1 ("we never even tested it... output
+  looks trashy") and surfaced six visual/formatting issues that
+  added up to a rough first impression. All fixed.
+
+  Six fixes (output-formatting only — no behavior change):
+
+  1. Empty section headers in `audit` no longer print bare.
+     Was: "── Top chokepoints (betweenness) ──\n\n── Top brokers
+          (structural holes) ──\n\n"
+     Now: "── Top chokepoints (betweenness) ──\n  (none — graph
+          too small or fully disconnected)\n\n── Top brokers...
+          \n  (none — no nodes connect distinct clusters)\n"
+     Same fix on "Dominant clusters (Leiden)".
+
+  2. `summary` "Hottest files" no longer lists 0-connection
+     entries when nothing is coupled.
+     Was: "│    0 connections  app.py\n│    0 connections..."
+     Now: "│    (no coupling — graph too small or fully
+          isolated files)"
+     Same fix on "Most complex functions" when no functions
+     parsed (e.g. small fixture repos).
+
+  3. `dep-tree` text output shows ecosystem prefix alongside
+     each manifest path.
+     Was: "Cargo.toml (2 deps):"
+     Now: "Cargo.toml [cargo] (2 deps):"
+     Matches the ecosystem prefix used in graph node IDs
+     (dep:cargo:serde) so the text + graph stories agree.
+
+  4. "(no --dir given; defaulting to current directory)"
+     warning suppressed when target is an existing absolute
+     file path. For actions like pe-sections / bin-disasm /
+     pyc-info / safetensors-info where the user passed an
+     explicit file, the dir scan is incidental and the warning
+     is misleading. Logic in cli/main.rs:
+       target_is_explicit_file = target.split_whitespace()
+         .next().map(|t| Path::new(t).is_file()).unwrap_or(false)
+
+  5. Scanner banners ("Scanned N files in Mms", "Cache: N/N
+     files unchanged") auto-quieted for explicit-file targets.
+     Same condition as #4 — passes scan_quiet=true into
+     ScanOptions when target is an existing file.
+
+  6. `think` orchestrator strips redundant `=== Foo ===`
+     headers from sub-action outputs. Previously a `── audit ──`
+     step would dump the audit's own `=== Codemap Architectural
+     Audit ===` line right beneath, double-stacking section
+     headers. New helper strip_redundant_top_header() in
+     actions/think.rs strips a leading "=== ... ===" line + the
+     immediately-following blank line.
+
+  E2E test fixture: /tmp/e2e-codemap.sh exercises every feature
+  shipped 5.16.2 -> 5.26.1. Hits real targets where available
+  (synthetic .py for pyc walker, Joern repo for Scala, system
+  AArch64 .so for ARM disasm, synthetic safetensors blob, etc.)
+  and skips with explicit notice for things needing fixtures
+  this machine doesn't have (.apk, two PE files for diff). Worth
+  keeping around as a smoke test.
+
+  Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+  Tests: 209 (unchanged — formatting fixes don't affect existing
+  test assertions, which only check for content presence).

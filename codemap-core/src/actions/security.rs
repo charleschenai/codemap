@@ -584,7 +584,11 @@ pub fn dep_tree(graph: &mut Graph, target: &str) -> String {
     ];
 
     for (manifest, deps) in &manifest_deps {
-        lines.push(format!("{} ({} deps):", manifest, deps.len()));
+        // Surface ecosystem next to manifest path so users can see at a
+        // glance which package registry the deps came from. Matches the
+        // ecosystem prefix used in graph node IDs (dep:cargo:serde, etc.).
+        let eco = ecosystem_from_manifest(manifest);
+        lines.push(format!("{} [{}] ({} deps):", manifest, eco, deps.len()));
 
         // Group by dep group
         let mut by_group: BTreeMap<&str, Vec<&DepEntry>> = BTreeMap::new();
