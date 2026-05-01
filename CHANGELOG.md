@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.26.3] — 2026-05-01
+
+### Added (docs only)
+- **"Drop-in system prompt for AI agents" section at the top of the README.** A copy-pasteable block users add to `~/.claude/CLAUDE.md` / `.cursorrules` / `~/.codex/instructions.md` / etc. that teaches the agent **when** to reach for codemap (vs grep/find/Read) and **which** action to pick for ~25 common asks. Includes:
+  - **Trigger-phrase → tool mapping table.** "When user says 'audit'/'find load-bearing files'/'reverse this windows binary'/'android apk'/'ml model'/'find secrets'/'recon a website'/etc., use Y" — reflexive lookup so the agent doesn't get lost in 164 actions.
+  - **Hard rules.** Always pass `--dir <small_path>`. Never live-URL recon. Quote arrows in `meta-path`. Spectral cap at 5K nodes.
+  - **Killer-query reference.** ~10 most-useful `meta-path` / `pagerank` / `attribute-filter` invocations as a quick lookup.
+  - Wrapped in `<!-- BEGIN ... END -->` markers so users can grep + extract verbatim.
+- **SKILL.md** updated to reference the README's per-action examples (5.26.1+) and the output quality fixes (5.26.2+).
+
+### Notes
+- Action count: 164 (unchanged). EntityKinds: 33 (unchanged). Tests: 209 (unchanged).
+- Docs-only patch ship.
+
+---
+
 ## [5.26.2] — 2026-05-01
 
 ### Fixed (visual / output quality — surfaced by an end-to-end test pass)

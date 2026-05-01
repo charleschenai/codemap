@@ -2562,3 +2562,97 @@ unaffected.
   Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
   Tests: 209 (unchanged — formatting fixes don't affect existing
   test assertions, which only check for content presence).
+
+
+[2026-05-01] docs: 5.26.3 — drop-in system prompt for AI agents (#64)
+  source: Charles asked for a section near the top of the
+  README that users can copy verbatim into their AI's system
+  prompt — Claude Code's CLAUDE.md, Cursor's .cursorrules,
+  Codex's instructions.md, etc. — so the agent knows when to
+  reach for codemap (vs grep/find/Read) and which action to
+  pick for common asks. Plus per-tool examples so the AI sees
+  the full toolkit, not just the entry point.
+
+  Section added near top of README, between the version line
+  and the Table of Contents — first thing readers see. Wrapped
+  in HTML comment markers (`<!-- BEGIN ... END -->`) so users
+  can grep + extract the block verbatim.
+
+  Contents:
+
+  1. "When the user asks X, use Y" trigger-phrase → tool table
+     covering ~25 of the most common asks:
+       - audit / review / overview      → think audit OR audit
+       - find load-bearing files       → think load-bearing
+       - what changed recently         → hotspots + churn
+       - trace user input to db        → taint
+       - what breaks if I change X     → blast-radius
+       - rank files by importance      → pagerank
+       - rank functions inside binary  → bin-disasm + pagerank --type bin_func
+       - compare two binaries          → binary-diff
+       - reverse PE/ELF/Mach-O binary  → think reverse OR direct actions
+       - android apk                   → think android OR apk-info
+       - flutter / RN native libs      → bin-disasm on extracted .so
+       - ml model architecture         → think ml model OR direct {gguf,safetensors,onnx}-info
+       - find hardcoded secrets        → secret-scan + pagerank --type secret
+       - dep tree / unused deps        → dep-tree + dead-deps
+       - supply chain / SBOM           → license-scan + cve-import + cve-match + meta-path
+       - find all api endpoints        → think find endpoints
+       - recon website                 → think recon (rejects live URLs!)
+       - parse HAR / sitemap / etc.    → web-blueprint / web-sitemap-parse / robots-parse / crt-parse
+       - decompile pyc                 → pyc-info
+       - render graph                  → dot / mermaid / to-gexf
+       - Fiedler / fault line          → fiedler
+       - PR risk / impact              → risk / changeset
+       - dead code cleanup             → dead-files + dead-functions + dead-deps
+       - DON'T KNOW WHAT TO USE        → think "<plain English>"
+
+  2. Hard rules:
+     - ALWAYS pass --dir <small_path>
+     - codemap NEVER makes network requests (capture artifacts
+       first; live URL guard in `think` enforces this)
+     - For explicit-file actions, pass absolute path as target
+     - Quote arrows in meta-path
+     - Spectral / LSP capped at 5000 nodes
+
+  3. Killer-query reference (10 most-useful pre-built queries):
+     - meta-path "source->endpoint"
+     - meta-path "source->dependency"
+     - meta-path "source->secret"
+     - meta-path "permission->method"
+     - meta-path "source->binary->dll->cve"
+     - meta-path "model->tensor"
+     - pagerank --type secret / bin_func
+     - attribute-filter entropy>7.0 --type section
+     - attribute-filter is_dead=true --type dependency
+     - attribute-filter diff_status=added --type bin_func
+
+  4. Output expectations: single tool call returns aggregated
+     text, sub-second on cold cache, --json for machine-readable.
+
+  Why this works: AI agents (including Claude Code) hit choice
+  paralysis with 164 actions. The trigger-phrase table collapses
+  that into "user said X, run Y" lookups so the agent reaches
+  for codemap reflexively instead of falling back to grep/find/
+  Read. The hard rules prevent the two most common failure
+  modes: forgetting --dir (50 GB heap blowup incident from
+  2026-04-29 codified) and defaulting to live scraping for web
+  work.
+
+  SKILL.md side-update: bumped to mention the README's per-
+  action examples (5.26.1+) and the output quality fixes
+  (5.26.2+).
+
+  Auto-memory project_codemap_5_16_to_5_25_session.md updated
+  to project_codemap_5_16_to_5_26_session arc with the full
+  16-release ship list table.
+
+  Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+  Tests: 209 (unchanged — docs-only).
+
+  This closes the documentation arc for the 5.16.2 → 5.26 mega-
+  ship. Codemap now has: README + drop-in system prompt + per-
+  action examples + benchmarks + competitor analysis + e2e-test
+  validated output quality + 18-language coverage + comprehensive
+  CHANGELOG/EVOLUTION/CONTRIBUTING/SKILL.md. Genuine production-
+  ready docs.

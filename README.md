@@ -4,7 +4,100 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.26.2 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.26.3 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+
+---
+
+## Drop-in system prompt for AI agents
+
+Copy the block below into your AI's system prompt — `~/.claude/CLAUDE.md` for Claude Code, `.cursorrules` for Cursor, `~/.codex/instructions.md` for Codex, or whatever your tool uses. It teaches the agent **when** to reach for codemap (vs grep/find/Read) and **which** action to pick for common asks.
+
+The trigger phrases are case-insensitive substrings. The "use this" column is what the AI should literally invoke.
+
+````markdown
+<!-- BEGIN codemap system-prompt fragment (copy verbatim into your agent's instructions) -->
+
+## codemap — when to use it
+
+Reach for `codemap` BEFORE grep/find/Read whenever the user asks a structural,
+cross-file, or "what depends on what" question. codemap is a single Rust
+binary with 164 actions over a heterogeneous graph (33 EntityKinds covering
+source files, binaries, schemas, secrets, dependencies, ML model tensors,
+Android APKs, recon artifacts). Sub-second cold-cache on 800-3,200 file
+repos; ~96% fewer tool calls than grep-based exploration on equivalent
+questions. Pure-static — never makes network requests.
+
+**Always pass `--dir <small_path>`.** Without it, codemap walks CWD recursively;
+from `~` that's 192K+ files and ~50 GB heap before OOM.
+
+### "When the user asks X, use Y" — quick reference
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "audit", "review the codebase", "high-level overview", "what is this" | `codemap --dir <path> think "audit this codebase"` OR `codemap --dir <path> audit` | One-page architectural risk overview: chokepoints + brokers + dual-risk + Leiden clusters + per-EntityKind census. |
+| "find load-bearing files", "critical files", "bottleneck", "what would break X" | `codemap --dir <path> think "find load-bearing files"` | Runs `audit + betweenness + bridges` — surfaces the architectural walls. |
+| "what changed recently", "hotspots", "active files" | `codemap --dir <path> hotspots` + `codemap --dir <path> churn HEAD~30` | Coupling-weighted file ranking + git-history churn heat. |
+| "trace user input to the database", "is this taint vulnerable" | `codemap --dir <path> taint <source-pattern> <sink-pattern>` | CPG-backed interprocedural taint paths. |
+| "what breaks if I change file X" | `codemap --dir <path> blast-radius X` | BFS over reverse-import edges. |
+| "rank files by importance" | `codemap --dir <path> pagerank` | 20-iter PageRank on import graph, top 30. |
+| "find load-bearing functions", "rank functions" | `codemap --dir <path> bin-disasm <binary>` then `codemap pagerank --type bin_func` | First disassemble (registers BinaryFunction nodes), then rank. |
+| "compare two binaries", "what changed between v1 and v2" | `codemap binary-diff /path/to/v1.exe /path/to/v2.exe` | Cross-graph promotion under `diff:{session}:` namespace; `attribute-filter diff_status=added` for new functions. |
+| "reverse this windows binary" | `codemap think "reverse this windows binary /path/to/app.exe"` | Routes to `pe-meta + pe-imports + pe-exports + pe-strings + pe-sections + pe-debug + bin-disasm`. |
+| "reverse this linux binary" / ".so" | `codemap think "reverse /path/to/lib.so"` (ELF) OR `codemap elf-info` + `codemap bin-disasm` | x86/x64/ARM/AArch64 ELF support. |
+| "reverse this mac binary" / ".dylib" | `codemap macho-info /path/to/lib.dylib` | LC_LOAD_DYLIB → Dll graph + LC_MAIN entry. |
+| "android apk", ".apk", "what permissions does this app use", "did I leak permissions" | `codemap think "android apk /path/to/app.apk"` OR `codemap apk-info <apk>` | Full DEX walker + permission heuristics. `meta-path "permission->method"` answers "what code uses CAMERA?" After running, `attribute-filter discovered_via=dex --type permission` finds permissions used in code but not declared in manifest. |
+| "what's in my flutter / react-native app" | `unzip app.apk lib/arm64-v8a/libapp.so -d /tmp` then `codemap bin-disasm /tmp/lib/arm64-v8a/libapp.so` | AArch64 function inventory from native libs. |
+| "ml model architecture", ".gguf / .safetensors / .onnx" | `codemap think "ml model /path/to/model.gguf"` OR direct `codemap gguf-info` / `codemap safetensors-info` / `codemap onnx-info` | Tensors → MlTensor nodes; ONNX operators → MlOperator nodes (aggregated by op_type). `meta-path "model->tensor"` for cross-model architecture inventory. |
+| "find hardcoded secrets", "credential leaks", "AWS keys / GitHub PATs in this repo" | `codemap --dir <path> secret-scan` | Each finding promotes to a `Secret` graph node. `meta-path "source->secret"` for inventory; `pagerank --type secret` ranks files by credential-risk concentration. |
+| "what dependencies does this project have", "dep tree" | `codemap --dir <path> dep-tree` | Parses Cargo.toml / package.json / pyproject.toml / go.mod / pom.xml / Gemfile / Pipfile. Each dep → `Dependency(ecosystem-namespaced)` graph node. |
+| "find unused dependencies" | `codemap --dir <path> dead-deps` | Cross-references manifests vs actual imports; marks dead deps with `is_dead=true` attr. |
+| "supply chain audit", "SBOM", "vulnerable deps" | `codemap --dir <path> license-scan` then `codemap cve-import nvd.json` then `codemap cve-match` then `codemap meta-path "source->binary->dll->cve"` | Licenses + CVEs as graph nodes; emit SPDX 2.3 (`to-spdx`) or CycloneDX 1.5 (`to-cyclonedx`). All offline — no network. |
+| "find all api endpoints", "what HTTP routes does this expose" | `codemap --dir <path> think "find all api endpoints"` | Routes Flask/FastAPI/Express to `api-surface + meta-path "source->endpoint"`. Each route promotes to `HttpEndpoint` graph node. |
+| "recon a website", "what tech stack is this site on" | **CAPTURE FIRST** then `codemap think "recon /tmp/captured.html"` | codemap will **REJECT live URLs** with a "capture the artifact first" message. Use `curl -o /tmp/index.html <URL>` then point `think` at the file. For JS-rendered sites, capture a HAR via Playwright/Burp/wget. |
+| "parse this HAR / sitemap.xml / robots.txt / crt.sh dump" | `codemap web-blueprint <har>`, `codemap web-sitemap-parse <xml>`, `codemap robots-parse <txt>`, `codemap crt-parse <json>` | Each parser registers HttpEndpoint / Compiler / Cert graph nodes. |
+| "decompile this .pyc" | `codemap pyc-info /path/to/foo.cpython-312.pyc` | Recursive marshal walker. Each function → BinaryFunction with `binary_format=pyc`. |
+| "diagram", "render graph", "visualize architecture" | `codemap --dir <path> dot \| dot -Tsvg > graph.svg` OR `codemap --dir <path> mermaid > docs/arch.md` | Graphviz DOT or Mermaid for GitHub-rendered docs. `to-gexf` for Gephi. |
+| "what's the natural fault line", "where does this codebase split", "Fiedler" | `codemap --dir <path> fiedler` | λ₂ + sign-cut bisection. Bottleneck detector. |
+| "PR risk", "is this commit risky", "review impact" | `codemap --dir <path> risk HEAD~5` OR `codemap --dir <path> changeset HEAD~5` | Composite 0-100 score: blast radius + coupling + complexity + scope. |
+| "dead code", "unused exports", "cleanup" | `codemap --dir <path> dead-files` + `codemap --dir <path> dead-functions` + `codemap --dir <path> dead-deps` | Three-pass cleanup audit. |
+| **Don't know what to use** | `codemap --dir <path> think "<plain English goal>"` | Goal router. Picks the right pipeline + shows it at the top of output. |
+
+### Hard rules
+
+1. **Always pass `--dir <small_path>`.** No exceptions. Otherwise codemap walks CWD recursively.
+2. **codemap NEVER makes network requests.** For website work, capture artifacts first (`curl`, `playwright codegen`, `wget`) and feed the saved files. The `think` action will reject live URLs.
+3. **For an explicit-file action (`pe-imports`, `bin-disasm`, `pyc-info`, `safetensors-info`, etc.), pass the absolute file path as the target — `--dir` becomes a no-op for that action.**
+4. **Quote arrow patterns in `meta-path`**: `meta-path "source->endpoint"` (bash treats `>` as redirection without quotes).
+5. **Spectral / LSP actions cap at 5000 nodes.** For larger graphs, prefer `clusters leiden` over `spectral-cluster`.
+
+### Killer queries to remember
+
+```bash
+codemap --dir <path> meta-path "source->endpoint"            # which code calls APIs
+codemap --dir <path> meta-path "source->dependency"          # full dep inventory
+codemap --dir <path> meta-path "source->secret"              # credential leak inventory
+codemap --dir <path> meta-path "permission->method"          # what code uses CAMERA (after apk-info)
+codemap --dir <path> meta-path "source->binary->dll->cve"    # vulnerable transitive deps (after cve-match)
+codemap --dir <path> meta-path "model->tensor"               # cross-model architecture
+codemap --dir <path> pagerank --type secret                  # files concentrating credential risk
+codemap --dir <path> pagerank --type bin_func                # most-central functions across binaries
+codemap --dir <path> attribute-filter entropy>7.0 --type section   # packed/encrypted PE sections
+codemap --dir <path> attribute-filter is_dead=true --type dependency # dead deps for cleanup PR
+codemap --dir <path> attribute-filter diff_status=added --type bin_func  # new functions in a binary diff
+```
+
+### Output expectations
+
+- Single tool call returns aggregated text (typically 1-100 KB depending on action).
+- Sub-second on cold cache for repos under 5K files. ~5-10× faster on warm cache.
+- Use `--json` for machine-readable output (wrapped in `{"action", "target", "files", "result", "ok", "error"}`).
+
+<!-- END codemap system-prompt fragment -->
+````
+
+**Why this works:** AI agents (including Claude Code) hit choice paralysis with 164 actions. The trigger-phrase table collapses that into "user said X, run Y" lookups so the agent reaches for codemap reflexively instead of falling back to grep/find/Read. The hard rules prevent the two most common failure modes (forgetting `--dir`, defaulting to live scraping for web work).
+
+For a fully-elaborated `think` example with output, see [`examples/README.md`](./examples/README.md).
 
 ---
 
