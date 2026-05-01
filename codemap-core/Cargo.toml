@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.25.1"
+version = "5.26.0"
 edition = "2021"
 license = "MIT"
 description = "Heterogeneous-graph codebase analysis library — 164 actions (incl. `think` natural-language goal router), 33 EntityKinds, across source AST, binary RE (ARM/AArch64 + section-level promotion + diff-namespace cross-graph + DEX bytecode + Android permission heuristics), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, ML model architecture"
@@ -27,6 +27,12 @@ walkdir = "2"
 regex = "1"
 tree-sitter-c-sharp = "0.23.5"
 tree-sitter-lua = "0.5.0"
+# 5.26.0: closes the AST coverage gap surfaced by the COMPETITION audit
+# — Scala (Joern is Scala; codemap previously parsed only its build
+# scripts), Swift (iOS / macOS apps), Dart (Flutter mobile + web).
+tree-sitter-scala = "0.26"
+tree-sitter-swift = "0.7"
+tree-sitter-dart  = "0.2"
 # Disasm — pure Rust x86/x64 decoder (no system libs). Default feature
 # set is heavy; pull only what we need: decoder + masm-style formatter.
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "masm"] }

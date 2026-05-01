@@ -67,6 +67,9 @@ const SUPPORTED_EXTS: &[&str] = &[
     ".sh", ".bash",
     ".yaml", ".yml", ".cmake",
     ".cs", ".kt", ".kts", ".lua", ".sql",
+    // 5.26.0: closes the COMPETITION audit's "Joern is invisible" gap
+    // (Scala) + adds first-class Flutter/iOS/macOS app support.
+    ".scala", ".sc", ".swift", ".dart",
 ];
 
 // ── Cache Types ─────────────────────────────────────────────────────

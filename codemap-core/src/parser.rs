@@ -260,6 +260,12 @@ fn ext_to_grammar(ext: &str) -> Option<&'static str> {
         ".sh" | ".bash" => Some("bash"),
         ".cs" => Some("c_sharp"),
         ".lua" => Some("lua"),
+        // 5.26.0: closes the AST coverage gap surfaced by the COMPETITION
+        // audit (Joern was almost invisible without Scala, Flutter apps
+        // had no analysis story).
+        ".scala" | ".sc" => Some("scala"),
+        ".swift"         => Some("swift"),
+        ".dart"          => Some("dart"),
         ".kt" | ".kts" | ".sql" => None, // regex-only, no compatible tree-sitter crate
         ".yaml" | ".yml" | ".cmake" => None, // regex-only, no tree-sitter grammar
         _ => None,
@@ -282,6 +288,9 @@ fn grammar_to_language(grammar: &str) -> Option<Language> {
         "bash" => Some(tree_sitter_bash::LANGUAGE.into()),
         "c_sharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         "lua" => Some(tree_sitter_lua::LANGUAGE.into()),
+        "scala" => Some(tree_sitter_scala::LANGUAGE.into()),
+        "swift" => Some(tree_sitter_swift::LANGUAGE.into()),
+        "dart"  => Some(tree_sitter_dart::LANGUAGE.into()),
         // kotlin and sql: no compatible tree-sitter crate, use regex fallback
         _ => None,
     }
@@ -362,6 +371,10 @@ fn import_types(grammar: &str) -> &'static [&'static str] {
         "kotlin" => &["import_header"],
         "lua" => &["function_call"],
         "sql" => &[], // SQL has no imports
+        // 5.26.0
+        "scala" => &["import_declaration"],
+        "swift" => &["import_declaration"],
+        "dart"  => &["import_or_export", "library_import", "library_export"],
         _ => &[],
     }
 }
@@ -382,6 +395,15 @@ fn func_types(grammar: &str) -> &'static [&'static str] {
         "kotlin" => &["function_declaration"],
         "lua" => &["function_declaration", "function_definition_statement"],
         "sql" => &["create_function_statement"],
+        // 5.26.0
+        "scala" => &["function_definition", "function_declaration", "given_definition"],
+        "swift" => &["function_declaration", "init_declaration", "deinit_declaration",
+                     "protocol_function_declaration"],
+        "dart"  => &["function_declaration", "function_signature", "method_declaration",
+                     "method_signature", "external_function_declaration",
+                     "local_function_declaration", "constructor_signature",
+                     "factory_constructor_signature", "getter_declaration",
+                     "setter_declaration", "getter_signature"],
         _ => &[],
     }
 }
@@ -402,6 +424,17 @@ fn export_types(grammar: &str) -> &'static [&'static str] {
         "kotlin" => &["function_declaration", "class_declaration"],
         "lua" => &["function_declaration", "function_definition_statement"],
         "sql" => &["create_function_statement", "create_table_statement"],
+        // 5.26.0 — top-level Scala defs (function_definition, class_definition,
+        // object_definition, trait_definition, enum_definition); Swift type
+        // declarations; Dart class + mixin + extension types.
+        "scala" => &["function_definition", "class_definition", "object_definition",
+                     "trait_definition", "enum_definition", "type_definition",
+                     "extension_definition", "given_definition"],
+        "swift" => &["function_declaration", "class_declaration", "protocol_declaration",
+                     "typealias_declaration", "init_declaration"],
+        "dart"  => &["class_declaration", "mixin_declaration", "extension_declaration",
+                     "extension_type_declaration", "enum_declaration",
+                     "function_declaration"],
         _ => &[],
     }
 }

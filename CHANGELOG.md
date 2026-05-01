@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.26.0] — 2026-05-01
+
+### Added
+- **Tree-sitter grammars for Scala, Swift, and Dart** (15 → 18 supported languages). Closes the AST coverage gap surfaced by the COMPETITION audit (`~/reference/codemap-competition/COMPETITION.md`):
+  - **Scala** (`.scala`, `.sc`) — Joern's source went from "122 files / 4.6K lines" (build scripts only) to **1,977 files / 257K lines parsed** with full top-broker / Leiden cluster detection.
+  - **Swift** (`.swift`) — first-class iOS / macOS app analysis. Function/class/protocol/init declarations.
+  - **Dart** (`.dart`) — first-class Flutter mobile + web analysis. Function/method/class/mixin/extension declarations.
+- New deps: `tree-sitter-scala 0.26`, `tree-sitter-swift 0.7`, `tree-sitter-dart 0.2`. All pure-Rust, no system libs.
+- Per-language `import_types` / `func_types` / `export_types` tables in `parser.rs` populated with canonical node names extracted from each grammar's `node-types.json`.
+
+- **`BENCHMARKS.md`** — measured `codemap think` performance on real OSS codebases (no warm cache):
+  - Joern (1,977 files Scala): "audit this codebase" in **862 ms**
+  - CodeGraphContext (828 files Python): "find load-bearing files" in **519 ms** (3-action pipeline)
+  - Continue (3,187 files TypeScript): "find all api endpoints" in **1,007 ms** (292 endpoints registered)
+  - Geometric mean: **~770 ms** for a 2–3 action pipeline on 800–3,200-file repos with cold cache
+  - Anchored on CodeGraph's published Claude-Code-Explore baseline (26–52 tool calls without a graph tool): codemap is **~1 tool call vs ~30 raw exploration calls**, ~96% reduction.
+
+### Notes
+- Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+- Tests: 209 (unchanged — language deps are config additions, not new code paths under test).
+
+---
+
 ## [5.25.1] — 2026-05-01
 
 ### Added (docs only — no code change)

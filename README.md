@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.25.1 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.26.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -58,7 +58,7 @@ Most code-analysis tools are either language-specific (works great for one stack
 
 - **LSP integration.** 5 actions that connect to any Language Server Protocol server to extract symbols, references, call hierarchies, diagnostics, and type information. Works with rust-analyzer, pylsp, typescript-language-server, clangd, or any LSP-compliant server. **(5.18.0+)** Every LSP action now writes into the heterogeneous graph: `lsp-symbols` registers `Symbol` nodes with `source=lsp` (capped 5K/call), `lsp-references` adds file→symbol usage edges (capped 1K/call), `lsp-calls` adds caller→target / target→callee edges (capped 500/call), `lsp-diagnostics` and `lsp-types` attach per-file attrs (`lsp_errors` / `lsp_warnings` / `lsp_typed_symbols`) for `pagerank` ranking by error density or type-coverage gaps.
 
-- **Bash/shell support.** 13 languages now covered with tree-sitter AST parsing, including Bash/Shell scripts (`.sh`, `.bash`). Function definitions and `source` imports are extracted from real parse trees.
+- **Bash/shell support.** 18 languages now covered with tree-sitter AST parsing — TS/JS, Python, Rust, Go, Java, Ruby, PHP, C, C++, CUDA, Bash/Shell, C#, Lua, plus **(5.26.0+) Scala, Swift, Dart**. Function definitions, class/object/trait/enum declarations, and import statements are extracted from real parse trees per language.
 
 - **Cross-language bridge detection.** PyO3, pybind11, TORCH_LIBRARY, Triton, CUDA kernels, monkey-patches, and YAML native-function dispatch tables are all first-class edges. A Python function calling into a C++ op registered via TORCH_LIBRARY shows up in the call graph. Most tools quietly drop these edges.
 
@@ -516,6 +516,8 @@ Pure-static parsers consuming captured artifacts. **Codemap never makes network 
 ## Examples
 
 For end-to-end scenario walkthroughs (audit, Android APK analysis, passive web recon, binary diff, `think`-first), see [`examples/README.md`](./examples/README.md). The snippets below are quick reference; the walkthroughs explain how the actions compose.
+
+For measured agent-tool-call savings on real OSS codebases (sub-second end-to-end on 800–3,200-file repos with cold cache), see [`BENCHMARKS.md`](./BENCHMARKS.md).
 
 To contribute: see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 

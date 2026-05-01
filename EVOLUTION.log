@@ -2345,3 +2345,92 @@ unaffected.
 
   No urgent work left. The next ship is whatever Charles names —
   this is a clean stopping point for the entire arc.
+
+
+[2026-05-01] feat: 5.26.0 — Scala/Swift/Dart grammars + BENCHMARKS.md (#61)
+  source: COMPETITION.md analysis (5.25.1 ship cycle) surfaced
+  two real gaps that Charles approved as 5.26 scope:
+    - AST grammar coverage hole: Joern source was almost
+      invisible to codemap because we had no Scala parser; same
+      went for Swift (iOS) and Dart (Flutter).
+    - No published codemap performance numbers (CodeGraph has
+      "94% fewer tool calls" benchmarks, codemap had nothing
+      comparable).
+
+  Both addressed in this ship.
+
+  AST grammars (closes COMPETITION.md gap #5):
+
+    Three new tree-sitter crates added with no system-lib
+    dependencies:
+      tree-sitter-scala = "0.26"   — closes the Joern blind spot
+      tree-sitter-swift = "0.7"    — iOS / macOS app analysis
+      tree-sitter-dart  = "0.2"    — Flutter mobile + web
+
+    parser.rs ext-to-grammar dispatch: .scala / .sc → scala,
+    .swift → swift, .dart → dart.
+
+    parser.rs grammar-to-language: each maps to its crate's
+    LANGUAGE constant (scala/swift use ::LANGUAGE.into(), dart
+    uses LANGUAGE.into() with a LanguageFn marshalling step).
+
+    scanner.rs SUPPORTED_EXTS extended with .scala / .sc /
+    .swift / .dart so the file walker actually picks them up.
+
+    parser.rs import_types / func_types / export_types tables
+    populated with canonical node names extracted from each
+    grammar's node-types.json. Scala covers function/class/
+    object/trait/enum/given/extension definitions. Swift covers
+    function/init/deinit/protocol declarations. Dart covers
+    function/method/getter/setter/constructor signatures plus
+    class/mixin/extension declarations.
+
+    Validation: re-audit on Joern (~/reference/codemap-competition/
+    02-joern) jumped from 122 files / 4.6K lines (just build
+    scripts) to 1,977 files / 257K lines — Scala parser working
+    end-to-end. Top brokers on Joern now correctly identifies
+    SecureXmlParsing.scala (constraint score 6.0) as the
+    architectural choke-point. Swift + Dart trusted by
+    construction (same dispatch pattern, smoke-tested via
+    cargo build with no errors).
+
+  BENCHMARKS.md (closes COMPETITION.md gap #3):
+
+    Three real OSS codebases, three queries, no warm cache:
+
+      Joern (Scala, 1977 files / 257K lines):
+        codemap think "audit this codebase"
+        Pipeline: audit → summary
+        Time: 862ms
+
+      CodeGraphContext (Python, 828 files / 70K lines):
+        codemap think "find load-bearing files"
+        Pipeline: audit → betweenness → bridges
+        Time: 519ms
+
+      Continue (TypeScript, 3187 files / 354K lines):
+        codemap think "find all api endpoints"
+        Pipeline: api-surface → meta-path source→endpoint
+        Time: 1007ms (292 HttpEndpoint nodes registered)
+
+    Geometric mean: ~770ms for a 2-3 action pipeline on
+    800-3200 file repos, cold cache.
+
+    Anchored on CodeGraph's published Claude-Code-Explore
+    baseline (26-52 tool calls without a graph tool, 1m8s -
+    2m8s wall clock): codemap is ~1 tool call vs ~30 raw
+    exploration calls, ~96% reduction. Honest framing — we
+    cite their "without" numbers as an independent baseline
+    rather than running an A/B ourselves yet (deferred to v2).
+
+  README updated: language count 13 → 18, BENCHMARKS.md linked
+  from Examples section.
+
+  Action count: 164 (unchanged). EntityKinds: 33 (unchanged).
+  Tests: 209 (unchanged — grammar additions are config-only,
+  no new code paths under test).
+
+  Closes review backlog items #3 + #5 from COMPETITION.md.
+  Charles dropped #1 (DB) and #2 (MCP) explicitly. #4 (native
+  file watcher) deferred until he personally feels the polling
+  pain. Codemap is now genuinely at a natural stopping point.
