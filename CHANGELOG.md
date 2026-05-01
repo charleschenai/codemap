@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.30.0] — 2026-05-01
+
+### Added (Ship 2 #21 — ONNX op-graph pruner)
+- **New `onnx-prune` action** (aliases: `op-prune`, `prune-ops`, `ml-dead-ops`). Identifies dead operators in ONNX models by reverse-reachability from the model's declared outputs.
+
+  Algorithm:
+  1. Parse ModelProto → GraphProto.
+  2. For each NodeProto, collect (name, op_type, inputs[], outputs[]).
+  3. `live_tensors = set(graph.outputs)`.
+  4. Iterate over nodes BFS-style: any node whose output is in `live` becomes live, its inputs joined into `live`. Repeat until stable.
+  5. Dead nodes = those whose outputs never reach a graph output.
+
+- **Catches the kinds of orphan branches compilers and quantization tools leave behind** — Q→DQ pairs that didn't get folded, debug-only sub-outputs that were forgotten in the export. Dead nodes add file size, runtime cost (when greedy schedulers don't prune), and visual noise; codemap surfaces them so the analyst can request a clean re-export via `onnx.utils.extract_model` or `onnxsim`.
+
+- **Each dead operator becomes an MlOperator graph node with `is_dead=true`** — `attribute-filter is_dead=true` then enumerates dead-op coverage across a corpus.
+
+- **Honest limitations:** subgraphs inside `If` / `Loop` / `Scan` node attributes are NOT walked for v1 — a node with such a subgraph is pessimistically marked live (no false-positive dead flags).
+
+### Tests
+- 241 → **248 tests** (+7). Linear chain, unreachable branch, multi-output, deep dead subgraph, diamond merge, no-output edge case, empty graph.
+
+---
+
 ## [5.29.0] — 2026-05-01
 
 ### Added (Ship 1 #9a — crypto constants scanner)

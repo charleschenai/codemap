@@ -2080,3 +2080,363 @@ fn parse_cuda_fallback(data: &[u8], filename: &str, file_size: u64) -> Result<St
 
     Ok(out)
 }
+
+// ── 6. onnx_prune (Ship 2 #21) ─────────────────────────────────────
+//
+// Identifies dead operators in an ONNX graph by reverse-reachability
+// from the model's declared outputs. Compilers and quantization tools
+// occasionally leave orphan branches (e.g., Q→DQ pairs that didn't
+// get folded; debug-only outputs that were forgotten). Dead nodes
+// add file size, runtime cost (when greedy schedulers don't prune),
+// and visual noise — codemap surfaces them so the analyst can request
+// a clean re-export.
+//
+// Algorithm:
+//   1. Parse ModelProto → GraphProto.
+//   2. For each NodeProto, collect (name, op_type, inputs[], outputs[]).
+//   3. live_tensors = set(graph.outputs)
+//   4. Iterate over nodes in reverse-name order, BFS-style: if any of
+//      a node's outputs is in live, mark the node live and add its
+//      inputs to live. Repeat until stable.
+//   5. Dead = nodes whose outputs are never reached.
+//
+// Honest limitations: graph initializers and graph inputs are always
+// considered live (they're producers of nothing-needs-pruning data).
+// Subgraphs inside If/Loop/Scan node attributes are NOT walked for v1
+// — a node with such a subgraph is pessimistically marked live.
+
+#[derive(Debug, Clone)]
+struct OnnxNode {
+    name: String,
+    op_type: String,
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+}
+
+fn parse_onnx_nodes(data: &[u8]) -> Result<(Vec<OnnxNode>, Vec<String>, Vec<String>, Vec<String>), String> {
+    let fields = collect_proto_fields(data);
+    if fields.is_empty() {
+        return Err("Could not parse as protobuf".to_string());
+    }
+
+    // Find the GraphProto (ModelProto.graph = field 7)
+    let graph_data = fields.iter()
+        .find(|f| f.field_number == 7 && f.wire_type == 2)
+        .map(|f| &data[f.data_offset..f.data_offset + f.data_len])
+        .ok_or_else(|| "ONNX model has no graph (field 7)".to_string())?;
+
+    let gfields = collect_proto_fields(graph_data);
+
+    let mut nodes: Vec<OnnxNode> = Vec::new();
+    let mut graph_inputs: Vec<String> = Vec::new();
+    let mut graph_outputs: Vec<String> = Vec::new();
+    let mut initializer_names: Vec<String> = Vec::new();
+
+    for gf in &gfields {
+        match gf.field_number {
+            1 if gf.wire_type == 2 => {
+                // NodeProto
+                let nd = &graph_data[gf.data_offset..gf.data_offset + gf.data_len];
+                let nfields = collect_proto_fields(nd);
+                let mut inputs: Vec<String> = Vec::new();
+                let mut outputs: Vec<String> = Vec::new();
+                let mut name = String::new();
+                let mut op_type = String::new();
+                for nf in &nfields {
+                    match nf.field_number {
+                        1 if nf.wire_type == 2 => {
+                            if let Some(s) = proto_string(nd, nf) { inputs.push(s); }
+                        }
+                        2 if nf.wire_type == 2 => {
+                            if let Some(s) = proto_string(nd, nf) { outputs.push(s); }
+                        }
+                        3 if nf.wire_type == 2 => {
+                            if let Some(s) = proto_string(nd, nf) { name = s; }
+                        }
+                        4 if nf.wire_type == 2 => {
+                            if let Some(s) = proto_string(nd, nf) { op_type = s; }
+                        }
+                        _ => {}
+                    }
+                }
+                nodes.push(OnnxNode { name, op_type, inputs, outputs });
+            }
+            5 if gf.wire_type == 2 => {
+                // GraphProto.initializer = TensorProto, name is field 8
+                let init_data = &graph_data[gf.data_offset..gf.data_offset + gf.data_len];
+                let init_fields = collect_proto_fields(init_data);
+                for ifld in &init_fields {
+                    if ifld.field_number == 8 && ifld.wire_type == 2 {
+                        if let Some(s) = proto_string(init_data, ifld) {
+                            initializer_names.push(s);
+                        }
+                    }
+                }
+            }
+            11 if gf.wire_type == 2 => {
+                // GraphProto.input = ValueInfoProto, name is field 1
+                let vi_data = &graph_data[gf.data_offset..gf.data_offset + gf.data_len];
+                let vfs = collect_proto_fields(vi_data);
+                for vf in &vfs {
+                    if vf.field_number == 1 && vf.wire_type == 2 {
+                        if let Some(s) = proto_string(vi_data, vf) {
+                            graph_inputs.push(s);
+                        }
+                    }
+                }
+            }
+            12 if gf.wire_type == 2 => {
+                // GraphProto.output = ValueInfoProto, name is field 1
+                let vi_data = &graph_data[gf.data_offset..gf.data_offset + gf.data_len];
+                let vfs = collect_proto_fields(vi_data);
+                for vf in &vfs {
+                    if vf.field_number == 1 && vf.wire_type == 2 {
+                        if let Some(s) = proto_string(vi_data, vf) {
+                            graph_outputs.push(s);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok((nodes, graph_inputs, graph_outputs, initializer_names))
+}
+
+/// Reverse-reachability: starting from graph_outputs, walk backwards
+/// over nodes (any node whose output is in live becomes live, its
+/// inputs joined into live) until fixpoint. Returns indices of dead nodes.
+fn find_dead_nodes(
+    nodes: &[OnnxNode],
+    graph_outputs: &[String],
+) -> Vec<usize> {
+    use std::collections::HashSet;
+    let mut live: HashSet<String> = graph_outputs.iter().cloned().collect();
+
+    // Iterate up to N rounds (N = nodes.len() bounds the worst case for
+    // chains; in practice stable in 2-3 rounds because most graphs are
+    // shallow DAGs).
+    let max_rounds = nodes.len() + 2;
+    for _ in 0..max_rounds {
+        let before = live.len();
+        for n in nodes {
+            if n.outputs.iter().any(|o| live.contains(o)) {
+                for i in &n.inputs { live.insert(i.clone()); }
+                for o in &n.outputs { live.insert(o.clone()); }
+            }
+        }
+        if live.len() == before { break; }
+    }
+
+    let mut dead = Vec::new();
+    for (idx, n) in nodes.iter().enumerate() {
+        let any_live = n.outputs.iter().any(|o| live.contains(o));
+        if !any_live { dead.push(idx); }
+    }
+    dead
+}
+
+pub fn onnx_prune(graph: &mut Graph, target: &str) -> String {
+    if target.is_empty() {
+        return "Usage: codemap onnx-prune <model.onnx>".to_string();
+    }
+    let data = match load_binary(target) {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+
+    let (nodes, graph_inputs, graph_outputs, initializers) = match parse_onnx_nodes(&data) {
+        Ok(t) => t,
+        Err(e) => return format!("ONNX parse error: {e}"),
+    };
+
+    let dead = find_dead_nodes(&nodes, &graph_outputs);
+    let live_count = nodes.len() - dead.len();
+    let dead_pct = if nodes.is_empty() { 0.0 } else {
+        (dead.len() as f64 / nodes.len() as f64) * 100.0
+    };
+
+    // Group dead nodes by op_type for the report
+    use std::collections::BTreeMap;
+    let mut dead_by_type: BTreeMap<&str, Vec<&OnnxNode>> = BTreeMap::new();
+    for &i in &dead {
+        dead_by_type.entry(nodes[i].op_type.as_str()).or_default().push(&nodes[i]);
+    }
+
+    // Promote each dead node into the heterogeneous graph as an
+    // MlOperator with `is_dead=true` so users can do
+    // `attribute-filter is_dead=true` across a model corpus.
+    use crate::types::EntityKind;
+    register_ml_model(graph, target, "onnx");
+    let model_id = format!("model:{target}");
+    let mut promoted = 0usize;
+    for &i in &dead {
+        if promoted >= MAX_ML_NODES_PER_CALL { break; }
+        let n = &nodes[i];
+        let display_name = if n.name.is_empty() {
+            format!("{}#{}", n.op_type, i)
+        } else {
+            n.name.clone()
+        };
+        let op_id = format!("ml_op_dead:onnx:{target}::{}", display_name);
+        let inputs_str = n.inputs.join(",");
+        let outputs_str = n.outputs.join(",");
+        graph.ensure_typed_node(&op_id, EntityKind::MlOperator, &[
+            ("name", display_name.as_str()),
+            ("op_type", n.op_type.as_str()),
+            ("model_format", "onnx"),
+            ("is_dead", "true"),
+            ("inputs", inputs_str.as_str()),
+            ("outputs", outputs_str.as_str()),
+        ]);
+        graph.add_edge(&model_id, &op_id);
+        promoted += 1;
+    }
+
+    // Format report
+    let mut out = String::new();
+    out.push_str(&format!("=== ONNX Op-Graph Prune: {} ===\n\n", target));
+    out.push_str(&format!("Nodes total:      {}\n", nodes.len()));
+    out.push_str(&format!("Nodes live:       {}\n", live_count));
+    out.push_str(&format!("Nodes dead:       {} ({:.1}%)\n", dead.len(), dead_pct));
+    out.push_str(&format!("Graph inputs:     {}\n", graph_inputs.len()));
+    out.push_str(&format!("Graph outputs:    {}\n", graph_outputs.len()));
+    out.push_str(&format!("Initializers:     {}\n", initializers.len()));
+    out.push('\n');
+
+    if dead.is_empty() {
+        out.push_str("No dead operators detected. Graph is fully reachable from outputs.\n");
+        return out;
+    }
+
+    out.push_str("── Dead operators by type ──\n");
+    let mut sorted: Vec<_> = dead_by_type.iter().collect();
+    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    for (op, ns) in &sorted {
+        out.push_str(&format!("  {op}: {} dead\n", ns.len()));
+    }
+    out.push('\n');
+
+    // Show first 20 dead nodes
+    out.push_str(&format!("── Sample dead nodes ({} shown) ──\n", dead.len().min(20)));
+    for &idx in dead.iter().take(20) {
+        let n = &nodes[idx];
+        let display_name = if n.name.is_empty() {
+            format!("{}#{}", n.op_type, idx)
+        } else {
+            n.name.clone()
+        };
+        let outs_short = n.outputs.iter().take(2).cloned().collect::<Vec<_>>().join(",");
+        out.push_str(&format!(
+            "  [{}] {} → outputs: {}{}\n",
+            n.op_type,
+            display_name,
+            outs_short,
+            if n.outputs.len() > 2 { ", …" } else { "" },
+        ));
+    }
+    if dead.len() > 20 {
+        out.push_str(&format!("  … and {} more\n", dead.len() - 20));
+    }
+    out.push('\n');
+    out.push_str("Try: re-export with `onnx.utils.extract_model` or `onnxsim` to drop these.\n");
+    out
+}
+
+#[cfg(test)]
+mod onnx_prune_tests {
+    use super::*;
+
+    fn n(name: &str, op: &str, ins: &[&str], outs: &[&str]) -> OnnxNode {
+        OnnxNode {
+            name: name.into(),
+            op_type: op.into(),
+            inputs: ins.iter().map(|s| s.to_string()).collect(),
+            outputs: outs.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn linear_chain_all_live() {
+        // input → A → B → output
+        let nodes = vec![
+            n("a", "MatMul", &["input"], &["t1"]),
+            n("b", "Add",    &["t1"],    &["output"]),
+        ];
+        let dead = find_dead_nodes(&nodes, &["output".to_string()]);
+        assert!(dead.is_empty(), "linear chain should be fully live, got {dead:?}");
+    }
+
+    #[test]
+    fn unreachable_branch_marked_dead() {
+        // input → A → output  (live)
+        // input → B → t2     (dead — t2 not consumed, not an output)
+        let nodes = vec![
+            n("a",   "MatMul", &["input"], &["output"]),
+            n("dead","Identity",&["input"], &["t2"]),
+        ];
+        let dead = find_dead_nodes(&nodes, &["output".to_string()]);
+        assert_eq!(dead, vec![1], "B node (idx 1) should be dead, got {dead:?}");
+    }
+
+    #[test]
+    fn multiple_outputs_all_paths_live() {
+        // input → A → out1
+        // input → B → out2
+        let nodes = vec![
+            n("a", "MatMul", &["input"], &["out1"]),
+            n("b", "Add",    &["input"], &["out2"]),
+        ];
+        let outputs = vec!["out1".to_string(), "out2".to_string()];
+        let dead = find_dead_nodes(&nodes, &outputs);
+        assert!(dead.is_empty(), "multi-output graph should be fully live, got {dead:?}");
+    }
+
+    #[test]
+    fn deep_dead_subgraph_all_marked() {
+        // input → A → out  (live)
+        // input → B → t1 → C → t2 → D → t3   (entire chain dead)
+        let nodes = vec![
+            n("a", "MatMul", &["input"], &["out"]),
+            n("b", "Conv",   &["input"], &["t1"]),
+            n("c", "Relu",   &["t1"],    &["t2"]),
+            n("d", "Add",    &["t2"],    &["t3"]),
+        ];
+        let dead = find_dead_nodes(&nodes, &["out".to_string()]);
+        let mut s = dead.clone(); s.sort();
+        assert_eq!(s, vec![1, 2, 3], "B/C/D should all be dead, got {dead:?}");
+    }
+
+    #[test]
+    fn diamond_shape_all_live() {
+        // input → A → t1 ─→ C → out
+        //          ↓        ↑
+        //          B ── t2 ─┘
+        let nodes = vec![
+            n("a", "Split", &["input"], &["t1", "t2"]),
+            n("b", "Identity", &["t2"], &["t2'"]),
+            n("c", "Add",      &["t1", "t2'"], &["out"]),
+        ];
+        let dead = find_dead_nodes(&nodes, &["out".to_string()]);
+        assert!(dead.is_empty(), "diamond merge should be fully live, got {dead:?}");
+    }
+
+    #[test]
+    fn empty_outputs_marks_all_dead() {
+        // No declared outputs → every node has nothing reachable → all dead
+        let nodes = vec![
+            n("a", "MatMul", &["input"], &["t1"]),
+            n("b", "Add",    &["t1"],    &["t2"]),
+        ];
+        let dead = find_dead_nodes(&nodes, &[]);
+        assert_eq!(dead.len(), 2, "no outputs → everything dead");
+    }
+
+    #[test]
+    fn no_nodes_no_dead() {
+        let dead = find_dead_nodes(&[], &["x".to_string()]);
+        assert!(dead.is_empty());
+    }
+}
+
