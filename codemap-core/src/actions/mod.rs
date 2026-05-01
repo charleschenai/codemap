@@ -39,6 +39,7 @@ pub mod anti_analysis;
 pub mod crypto_const;
 pub mod cuda_trace;
 pub mod crypto_loops;
+pub mod switch_recovery;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -283,6 +284,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // XOR-decryption loops in disasm output. Second propagator
         // consumer (after Ship 1 #7's jump-table resolver).
         "crypto-loops" | "xor-loops" | "find-decrypt" | "decrypt-loop" => Ok(crypto_loops::crypto_loops(graph, target)),
+        // Switch table recovery (5.34.0 — Ship 4 #24). Aggregates Ship
+        // 1 #7's per-function jump_targets into structured SwitchTable
+        // graph nodes with case_count / pattern / confidence.
+        "switch-recovery" | "switches" | "dispatchers" | "switch-tables" => Ok(switch_recovery::switch_recovery(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

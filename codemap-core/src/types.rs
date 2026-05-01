@@ -273,6 +273,22 @@ pub enum EntityKind {
     /// corpus; `pagerank --type cuda_kernel` ranks shared kernels
     /// across a CUDA-app suite.
     CudaKernel,
+    /// Recovered switch dispatch table (Ship 4 #24). Aggregates the
+    /// `jump_targets` Ship 1 #7's resolver collects on each function:
+    /// when a function contains at least one indirect JMP whose
+    /// targets the resolver successfully read from `.rdata` /
+    /// `.data.rel.ro`, those targets together describe the case
+    /// labels of the original C/C++ `switch` statement. Edges:
+    /// bin_func → switch_table → bin_func (case targets). attrs:
+    /// case_count, function_address, function_name, targets (comma-
+    /// joined hex), pattern (`pic_relative` / `absolute_pointer` /
+    /// `mixed`), confidence (high if all targets resolve to known
+    /// function entries; medium if some land mid-function — typical
+    /// for tail-merged dispatchers; low if speculative). Killer
+    /// queries: `pagerank --type switch_table` finds the heavy
+    /// dispatchers in a binary; `meta-path source->switch_table`
+    /// enumerates dispatcher-style code patterns.
+    SwitchTable,
 }
 
 impl EntityKind {
@@ -315,6 +331,7 @@ impl EntityKind {
             EntityKind::AntiAnalysis => "anti_tech",
             EntityKind::CryptoConstant => "crypto",
             EntityKind::CudaKernel => "cuda_kernel",
+            EntityKind::SwitchTable => "switch_table",
         }
     }
 
@@ -359,6 +376,7 @@ impl EntityKind {
             "anti_tech" | "anti" | "anti-analysis" | "antitech" | "technique" => EntityKind::AntiAnalysis,
             "crypto" | "cryptoconst" | "crypto-const" | "cryptographic" => EntityKind::CryptoConstant,
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
+            "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             _ => return None,
         })
     }

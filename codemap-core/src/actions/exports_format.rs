@@ -178,6 +178,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             AntiAnalysis      => (239, 154, 154),
             CryptoConstant    => (255, 245, 157),
             CudaKernel        => (118, 185,   0), // NVIDIA green
+            SwitchTable       => (179, 157, 219),
         }
     }
 

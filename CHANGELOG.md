@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.34.0] — 2026-05-01
+
+### Added (Ship 4 #24 — switch table recovery)
+- **New `switch-recovery` action** (aliases: `switches`, `dispatchers`, `switch-tables`). Aggregates Ship 1 #7's per-function `jump_targets` into structured SwitchTable graph nodes with case_count + pattern + confidence.
+- **New `EntityKind::SwitchTable`** (alias: `switch_table`, `switch`, `dispatcher`). Each dispatching function gets one SwitchTable node with attrs:
+  - `function_address`, `function_name`
+  - `case_count` — number of resolved case targets
+  - `targets_at_func_entry` — how many targets land at known function entry points
+  - `targets` — comma-joined hex preview (first 16)
+  - `confidence` — `high` (every target at func entry), `medium` (some), `low` (< 2 or none)
+  - `pattern` — `absolute_pointer` / `pic_relative` / `mixed` (v1: always `absolute_pointer`)
+- **Edges:** `bin_func → switch_table → bin_func` (case-target functions). Lets `pagerank --type switch_table` rank the heavy dispatchers in a binary, and `meta-path "bin_func->switch_table->bin_func"` enumerate dispatcher-style code patterns.
+- **Cheap because Ship 1 #7 already did the hard work.** This action is a 280-LOC aggregator + classifier on top of the per-function `jump_targets` Vec the resolver populates during `bin-disasm`. Functions with multiple independent dispatchers get one merged SwitchTable in v1; per-JMP attribution is a v2 concern (would need to re-decode + tag each indirect JMP).
+
+### Notes
+- Default-case recovery deferred — the "default" branch of a switch is the fall-through after the dispatch JMP, not modeled in v1.
+- C++ exception-unwind tables (`.gcc_except_table`) are NOT switches — they use similar relative-offset encodings but encode different semantics; correctly not flagged here.
+
+### Tests
+- 260 → **265 tests** (+5). Confidence classification at all 3 levels (high / medium / low for single-target case), 3-group report formatting, empty-tables message.
+
+---
+
 ## [5.33.1] — 2026-05-01
 
 ### Fixed
