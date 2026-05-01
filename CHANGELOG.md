@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.52.0] — 2026-05-01
+
+### Added (FLOSS heuristic decoder-function scorer + stackstrings-quick)
+- **New `decoder-find` action** (aliases: `decoders`, `find-decoders`, `string-decoder-id`, `decoder-scan`). Per-function CFG-feature scorer ported from FLARE FLOSS `floss/identify.py`. Pure-static — FLOSS's emulation pipeline stays out of scope.
+- **Feature set**: tight loops (BB→self), kinda-tight loops (a→c→a), non-zeroing XOR (filtered against MS security cookies), shifts/rotates, register-deref MOVs, basic-block / instruction counts, in-degree (calls-to), SCC loops. Combined-feature flags (NzxorTightLoop / NzxorLoop / TightFunction) carry SEVERE weight.
+- **New `EntityKind::DecoderCandidate`** (39th EntityKind) with attrs: function_address, function_name, score (0.0-1.0), features, confidence (high ≥ 0.6 / medium ≥ 0.4 / low ≥ 0.3), block_count, instruction_count.
+- **New `stackstrings-quick` action** (aliases: `stackstrings`, `stack-strings`, `ss-quick`). Pure-static byte-pattern scan of .text for amd64+i386 cmp/mov-immediate sequences whose immediates decode as printable strings.
+- **Completes the malware-triage trio**: anti-analysis ("is this malware?") + crypto-const ("what crypto?") + decoder-find ("where are the string decoders?").
+
+### Tests
+- 460 → **480 tests** (+20).
+
+---
+
 ## [5.51.0] — 2026-05-01
 
 ### Added (Ship 5 #13 — capa-rules YAML loader, file-scope subset)

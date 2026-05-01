@@ -56,6 +56,8 @@ pub mod signsrch;
 pub mod yara_scan;
 pub mod peid;
 pub mod capa;
+pub mod decoder_find;
+pub mod stackstrings_quick;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -354,6 +356,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // capa-rules YAML loader (5.51.0 — Ship 5 #13). 1,045 vendored
         // Apache-2.0 capa rules; file-scope subset only in v1.
         "capa-scan" | "capa" | "capabilities" | "capa-rules" => Ok(capa::capa_scan(graph, target)),
+        // Decoder-function finder (5.52.0). FLOSS heuristic v1.
+        "decoder-find" | "decoders" | "find-decoders" | "string-decoder-id" | "decoder-scan" => Ok(decoder_find::decoder_find(graph, target)),
+        // Stackstrings quick-regex pass (5.52.0).
+        "stackstrings-quick" | "stackstrings" | "stack-strings" | "ss-quick" => Ok(stackstrings_quick::stackstrings_quick(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

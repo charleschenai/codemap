@@ -616,6 +616,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         YaraMatch         => "shape=ellipse, fillcolor=\"#ffd54f\", style=filled, fontsize=9",
         Packer            => "shape=doubleoctagon, fillcolor=\"#ffab91\", style=filled, fontsize=10",
         CapaMatch         => "shape=cds, fillcolor=\"#ffcc80\", style=filled, fontsize=10",
+        DecoderCandidate  => "shape=Mdiamond, fillcolor=\"#ce93d8\", style=filled, fontsize=10",
     }
 }
 
@@ -781,6 +782,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         YaraMatch         => "yara_match",
         Packer            => "packer",
         CapaMatch         => "capa_match",
+        DecoderCandidate  => "decoder",
     }
 }
 

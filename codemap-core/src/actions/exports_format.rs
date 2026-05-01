@@ -187,6 +187,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             YaraMatch         => (255, 213,  79),
             Packer            => (255, 171, 145),
             CapaMatch         => (255, 204, 128),
+            DecoderCandidate  => (206, 147, 216),
         }
     }
 
