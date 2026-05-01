@@ -612,6 +612,8 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         ComClass          => "shape=component, fillcolor=\"#90caf9\", style=filled, fontsize=10",
         ComInterface      => "shape=parallelogram, fillcolor=\"#b39ddb\", style=filled, fontsize=10",
         BinaryFingerprint => "shape=note, fillcolor=\"#f48fb1\", style=filled, fontsize=10",
+        YaraRule          => "shape=note, fillcolor=\"#fff176\", style=filled, fontsize=10",
+        YaraMatch         => "shape=ellipse, fillcolor=\"#ffd54f\", style=filled, fontsize=9",
     }
 }
 
@@ -773,6 +775,8 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         ComClass          => "com_class",
         ComInterface      => "com_interface",
         BinaryFingerprint => "fingerprint",
+        YaraRule          => "yara_rule",
+        YaraMatch         => "yara_match",
     }
 }
 

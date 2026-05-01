@@ -340,6 +340,30 @@ pub enum EntityKind {
     /// filter on `name` finds binaries handling specific shell /
     /// scripting / office automation interfaces.
     ComInterface,
+    /// YARA rule loaded by `yara-scan`. One node per rule
+    /// in the user-supplied corpus (capa-rules-yara, signature-base,
+    /// findcrypt3, signsrch-derived, custom). Edges: yara_rule →
+    /// yara_match (each match anchored to a target). attrs: name
+    /// (rule identifier), namespace (compiler namespace, "default"
+    /// if unspecified), tags (comma-joined), source_file (the .yar
+    /// path), meta_* (rule meta fields prefixed). Killer queries:
+    /// `pagerank --type yara_rule` finds the most-fired rules across
+    /// a binary corpus; `meta-path "yara_rule->yara_match"`
+    /// enumerates per-rule activity.
+    YaraRule,
+    /// Match emitted by `yara-scan` when a YaraRule fires on a
+    /// target. Edges: binary → yara_match ← yara_rule. attrs:
+    /// rule_name, namespace, target (the binary path), section
+    /// (PE/ELF/Mach-O section name when scanned per-section,
+    /// "<whole>" otherwise), offset (file offset within the section
+    /// or buffer), virtual_address (translated VA when section has
+    /// VA mapping; "" otherwise), pattern_id (`$a`/`$str1`/etc.),
+    /// match_len (length of the matched bytes), preview (first 32
+    /// bytes hex-escaped, ASCII where possible). Killer queries:
+    /// `meta-path "pe->yara_match"` enumerates rule hits per
+    /// binary; attribute filter on `rule_name` extracts every
+    /// hit of a specific rule.
+    YaraMatch,
 }
 
 impl EntityKind {
@@ -387,6 +411,8 @@ impl EntityKind {
             EntityKind::ComClass => "com_class",
             EntityKind::ComInterface => "com_interface",
             EntityKind::BinaryFingerprint => "fingerprint",
+            EntityKind::YaraRule => "yara_rule",
+            EntityKind::YaraMatch => "yara_match",
         }
     }
 
@@ -436,6 +462,8 @@ impl EntityKind {
             "com_class" | "comclass" | "clsid" | "comcls" => EntityKind::ComClass,
             "com_interface" | "cominterface" | "iid" | "comif" | "com_iface" | "interface" => EntityKind::ComInterface,
             "fingerprint" | "binary_fingerprint" | "binaryfingerprint" | "die" | "packer-tag" | "die-tag" => EntityKind::BinaryFingerprint,
+            "yara_rule" | "yararule" | "yararules" | "yara-rule" | "rule" => EntityKind::YaraRule,
+            "yara_match" | "yaramatch" | "yara-match" | "yhit" | "yara_hit" => EntityKind::YaraMatch,
             _ => return None,
         })
     }

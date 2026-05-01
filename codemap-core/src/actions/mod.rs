@@ -53,6 +53,7 @@ pub mod apk_fingerprint;
 pub mod endpoint_enrich;
 pub mod elf_os;
 pub mod signsrch;
+pub mod yara_scan;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -341,6 +342,9 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
             => Ok(endpoint_enrich::lolbin_scan(graph, target)),
         // ELF OS detection cascade (5.46.0 — Ship 5 #2).
         "elf-os" | "os" | "detect-os" => Ok(elf_os::elf_os(graph, target)),
+        // YARA scanner (5.48.0). Generic runtime engine for any
+        // user-supplied YARA corpus. Pure-Rust via yara-x.
+        "yara-scan" | "yara" | "yara-rules" => Ok(yara_scan::yara_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

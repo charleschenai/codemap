@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.48.0] — 2026-05-01
+
+### Added (yara-x integration + `yara-scan` action + per-section scan)
+- **New `yara-scan` action** (aliases: `yara`, `yara-rules`). Generic runtime engine for any user-supplied YARA corpus (capa-rules, signature-base, findcrypt3, signsrch-derived, custom). Pure-Rust via `yara-x` (BSD-3, official VirusTotal port — no libyara C-FFI).
+- **Per-section scan** translates match offsets to virtual addresses using each section's `VirtualAddress` / `sh_addr` / `vmaddr`. Skips noise sections (`.rsrc`, `.reloc`, `.bss`, `.idata`).
+- **New `EntityKind::YaraRule` + `YaraMatch`**.
+- **Skips `import "cuckoo"` rules** silently (dynamic-analysis context, always false in static-only operation).
+
+### Tests
+- 380 → **400 tests** (+20).
+
+---
+
 ## [5.47.0] — 2026-05-01
 
 ### Added (Ship 2 #11 — signsrch corpus port)

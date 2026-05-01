@@ -183,6 +183,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             ComClass          => (144, 202, 249),
             ComInterface      => (179, 157, 219),
             BinaryFingerprint => (244, 143, 177),
+            YaraRule          => (255, 241, 118),
+            YaraMatch         => (255, 213,  79),
         }
     }
 
