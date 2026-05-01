@@ -43,6 +43,8 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod decoder_find;
+pub mod stackstrings_quick;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +305,15 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // Decoder-function finder (5.38.0). FLOSS heuristic v1: per-
+        // function CFG-feature scorer that ranks every function by
+        // "looks like a string decoder". Pure-static port — FLOSS's
+        // emulation pipeline stays out of scope.
+        "decoder-find" | "decoders" | "find-decoders" | "string-decoder-id" | "decoder-scan" => Ok(decoder_find::decoder_find(graph, target)),
+        // Stackstrings quick-regex pass (5.38.0). Pure-static byte-
+        // pattern scan of .text for amd64 + i386 cmp/mov-immediate
+        // sequences whose immediates decode as printable strings.
+        "stackstrings-quick" | "stackstrings" | "stack-strings" | "ss-quick" => Ok(stackstrings_quick::stackstrings_quick(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

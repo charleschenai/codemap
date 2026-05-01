@@ -302,6 +302,29 @@ pub enum EntityKind {
     /// vtable` ranks the most-shared vtables; `meta-path
     /// "vtable->bin_func"` enumerates virtual methods per class.
     VTable,
+    /// Decoder-function candidate (Ship from FLOSS port, heuristic v1).
+    /// Per-function CFG-feature scorer ported from Mandiant's FLARE
+    /// FLOSS `floss/identify.py` + `floss/features/`. Pure-static —
+    /// FLOSS's emulation pipeline is OFF-LIMITS for codemap. Each
+    /// non-thunk, non-runtime function gets a weighted score in
+    /// [0.0, 1.0] from the presence of: tight loops (BB→self),
+    /// "kinda-tight" loops (a→c→a), non-zeroing XOR (filtered
+    /// against MS security cookies), shifts/rotates, register-deref
+    /// MOVs, basic-block / instruction counts, in-degree (calls-to),
+    /// and SCC loops. Combined-feature flags (NzxorTightLoop /
+    /// NzxorLoop / TightFunction) carry SEVERE weight when any
+    /// non-zeroing XOR sits inside a tight loop. Edges: binary →
+    /// decoder → bin_func (the function the candidate refers to).
+    /// attrs: function_address, function_name, score (0.0-1.0),
+    /// features (comma-joined feature names), confidence
+    /// (high ≥ 0.6, medium ≥ 0.4, low ≥ 0.3), block_count,
+    /// instruction_count. Killer queries: `pagerank --type
+    /// decoder` ranks string-decoder candidates across binaries;
+    /// `meta-path "pe->decoder->bin_func"` finds where the actual
+    /// decoder code lives — load-bearing first step for hunting
+    /// C2 URLs / config blobs / decryption keys in obfuscated
+    /// malware samples.
+    DecoderCandidate,
 }
 
 impl EntityKind {
@@ -346,6 +369,7 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::DecoderCandidate => "decoder",
         }
     }
 
@@ -392,6 +416,7 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "decoder" | "decoder_candidate" | "decoder-candidate" | "string_decoder" | "string-decoder" | "deobf" => EntityKind::DecoderCandidate,
             _ => return None,
         })
     }

@@ -6,6 +6,130 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added — FLOSS heuristic decoder-function scorer + stackstrings-quick
+
+Pure-static port of Mandiant FLARE FLOSS's decoder-function scorer
+(`floss/identify.py`, `floss/features/extract.py`,
+`floss/features/features.py`). FLOSS's headline emulation pipeline
+(vivisect + memory diff) is OFF-LIMITS for codemap (static-only); this
+ports the salvageable static half end-to-end.
+
+- **New `decoder-find` action** (aliases: `decoders`, `find-decoders`,
+  `string-decoder-id`, `decoder-scan`). Per-function CFG-feature scorer
+  that ranks every function in a PE/ELF binary by "looks like a string
+  decoder." Threshold = 0.30 weighted score.
+- **New `EntityKind::DecoderCandidate`** (aliases: `decoder`,
+  `decoder_candidate`, `string_decoder`, `deobf`). Edges:
+  `binary → decoder → bin_func`. attrs: `function_address`,
+  `function_name`, `score`, `confidence` (high ≥ 0.6 / medium ≥ 0.4
+  / low ≥ 0.3), `block_count`, `instruction_count`, `nzxor_count`,
+  `shift_count`, `mov_count`, `calls_to`, `features`.
+- **Self-contained basic-block CFG construction.** Builds a per-function
+  CFG from the iced-x86 instruction stream (Path 2 from the build
+  plan): leaders = first instr + branch targets + post-branch fall-
+  throughs. Splits BBs at conditional / unconditional / indirect
+  branches and returns. Calls do not split (matches FLOSS). When the
+  parallel `bbcfg` work lands a richer general-purpose CFG, the
+  `Cfg` struct can swap to it without touching the scorer.
+- **Per-function features (FLOSS parity):**
+  - **BlockCount** (LOW): >30 → 0.1, 3-10 → 1.0, else → 0.4.
+  - **InstructionCount** (LOW): >10 → 0.8, else → 0.1.
+  - **CallsTo** (MEDIUM): in-degree on the call graph, normalised by
+    max in-degree across all functions.
+  - **Nzxor** (HIGH): non-zeroing XOR (`xor reg, reg2` where regs
+    differ — sub-register variants normalised). Filtered against MS
+    security cookies (first/last 0x40 bytes of first/return BB
+    using ESP/EBP/RSP/RBP).
+  - **Shift** (HIGH): SHL/SHR/SAL/SAR/ROL/ROR/RCL/RCR.
+  - **Mov** (MEDIUM): `mov [reg], reg2` with no displacement and no
+    SIB index — matches FLOSS's `i386RegMemOper` filter.
+  - **TightLoop** (HIGH): basic block jumps to itself.
+  - **KindaTightLoop** (HIGH): a → c → a one-hop loop.
+  - **Loop** (MEDIUM): SCC ≥ 2 in the BB graph (Tarjan).
+  - **NzxorTightLoop / NzxorLoop / TightFunction** (SEVERE): combined
+    flags from the underlying signals.
+- **Tarjan SCC over the BB graph** with self-loop promotion (a 1-node
+  SCC with a self-edge counts as a loop, matching FLOSS's intent).
+- **Thunk + runtime-helper filtering.** Single-jmp / single-indirect-
+  jump functions are dropped as thunks. Hardcoded list of CRT / libc
+  helper names (`_chkstk`, `__security_*`, `_start`, `mainCRTStartup`,
+  `__libc_start_main`, `_init`, `_fini`, `frame_dummy`, etc.) — the
+  static substitute for FLOSS's FLIRT-based library-function filter.
+- **Cross-edge to `BinaryFunction` nodes** when `bin-disasm` has run
+  on the same target — `meta-path "pe->decoder->bin_func"` walks
+  binary → decoder candidate → actual function entry.
+
+- **New `stackstrings-quick` action** (aliases: `stackstrings`,
+  `stack-strings`, `ss-quick`). Pure-static byte-pattern scan over
+  `.text` for the classic compiler-emitted stack-string shapes —
+  amd64 `mov r64, imm64` (10-byte form), `cmp dword [reg+disp8],
+  imm32` (7-byte form); i386 `cmp r32, imm32` (6-byte), `cmp dword
+  [reg], imm32` (6-byte), `mov dword [ebp+disp8], imm32` (7-byte).
+  Emits `StringLiteral` nodes with `string_type=stackstring`,
+  `arch`, `pattern` attrs. Lower recall than FLOSS's emulation pass
+  (which actually executes the function and snapshots the stack);
+  free as a triage signal.
+
+- **Graph + export wiring.** `DecoderCandidate` gets a salmon-orange
+  `doubleoctagon` shape in DOT output (`#ffab91`), RGB
+  `(255, 171, 145)` for GEXF / Graphviz / vis.js exports.
+
+### Why this matters
+
+Combined with the existing anti-analysis scanner (5.30.0) and
+crypto-constant detector (5.31.0), this completes a malware-triage
+trio — three coordinated questions you can answer entirely statically:
+
+1. **Anti-analysis** — "Is this malware?" (rule-based detection of
+   anti-debug / anti-VM / packer / obfuscation techniques).
+2. **Crypto-const** — "What crypto does it use?" (AES/SHA/MD5/etc.
+   identified by hardcoded constants + S-boxes).
+3. **Decoder-find** — "Where are its string decoders?" (load-bearing
+   first step for finding C2 URLs, config blobs, decryption keys
+   in obfuscated samples).
+
+Nothing else on codemap's roadmap delivers decoder-find — it's a
+genuinely new RE capability gained from a clean Apache-2.0 port.
+
+### Honest limitations (v1 → v2)
+
+- **No `Arguments` feature.** FLOSS pulls argument count from
+  vivisect's `getFunctionApi`; codemap doesn't have a calling-
+  convention recovery pass. Skipping rather than approximating
+  keeps scores interpretable (no fake bias for every function).
+- **No FLIRT library filtering.** Hardcoded runtime-helper list
+  is a thin substitute; statically-linked CRT could produce
+  false positives.
+- **Intra-function only.** Inter-procedural CFG shape isn't
+  considered; each function is scored in isolation.
+- **x86 / x64 only.** ARM / AArch64 disasm uses a symbol-table-only
+  fallback (no instruction features) — `decoder-find` bails with a
+  friendly message on those targets.
+- **stackstrings-quick recall < FLOSS.** Pure-regex pre-pass; the
+  emulation-based stack snapshotting in FLOSS proper finds more.
+
+### Tests
+
+15 new unit tests (9 in `decoder_find::tests` covering CFG
+construction on a synthetic decoder, score-above-threshold for the
+synthetic function, plain-function below-threshold, MS security
+cookie filter, thunk filter, runtime-helper name filter, register
+normalisation, confidence thresholds, empty-features baseline; 6 in
+`stackstrings_quick::tests` covering amd64 `mov imm64`, i386
+`cmp r32, imm32`, i386 `mov [ebp+disp8], imm32`, garbage-immediate
+rejection, minimum-printable-bytes filter, multi-hit sliding scan).
+All 183 lib tests pass.
+
+### License + provenance
+
+FLOSS is Apache-2.0 (Willi Ballenthin + Moritz Raabe / Mandiant /
+Google FLARE). Re-implementation in Rust against iced-x86 — clean
+algorithmic port, not a source copy. codemap remains MIT.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
