@@ -215,6 +215,193 @@ const SHA384_INIT: &[u8] = &[
     0xBE, 0xFA, 0x4F, 0xA4, 0x91, 0x47, 0x8D, 0xB1,
 ];
 
+// ── Modern stream ciphers ─────────────────────────────────────────
+//
+// Salsa20 / ChaCha20 nothing-up-my-sleeve constants. Stored as ASCII
+// in the key-schedule. Both are high-confidence: 16 bytes of fixed
+// printable text never appears coincidentally.
+
+const SALSA20_EXPAND_32: &[u8] = b"expand 32-byte k";
+const SALSA20_EXPAND_16: &[u8] = b"expand 16-byte k";
+
+// Sosemanuk mul_a / mul_ia table prefixes. The full tables are 256
+// entries; the first 16 bytes are distinctive (we drop the leading
+// 4 zero bytes from the published table since they are too generic).
+// BE form is what the Sosemanuk paper publishes; LE is what x86
+// compilers store when the table is `uint32_t mul_a[256]`.
+
+const SOSEMANUK_MUL_A_BE: &[u8] = &[
+    0xE1, 0x9F, 0xCF, 0x13, 0x6B, 0x97, 0x37, 0x26,
+    0x8A, 0x08, 0xF8, 0x35,
+];
+const SOSEMANUK_MUL_A_LE: &[u8] = &[
+    0x13, 0xCF, 0x9F, 0xE1, 0x26, 0x37, 0x97, 0x6B,
+    0x35, 0xF8, 0x08, 0x8A,
+];
+const SOSEMANUK_MUL_IA_BE: &[u8] = &[
+    0x18, 0x0F, 0x40, 0xCD, 0x30, 0x1E, 0x80, 0x33,
+    0x28, 0x11, 0xC0, 0xFE,
+];
+const SOSEMANUK_MUL_IA_LE: &[u8] = &[
+    0xCD, 0x40, 0x0F, 0x18, 0x33, 0x80, 0x1E, 0x30,
+    0xFE, 0xC0, 0x11, 0x28,
+];
+
+// ── Modern PRNG ───────────────────────────────────────────────────
+
+// WellRNG512 magic: two 4-byte variants used by different reference
+// implementations (signed-int vs unsigned).
+const WELLRNG512_A: &[u8] = &[0x24, 0x2D, 0x44, 0xDA];
+const WELLRNG512_B: &[u8] = &[0x20, 0x2D, 0x44, 0xDA];
+
+// ── TEA family (block ciphers built on golden-ratio delta) ────────
+
+// TEA cumulative sum after 16 rounds: 0x9E3779B9 << 4 (low 32 bits)
+// = 0xE3779B90, stored LE = 90 9B 77 E3. Rolling-sum loops will
+// embed this as a pre-computed end-of-loop check.
+const TEA_SUM: &[u8] = &[0x90, 0x9B, 0x77, 0xE3];
+
+// XTEA two's complement of the golden-ratio delta (0x61C88647).
+// Some XTEA implementations subtract this instead of adding the
+// delta; both forms are correct.
+const XTEA_DELTA_NEG: &[u8] = &[0x47, 0x86, 0xC8, 0x61];
+
+// ── Twofish ────────────────────────────────────────────────────────
+//
+// Q0/Q1 permutation tables and MDS1-4 mix-column tables. First 16
+// bytes of each is highly distinctive (Twofish ships 1024 bytes of
+// these tables, no other algorithm uses these exact prefixes).
+
+const TWOFISH_Q0: &[u8] = &[
+    0xA9, 0x67, 0xB3, 0xE8, 0x04, 0xFD, 0xA3, 0x76,
+    0x9A, 0x92, 0x80, 0x78, 0xE4, 0xDD, 0xD1, 0x38,
+];
+const TWOFISH_Q1: &[u8] = &[
+    0x75, 0xF3, 0xC6, 0xF4, 0xDB, 0x7B, 0xFB, 0xC8,
+    0x4A, 0xD3, 0xE6, 0x6B, 0x45, 0x7D, 0xE8, 0x4B,
+];
+const TWOFISH_MDS1: &[u8] = &[
+    0x75, 0x32, 0xBC, 0xBC, 0xF3, 0x21, 0xEC, 0xEC,
+    0xC6, 0x43, 0x20, 0x20, 0xF4, 0xC9, 0xB3, 0xB3,
+];
+const TWOFISH_MDS2: &[u8] = &[
+    0x39, 0x39, 0xD9, 0xA9, 0x17, 0x17, 0x90, 0x67,
+    0x9C, 0x9C, 0x71, 0xB3, 0xA6, 0xA6, 0xD2, 0xE8,
+];
+const TWOFISH_MDS3: &[u8] = &[
+    0x32, 0xBC, 0x75, 0xBC, 0x21, 0xEC, 0xF3, 0xEC,
+    0x43, 0x20, 0xC6, 0x20, 0xC9, 0xB3, 0xF4, 0xB3,
+];
+const TWOFISH_MDS4: &[u8] = &[
+    0xD9, 0xA9, 0x39, 0xD9, 0x90, 0x67, 0x17, 0x90,
+    0x71, 0xB3, 0x9C, 0x71, 0xD2, 0xE8, 0xA6, 0xD2,
+];
+
+// ── Camellia ───────────────────────────────────────────────────────
+//
+// 6 sigma constants (8 bytes each LE, 48 bytes total) packed
+// contiguously. Reference implementations (libgcrypt, OpenSSL,
+// Crypto++) all store these as a contiguous 48-byte block — high
+// confidence single match.
+
+const CAMELLIA_SIGMA_LE: &[u8] = &[
+    0x8B, 0x90, 0xCC, 0x3B, 0x7F, 0x66, 0x9E, 0xA0, // sigma1
+    0xB2, 0x73, 0xAA, 0x4C, 0x58, 0xE8, 0x7A, 0xB6, // sigma2
+    0xBE, 0x82, 0x4F, 0xE9, 0x2F, 0x37, 0xEF, 0xC6, // sigma3
+    0x1C, 0x6F, 0xD3, 0xF1, 0xA5, 0x53, 0xFF, 0x54, // sigma4
+    0x1D, 0x2D, 0x68, 0xDE, 0xFA, 0x27, 0xE5, 0x10, // sigma5
+    0xFD, 0xC1, 0xE6, 0xB3, 0xC2, 0x88, 0x56, 0xB0, // sigma6
+];
+
+// Camellia first sigma alone (sigma1 = SHA-512 H0 fragment).
+// Used when only one sigma is statically present (some compilers
+// load them indirectly).
+const CAMELLIA_SIGMA1: &[u8] = &[
+    0x8B, 0x90, 0xCC, 0x3B, 0x7F, 0x66, 0x9E, 0xA0,
+];
+
+// ── SkipJack ───────────────────────────────────────────────────────
+//
+// F-table first 16 bytes. The full F-table is 256 bytes and is the
+// only large constant in the algorithm.
+
+const SKIPJACK_F_TABLE: &[u8] = &[
+    0xA3, 0xD7, 0x09, 0x83, 0xF8, 0x48, 0xF6, 0xF4,
+    0xB3, 0x21, 0x15, 0x78, 0x99, 0xB1, 0xAF, 0xF9,
+];
+
+// ── Base64 ─────────────────────────────────────────────────────────
+//
+// Standard alphabet (64 ASCII chars) — present in any code that
+// emits base64 with a hand-rolled table.
+
+const BASE64_ALPHABET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+// Base64 dword translation table (variant 1: little-endian dword
+// per char-code, 1024 bytes total). Distinctive 24-byte slice from
+// the middle: indices 0x3E='+' = 0x3E, 0x3F='/' = 0x3F, 0x30..0x39
+// = 0x34..0x3D. The "FF FF FF FF" filler bytes between are the
+// "invalid char" sentinel.
+const BASE64_DWORD_TABLE_V1: &[u8] = &[
+    0x3E, 0x00, 0x00, 0x00,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x3F, 0x00, 0x00, 0x00,
+    0x34, 0x00, 0x00, 0x00,
+];
+
+// Base64 byte translation table (variant 2: 256 bytes total, packed).
+// "3E FF FF FF 3F 34 35 36 37 38 39 3A 3B 3C 3D" is unique to b64.
+const BASE64_BYTE_TABLE_V2: &[u8] = &[
+    0x3E, 0xFF, 0xFF, 0xFF,
+    0x3F, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D,
+];
+
+// ── Prime tables (findcrypt3 _pusher_ rules) ──────────────────────
+//
+// 54 single-byte primes 3..251. Indicates RNG / Miller-Rabin
+// presence. Long-form variant is the same primes promoted to u32
+// little-endian (so each prime is followed by 3 zero bytes).
+
+const PRIME_CONST_CHAR: &[u8] = &[
+    0x03, 0x05, 0x07, 0x0B, 0x0D, 0x11, 0x13, 0x17,
+    0x1D, 0x1F, 0x25, 0x29, 0x2B, 0x2F, 0x35, 0x3B,
+    0x3D, 0x43, 0x47, 0x49, 0x4F, 0x53, 0x59, 0x61,
+    0x65, 0x67, 0x6B, 0x6D, 0x71, 0x7F, 0x83, 0x89,
+    0x8B, 0x95, 0x97, 0x9D, 0xA3, 0xA7, 0xAD, 0xB3,
+    0xB5, 0xBF, 0xC1, 0xC5, 0xC7, 0xD3, 0xDF, 0xE3,
+    0xE5, 0xE9, 0xEF, 0xF1, 0xFB,
+];
+
+// First 8 primes as LE u32 = 32-byte distinctive prefix.
+const PRIME_CONST_LONG: &[u8] = &[
+    0x03, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
+    0x07, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
+    0x0D, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00,
+    0x13, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00,
+];
+
+// ── CRC-16 CCITT ──────────────────────────────────────────────────
+//
+// First 16 entries of the CCITT table (poly 0x1021), little-endian
+// u16. 32 distinctive bytes — CRC tables for other polynomials use
+// completely different lead values.
+
+const CRC16_CCITT_TABLE_LE: &[u8] = &[
+    0x00, 0x00, 0x21, 0x10, 0x42, 0x20, 0x63, 0x30,
+    0x84, 0x40, 0xA5, 0x50, 0xC6, 0x60, 0xE7, 0x70,
+    0x08, 0x81, 0x29, 0x91, 0x4A, 0xA1, 0x6B, 0xB1,
+    0x8C, 0xC1, 0xAD, 0xD1, 0xCE, 0xE1, 0xEF, 0xF1,
+];
+
+// ── Notes on signatures we DON'T add ─────────────────────────────
+//
+// SPECK / CHASKEY: Both are ARX-based ciphers with no large fixed
+// tables and no algorithm-unique constants — capa identifies them
+// purely via mnemonic + rotation-amount patterns (`rol 3`, `ror 8`,
+// `rol 7`, `rol 2`). These belong in the future propagator-based
+// detector, not in byte-pattern scanning.
+
 // ── The signature catalog ──────────────────────────────────────────
 
 const SIGS: &[Sig] = &[
@@ -262,6 +449,76 @@ const SIGS: &[Sig] = &[
           endian: Endian::Both, confidence: Confidence::High },
     Sig { name: "substitution table prefix", algorithm: "MD2", bytes: MD2_SUBST_PREFIX,
           endian: Endian::Both, confidence: Confidence::High },
+
+    // Modern stream ciphers.
+    Sig { name: "expand 32-byte k (nothing-up-my-sleeve)", algorithm: "Salsa20/ChaCha20",
+          bytes: SALSA20_EXPAND_32, endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "expand 16-byte k (nothing-up-my-sleeve)", algorithm: "Salsa20/ChaCha20",
+          bytes: SALSA20_EXPAND_16, endian: Endian::Le, confidence: Confidence::High },
+
+    // Sosemanuk.
+    Sig { name: "mul_a table prefix (BE)", algorithm: "Sosemanuk", bytes: SOSEMANUK_MUL_A_BE,
+          endian: Endian::Be, confidence: Confidence::High },
+    Sig { name: "mul_a table prefix (LE)", algorithm: "Sosemanuk", bytes: SOSEMANUK_MUL_A_LE,
+          endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "mul_ia table prefix (BE)", algorithm: "Sosemanuk", bytes: SOSEMANUK_MUL_IA_BE,
+          endian: Endian::Be, confidence: Confidence::High },
+    Sig { name: "mul_ia table prefix (LE)", algorithm: "Sosemanuk", bytes: SOSEMANUK_MUL_IA_LE,
+          endian: Endian::Le, confidence: Confidence::High },
+
+    // WellRNG512.
+    Sig { name: "magic constant 0xDA442D24", algorithm: "WellRNG512", bytes: WELLRNG512_A,
+          endian: Endian::Le, confidence: Confidence::Medium },
+    Sig { name: "magic constant 0xDA442D20", algorithm: "WellRNG512", bytes: WELLRNG512_B,
+          endian: Endian::Le, confidence: Confidence::Medium },
+
+    // TEA cumulative sum + XTEA negative delta.
+    Sig { name: "cumulative sum 0xE3779B90 (16 rounds)", algorithm: "TEA",
+          bytes: TEA_SUM, endian: Endian::Le, confidence: Confidence::Low },
+    Sig { name: "delta 0x61C88647 (two's complement)", algorithm: "XTEA",
+          bytes: XTEA_DELTA_NEG, endian: Endian::Le, confidence: Confidence::Medium },
+
+    // Twofish.
+    Sig { name: "Q0 permutation prefix", algorithm: "Twofish", bytes: TWOFISH_Q0,
+          endian: Endian::Both, confidence: Confidence::High },
+    Sig { name: "Q1 permutation prefix", algorithm: "Twofish", bytes: TWOFISH_Q1,
+          endian: Endian::Both, confidence: Confidence::High },
+    Sig { name: "MDS1 column prefix", algorithm: "Twofish", bytes: TWOFISH_MDS1,
+          endian: Endian::Both, confidence: Confidence::High },
+    Sig { name: "MDS2 column prefix", algorithm: "Twofish", bytes: TWOFISH_MDS2,
+          endian: Endian::Both, confidence: Confidence::High },
+    Sig { name: "MDS3 column prefix", algorithm: "Twofish", bytes: TWOFISH_MDS3,
+          endian: Endian::Both, confidence: Confidence::High },
+    Sig { name: "MDS4 column prefix", algorithm: "Twofish", bytes: TWOFISH_MDS4,
+          endian: Endian::Both, confidence: Confidence::High },
+
+    // Camellia.
+    Sig { name: "sigma1..6 block (LE)", algorithm: "Camellia", bytes: CAMELLIA_SIGMA_LE,
+          endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "sigma1 (LE)", algorithm: "Camellia", bytes: CAMELLIA_SIGMA1,
+          endian: Endian::Le, confidence: Confidence::Medium },
+
+    // SkipJack.
+    Sig { name: "F-table prefix", algorithm: "SkipJack", bytes: SKIPJACK_F_TABLE,
+          endian: Endian::Both, confidence: Confidence::High },
+
+    // Base64.
+    Sig { name: "standard alphabet (A-Za-z0-9+/)", algorithm: "Base64",
+          bytes: BASE64_ALPHABET, endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "dword translation table (LE u32)", algorithm: "Base64-DwordTable",
+          bytes: BASE64_DWORD_TABLE_V1, endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "byte translation table (packed)", algorithm: "Base64-ByteTable",
+          bytes: BASE64_BYTE_TABLE_V2, endian: Endian::Le, confidence: Confidence::High },
+
+    // Prime tables (RNG / Miller-Rabin / big-int factoring presence).
+    Sig { name: "primes 3..251 (single-byte)", algorithm: "Prime-Table",
+          bytes: PRIME_CONST_CHAR, endian: Endian::Le, confidence: Confidence::High },
+    Sig { name: "primes 3..23 (LE u32)", algorithm: "Prime-Table",
+          bytes: PRIME_CONST_LONG, endian: Endian::Le, confidence: Confidence::High },
+
+    // CRC-16 CCITT.
+    Sig { name: "lookup-table prefix (poly 0x1021)", algorithm: "CRC-16-CCITT",
+          bytes: CRC16_CCITT_TABLE_LE, endian: Endian::Both, confidence: Confidence::High },
 ];
 
 // ── Action ─────────────────────────────────────────────────────────
@@ -483,9 +740,85 @@ mod tests {
         use std::collections::HashSet;
         let algos: HashSet<&str> = SIGS.iter().map(|s| s.algorithm).collect();
         for expected in ["MD5", "SHA-1", "SHA-256", "SHA-512", "AES", "DES", "Blowfish",
-                          "CRC-32", "RC6", "TEA/XTEA", "Whirlpool"] {
+                          "CRC-32", "RC6", "TEA/XTEA", "Whirlpool",
+                          // Modern stream ciphers + block ciphers added in 5.38.0
+                          "Salsa20/ChaCha20", "Sosemanuk", "WellRNG512", "TEA", "XTEA",
+                          "Twofish", "Camellia", "SkipJack",
+                          "Base64", "Base64-DwordTable", "Prime-Table", "CRC-16-CCITT"] {
             assert!(algos.contains(expected), "missing signature for {expected}");
         }
+    }
+
+    #[test]
+    fn finds_chacha20_expand_32_byte_k() {
+        let mut data = vec![0u8; 0x100];
+        data[0x40..0x50].copy_from_slice(b"expand 32-byte k");
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Salsa20/ChaCha20"
+                                        && m.offset == 0x40),
+            "expected Salsa20/ChaCha20 hit at 0x40, got {:?}",
+            matches.iter().map(|m| (m.algorithm, m.offset)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn finds_twofish_q0_table_prefix() {
+        let mut data = vec![0u8; 0x100];
+        data[0x20..0x30].copy_from_slice(TWOFISH_Q0);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Twofish"
+                                        && m.name.starts_with("Q0")));
+    }
+
+    #[test]
+    fn finds_camellia_sigma_block() {
+        let mut data = vec![0u8; 0x200];
+        data[0x80..0x80 + CAMELLIA_SIGMA_LE.len()].copy_from_slice(CAMELLIA_SIGMA_LE);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Camellia"
+                                        && m.name.contains("sigma1..6")));
+    }
+
+    #[test]
+    fn finds_skipjack_f_table() {
+        let mut data = vec![0u8; 0x100];
+        data[0x10..0x20].copy_from_slice(SKIPJACK_F_TABLE);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "SkipJack"));
+    }
+
+    #[test]
+    fn finds_base64_standard_alphabet() {
+        let mut data = vec![0u8; 0x100];
+        data[0x10..0x10 + BASE64_ALPHABET.len()].copy_from_slice(BASE64_ALPHABET);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Base64"
+                                        && m.name.contains("alphabet")));
+    }
+
+    #[test]
+    fn finds_sosemanuk_mul_a_le_table() {
+        let mut data = vec![0u8; 0x100];
+        data[0x40..0x4C].copy_from_slice(SOSEMANUK_MUL_A_LE);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Sosemanuk"
+                                        && m.name.contains("mul_a")));
+    }
+
+    #[test]
+    fn finds_prime_constants_char() {
+        let mut data = vec![0u8; 0x200];
+        data[0x80..0x80 + PRIME_CONST_CHAR.len()].copy_from_slice(PRIME_CONST_CHAR);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "Prime-Table"
+                                        && m.name.contains("single-byte")));
+    }
+
+    #[test]
+    fn finds_crc16_ccitt_table_prefix() {
+        let mut data = vec![0u8; 0x100];
+        data[0x20..0x40].copy_from_slice(CRC16_CCITT_TABLE_LE);
+        let matches = scan(&data);
+        assert!(matches.iter().any(|m| m.algorithm == "CRC-16-CCITT"));
     }
 
     #[test]

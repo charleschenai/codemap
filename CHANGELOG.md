@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (crypto-const expansion — modern stream ciphers + extras)
+- **+25 new signatures in `crypto_const.rs SIGS`**, +12 algorithm names. Crypto-const catalog grew from 22 entries / 11 algorithms to 47 entries / 23 algorithms. Closes the largest gap: modern stream ciphers were previously invisible to codemap.
+- **Modern stream ciphers — Salsa20 / ChaCha20.** "expand 32-byte k" and "expand 16-byte k" nothing-up-my-sleeve constants. Heavily used in current ransomware key derivation, modern VPNs, TLS 1.3 cipher suites. Confidence: high (16 ASCII bytes never coincidental).
+- **Sosemanuk** (eSTREAM finalist). `mul_a` and `mul_ia` table prefixes — both BE (paper layout) and LE (compiled layout) variants. Distinctive 12-byte non-zero suffix per table. Used by Maze ransomware affiliate tooling.
+- **WellRNG512.** Two 4-byte magic constants (0xDA442D24, 0xDA442D20) covering both signed and unsigned reference implementations.
+- **TEA family.** TEA cumulative sum constant 0xE3779B90 (= delta × 16) and XTEA two's complement delta 0x61C88647. Distinguishes TEA / XTEA / XXTEA variants.
+- **Twofish.** Q0/Q1 permutation table prefixes + MDS1-4 mix-column table prefixes (6 × 16 bytes). All high-confidence — these are unique to Twofish.
+- **Camellia.** Combined sigma1..6 contiguous 48-byte block (libgcrypt / OpenSSL / Crypto++ shared layout) + standalone sigma1 fallback for indirect-load compilers.
+- **SkipJack.** F-table first 16 bytes (the only large constant in the algorithm).
+- **Base64.** Standard alphabet (64 ASCII chars) + dword-translation-table (variant 1, LE u32 form) + byte-translation-table (variant 2, packed 256-byte form). `Base64-DwordTable` / `Base64-ByteTable` are separate algorithm names so analysts can tell rolled-their-own implementations apart from libc.
+- **Prime tables (findcrypt3 _pusher_ rules).** 54 single-byte primes 3..251 + LE u32 promoted variant. Indicates Miller-Rabin / RSA / big-int factoring presence.
+- **CRC-16 CCITT.** First 16 entries of the standard table (poly 0x1021), little-endian u16. Distinctive 32-byte prefix.
+- **+8 unit tests** (one per major new algorithm) covering ChaCha20 expand-32, Twofish Q0, Camellia sigma block, SkipJack F-table, Base64 alphabet, Sosemanuk mul_a LE, prime char-table, CRC-16 CCITT.
+
+### Honest non-additions (documented in source)
+- **SPECK / CHASKEY.** Both are ARX-based ciphers with no large fixed tables and no algorithm-unique byte constants — capa identifies them via mnemonic + rotation-amount patterns (`rol 3` / `ror 8` / `rol 7` / `rol 2`). They belong in the future propagator-based detector, not in byte-pattern scanning. Comment in `crypto_const.rs` documents this.
+
+### Coordination note
+A separate work-stream (`signsrch` pane) is integrating the full signsrch.xml corpus (~2,338 patterns). This expansion is intentionally complementary — it focuses on modern algorithms (≥ 2020) that signsrch.xml (vintage 2017) does not cover, plus algorithms (Twofish / Camellia / SkipJack / WellRNG512) that capa-rules covers but legacy crypto_const did not.
+
+### Tests
+- 283 → **291 tests** (+8). All existing tests stay green.
+
+### Source data attribution
+All signature bytes are algorithm constants (facts) re-derived from public references: capa-rules `data-manipulation/encryption/*.yml` (Apache 2.0), findcrypt3.rules (used as documentation only, not copied), original algorithm specifications (Salsa20 / ChaCha20 / Sosemanuk / Twofish / Camellia / SkipJack RFCs and papers). No GPL source code was incorporated.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
