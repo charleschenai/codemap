@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.37.0] — 2026-05-01
+
+### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)
+- **New `vtable-detect` action** (aliases: `vtables`, `find-vtables`, `vftable`). Recovers C++ virtual function tables from compiled binaries by scanning data sections for runs of N consecutive pointer-sized values whose targets all land at known function entry points.
+- **Pure structural pattern** — no Itanium ABI / MSVC COL parsing in v1. Runs that look like vtables get flagged as such; class-name extraction from RTTI typeinfo is the natural v2 follow-on.
+- **New `EntityKind::VTable`** (aliases: `vtable`, `vftable`, `v_table`, `virtual_table`, `vmt`). Each candidate becomes a graph node attached to the binary, with edges to each virtual method (function entry).
+- **Section scanning logic:**
+  - **PE:** all non-executable sections except `.idata`, `.reloc`, `.pdata`, `.xdata`.
+  - **ELF:** all sections that have `SHF_ALLOC` set, lack `SHF_EXECINSTR`, are not `SHT_NOBITS`, and aren't `.plt`/`.got`/`.eh_frame`/`.dyn*`/`.symtab`/`.strtab`/etc. (those produce too many false positives without specialized handling).
+- **Confidence levels:**
+  - **High** — ≥ 4 consecutive function-entry pointers.
+  - **Medium** — 2-3.
+  - **Low** — found in `.init_array` / `.fini_array` (always tagged low because constructor/destructor arrays look like vtables).
+
+### Honest limitations (v1 → v2)
+- **No class-name recovery.** Itanium vtable typeinfo + MSVC RTTI Type Descriptor parsing both deferred. v1 surfaces "this binary has 47 vtables at these addresses with these methods"; v2 will add "vtable for `class Foo` with `Foo::~Foo()` / `Foo::doStuff()` / etc."
+- **MSVC COL header skipped.** MSVC vtables have a COL pointer 8 bytes before the first virtual method; the scanner won't anchor on that and may emit the vtable shifted by one slot. Manageable for now.
+- **Multi-inheritance virtual base detection limited.** VBR vtables have 3-pointer headers and the run heuristic might split them across two candidates.
+- **Constructor/destructor arrays produce noise.** Tagged "low" confidence so analysts can filter them out.
+
+### Architectural milestone — Ship 4 complete (with v1 caveats)
+Ship 4 (C++ Class Hierarchy) shipped as 2 separate releases today:
+- 5.34.0 — #24 switch table recovery
+- 5.37.0 — #19 vtable detector (heuristic v1)
+
+#19 v2 (RTTI typeinfo parsing for class-name recovery) is the most-promising follow-on; everything structural is in place.
+
+### Tests
+- 277 → **283 tests** (+6). Confidence-level mapping (incl. init_array carve-out), 64-bit + 32-bit pointer reading, scan finds consecutive function-pointer runs, correctly ignores runs below MIN_VIRTUAL_METHODS, empty-tables report.
+
+---
+
 ## [5.36.0] — 2026-05-01
 
 ### Added (Ship 3 #6 — opaque-predicate detector, heuristic v1)

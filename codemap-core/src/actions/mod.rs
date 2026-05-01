@@ -42,6 +42,7 @@ pub mod crypto_loops;
 pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
+pub mod vtable_detect;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -298,6 +299,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // matches cmp reg,reg + Jcc and xor-then-test patterns within
         // 3 instructions of a Jcc. Real Blazytko port = v2.
         "opaque-pred" | "opaque-predicate" | "find-opaque" | "junk-control" => Ok(opaque_pred::opaque_pred(graph, target)),
+        // VTable detector (5.37.0 — Ship 4 #19). Heuristic v1: scans
+        // data sections for runs of consecutive function-entry
+        // pointers. Itanium / MSVC RTTI parsing = v2.
+        "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

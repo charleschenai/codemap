@@ -179,6 +179,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             CryptoConstant    => (255, 245, 157),
             CudaKernel        => (118, 185,   0), // NVIDIA green
             SwitchTable       => (179, 157, 219),
+            VTable            => (128, 203, 196),
         }
     }
 

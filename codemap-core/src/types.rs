@@ -289,6 +289,19 @@ pub enum EntityKind {
     /// dispatchers in a binary; `meta-path source->switch_table`
     /// enumerates dispatcher-style code patterns.
     SwitchTable,
+    /// C++ virtual function table (Ship 4 #19, heuristic v1).
+    /// Detected by scanning data sections for runs of N consecutive
+    /// pointer-sized values whose targets all land at function
+    /// entries inside `.text`. Pure structural pattern — doesn't
+    /// parse Itanium / MSVC RTTI metadata for v1. Edges:
+    /// binary → vtable → bin_func (one edge per virtual method).
+    /// attrs: vtable_address, virtual_count, first_method (hex VA),
+    /// section (containing data-section name), confidence (high if
+    /// ≥ 4 consecutive function-entry pointers, medium if 2-3,
+    /// not flagged below 2). Killer queries: `pagerank --type
+    /// vtable` ranks the most-shared vtables; `meta-path
+    /// "vtable->bin_func"` enumerates virtual methods per class.
+    VTable,
 }
 
 impl EntityKind {
@@ -332,6 +345,7 @@ impl EntityKind {
             EntityKind::CryptoConstant => "crypto",
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
+            EntityKind::VTable => "vtable",
         }
     }
 
@@ -377,6 +391,7 @@ impl EntityKind {
             "crypto" | "cryptoconst" | "crypto-const" | "cryptographic" => EntityKind::CryptoConstant,
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
+            "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
             _ => return None,
         })
     }
