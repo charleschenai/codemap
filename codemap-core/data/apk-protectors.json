@@ -1,0 +1,431 @@
+{
+  "library": [
+    {
+      "family": "IL2CPP",
+      "paths": [
+        "lib/armeabi-v7a/libil2cpp.so"
+      ]
+    },
+    {
+      "family": "SandHook",
+      "paths": [
+        "lib/arm64-v8a/libsandhook-native.so",
+        "lib/arm64-v8a/libsandhook.so",
+        "lib/armeabi-v7a/libsandhook-native.so",
+        "lib/armeabi-v7a/libsandhook.so"
+      ]
+    },
+    {
+      "family": "UnicomSDK",
+      "paths": [
+        "assets/arm64-v8a/libunicomSimplesdk.dat",
+        "assets/arm64-v8a/libunicomsdk.jar",
+        "assets/armeabi-v7a/libdecrypt.jar",
+        "assets/x86/libunicomSimplesdk.dat",
+        "assets/arm64-v8a/libdecrypt.jar",
+        "assets/x86/libunicomsdk.jar",
+        "assets/unicom_resource.dat",
+        "assets/x86/libdecrypt.jar",
+        "assets/classes.jar"
+      ]
+    },
+    {
+      "family": "Unity",
+      "paths": [
+        "lib/armeabi-v7a/libunity.so"
+      ]
+    }
+  ],
+  "packer": [
+    {
+      "family": "Kony",
+      "paths": [
+        "libkonyjsvm.so"
+      ]
+    }
+  ],
+  "protector": [
+    {
+      "family": "AlibabaProtection",
+      "paths": [
+        "lib/armeabi-v7a/libmobisec.so",
+        "lib/armeabi/libmobisec.so",
+        "lib/x86/libmobisec.so"
+      ]
+    },
+    {
+      "family": "APKProtect",
+      "paths": [
+        "apkprotect.com/key.dat",
+        "lib/armeabi-v7a/libAPKProtect.so",
+        "lib/armeabi/libAPKProtect.so"
+      ]
+    },
+    {
+      "family": "APKProtector",
+      "paths": [
+        "assets/ap.others/apkprotect.bin",
+        "assets/ap.src/apkprotect-v1.bin",
+        "assets/ap.src/apkprotect-v2.bin",
+        "assets/ap.src/apkprotect-v3.bin",
+        "lib/arm64-v8a/libapkprotect.so",
+        "lib/armeabi-v7a/libapkprotect.so",
+        "lib/x86/libapkprotect.so",
+        "lib/x86_64/libapkprotect.so"
+      ]
+    },
+    {
+      "family": "ApktoolPlus",
+      "paths": [
+        "lib/armeabi-v7a/libapktoolplus_jiagu.so"
+      ]
+    },
+    {
+      "family": "AppGuard",
+      "paths": [
+        "assets/AppGuard.dgc",
+        "assets/AppGuard0.jar",
+        "lib/armeabi-v7a/libAppGuard.so",
+        "lib/armeabi/libAppGuard-x86.so",
+        "lib/armeabi/libAppGuard.so"
+      ]
+    },
+    {
+      "family": "AppSolid",
+      "paths": [
+        "assets/high_resolution.png"
+      ]
+    },
+    {
+      "family": "BaiduProtection",
+      "paths": [
+        "assets/baiduprotect.jar",
+        "assets/libbaiduprotect_x86.so",
+        "lib/armeabi-v7a/libbaiduprotect.so",
+        "lib/armeabi/libbaiduprotect.so",
+        "lib/mips/libbaiduprotect.so",
+        "lib/x86/libbaiduprotect.so"
+      ]
+    },
+    {
+      "family": "BangBang Reinforcement",
+      "paths": [
+        "assets/autostreets.com_cert_chain.cer",
+        "assets/da.js",
+        "assets/img.autostreetscdn.com_cert.cer",
+        "assets/QMUIWebviewBridge.js",
+        "assets/info.y",
+        "assets/main.js",
+        "assets/weex-main-jsfm.js",
+        "assets/weex-rax-api.js",
+        "assets/weex-rax-extra-api.js",
+        "lib/arm/libDexHelper.so",
+        "lib/arm/libdexjni.so",
+        "lib/arm/libDexHelper-x86.so",
+        "com/secneo/apkwrapper"
+      ]
+    },
+    {
+      "family": "BangcleProtection",
+      "paths": [
+        "lib/armeabi/libsecexe.so",
+        "lib/x86/libsecexe.so"
+      ]
+    },
+    {
+      "family": "build38",
+      "paths": [
+        "__license.tak",
+        "license.tak"
+      ]
+    },
+    {
+      "family": "DexProtector",
+      "paths": [
+        "assets/classes.dex.dat",
+        "assets/dp.arm-v7.so.dat",
+        "assets/dp.arm-v8.so.dat",
+        "assets/dp.arm.so.dat",
+        "assets/dp.mp3",
+        "assets/dp.x86.so.dat",
+        "assets/dp.x86_64.so.dat",
+        "lib/armeabi-v7a/libdexprotector.so",
+        "lib/armeabi/libdexprotector.so",
+        "assets/dp-lib/dp.kotlin-v1.lua.mph",
+        "assets/dexprotect/classes.dex.dat"
+      ]
+    },
+    {
+      "family": "DingXiang Reinforcement",
+      "paths": [
+        "com/security/shell/AppStub1",
+        "com/security/inner/stub000"
+      ]
+    },
+    {
+      "family": "DXShield",
+      "paths": [
+        "lib/armeabi/libdxbase.so"
+      ]
+    },
+    {
+      "family": "ExTrus AppDefence",
+      "paths": [
+        "assets/appdefence_xml"
+      ]
+    },
+    {
+      "family": "Gemalto",
+      "paths": [
+        "lib/arm64-v8a/libmedl.so",
+        "lib/armeabi-v7a/libmedl.so",
+        "lib/armeabi/libmedl.so",
+        "lib/mips/libmedl.so",
+        "lib/mips64/libmedl.so",
+        "lib/x86/libmedl.so",
+        "lib/x86_64/libmedl.so"
+      ]
+    },
+    {
+      "family": "Hdus-Wjus",
+      "paths": [
+        "lib/armeabi/libhdus.so",
+        "lib/armeabi/libwjus.so"
+      ]
+    },
+    {
+      "family": "iCrypt",
+      "paths": [
+        "assets/af.bin",
+        "assets/ijiami.ajm",
+        "assets/ijiami.dat",
+        "assets/IJMDal.Data",
+        "assets/signed.bin",
+        "assets/InteGration_4.5.1.ttf",
+        "assets/libijmDataEncryption.so",
+        "assets/libijmDataEncryption_arm64.so",
+        "assets/libijmDataEncryption_x86.so",
+        "lib/arm/libijm-emulator.so"
+      ]
+    },
+    {
+      "family": "Ijiami",
+      "paths": [
+        "assets/ijiami.ajm",
+        "assets/ijm_lib/armeabi/libexec.so",
+        "assets/ijm_lib/armeabi/libexecmain.so",
+        "assets/ijm_lib/x86/libexec.so",
+        "assets/ijm_lib/x86/libexecmain.so",
+        "assets/ijiami.dat",
+        "lib/armeabi-v7a/libexec.so",
+        "lib/armeabi-v7a/libexecmain.so",
+        "lib/armeabi/libexec.so",
+        "lib/armeabi/libexecmain.so",
+        "lib/x86/libexec.so",
+        "lib/x86/libexecmain.so"
+      ]
+    },
+    {
+      "family": "Jiagu",
+      "paths": [
+        "assets/libjiagu.so",
+        "assets/libjiagu_a64.so",
+        "assets/libjiagu_ls.so",
+        "assets/libjiagu_x64.so",
+        "assets/libjiagu_x86.so"
+      ]
+    },
+    {
+      "family": "Kiro",
+      "paths": [
+        "lib/armeabi/libkiroro.so"
+      ]
+    },
+    {
+      "family": "KiwiSecurity",
+      "paths": [
+        "assets/crash",
+        "assets/ec_dt.lic",
+        "assets/kwpt.lincense",
+        "lib/arm/libkiwi_dumper.so",
+        "lib/arm/libkiwicrash.so",
+        "lib/arm/libKwProtectSDK.so",
+        "lib/arm/libkwsdataenc.so",
+        "lib/arm/libkadp.so",
+        "com/kiwisec/crash",
+        "com/kiwivm/security",
+        "com/kiwivm/security/StubApplication"
+      ]
+    },
+    {
+      "family": "LIAPP",
+      "paths": [
+        "assets/LIAPPClient.sc",
+        "assets/LIAPPClient_x86.sc",
+        "assets/LIAPPEgg.sc",
+        "assets/LIAPPEgg_x86.sc"
+      ]
+    },
+    {
+      "family": "MedusaH",
+      "paths": [
+        "lib/armeabi-v7a/libmd.so"
+      ]
+    },
+    {
+      "family": "MobileTencentProtect",
+      "paths": [
+        "lib/armeabi-v7a/mix.dex",
+        "lib/armeabi/mix.dex"
+      ]
+    },
+    {
+      "family": "NagaPTProtection",
+      "paths": [
+        "lib/armeabi/libddog.so",
+        "lib/armeabi/libfdog.so"
+      ]
+    },
+    {
+      "family": "NetEase EasyShield",
+      "paths": [
+        "assets/nedata.db",
+        "assets/nedig.properties",
+        "lib/arm/libnesec.so",
+        "lib/arm/libnesec-x86.so",
+        "lib/arm/libnshelper.so",
+        "com/netease/nis/wrapper",
+        "com/netease/nis/wrapper/MyApplication"
+      ]
+    },
+    {
+      "family": "NQShield",
+      "paths": [
+        "assets/libnqshieldx86.so",
+        "assets/nqdata",
+        "lib/armeabi/libnqshield.so"
+      ]
+    },
+    {
+      "family": "OLLVM-TLL",
+      "paths": [
+        "lib/armeabi-v7a/libmtprotect.so",
+        "lib/x86/libmtprotect.so"
+      ]
+    },
+    {
+      "family": "PangXie",
+      "paths": [
+        "lib/armeabi-v7a/libnsecure.so",
+        "lib/armeabi/libnsecure.so"
+      ]
+    },
+    {
+      "family": "ProGuard",
+      "paths": [
+        "META-INF/proguard/androidx-annotations.pro"
+      ]
+    },
+    {
+      "family": "QDBH",
+      "paths": [
+        "assets/qdbh"
+      ]
+    },
+    {
+      "family": "Qihoo360Protection",
+      "paths": [
+        "lib/armeabi-v7a/libprotectClass.so",
+        "lib/armeabi/libprotectClass.so",
+        "lib/x86/libprotectClass.so"
+      ]
+    },
+    {
+      "family": "SecNeo",
+      "paths": [
+        "lib/arm64-v8a/libDexHelper-x86_64.so",
+        "lib/arm64-v8a/libDexHelper.so",
+        "lib/armeabi-v7a/libDexHelper-x86.so",
+        "lib/armeabi-v7a/libDexHelper.so",
+        "lib/armeabi/libDexHelper-x86.so",
+        "lib/armeabi/libDexHelper.so",
+        "lib/x86/libDexHelper.so"
+      ]
+    },
+    {
+      "family": "SecShell",
+      "paths": [
+        "assets/secData0.jar",
+        "lib/armeabi/libSecShell-x86.so",
+        "lib/armeabi/libSecShell.so"
+      ]
+    },
+    {
+      "family": "Tencent Security",
+      "paths": [
+        "assets/dexMethod_00oo1l1l.dat",
+        "lib/arm/libshell-supervbasic.2019.so",
+        "lib/arm/libshell-superv.2019.so"
+      ]
+    },
+    {
+      "family": "TencentLegu",
+      "paths": [
+        "assets/0OO00l111l1l",
+        "assets/0OO00oo01l1l",
+        "assets/libshellx-super.2019.so",
+        "assets/o0oooOO0ooOo.dat",
+        "lib/arm64-v8a/libshell-super.2019.so",
+        "lib/armeabi/libshell-super.2019.so"
+      ]
+    },
+    {
+      "family": "TencentProtection",
+      "paths": [
+        "assets/tosversion",
+        "tencent_stub"
+      ]
+    },
+    {
+      "family": "Tongfu Shield",
+      "paths": [
+        "assets/mode",
+        "assets/PK",
+        "assets/virtual",
+        "assets/libegis.a",
+        "lib/arm/libegis.so",
+        "com/payegis/FirstApplication",
+        "com.payegis.entry",
+        "egis",
+        "egis-x86"
+      ]
+    },
+    {
+      "family": "VDog",
+      "paths": [
+        "assets/main000/libhdog-x86.so",
+        "assets/main000/libhdog.so",
+        "assets/main000/libvdog-x86.so",
+        "assets/main000/libvdog.so"
+      ]
+    },
+    {
+      "family": "Virbox",
+      "paths": [
+        "libsandhook.so",
+        "libsandhook-native.so",
+        "libv++_64.so",
+        "libv++.so"
+      ]
+    },
+    {
+      "family": "Yidun",
+      "paths": [
+        "lib/arm64-v8a/libnesec.so",
+        "lib/armeabi-v7a/libnesec.so",
+        "lib/armeabi/libnesec.so",
+        "lib/x86/libnesec.so"
+      ]
+    }
+  ]
+}

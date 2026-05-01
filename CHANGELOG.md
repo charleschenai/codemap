@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.45.0] — 2026-05-01
+
+### Added (APK protector fingerprint + endpoint enrichment)
+- **New `apk-fingerprint` action** (aliases: `apk-protector`, `apk-fp`, `android-fingerprint`). Matches ZIP archive entry names against signatures mined from Detect-It-Easy's APK rule set — 64 Android DRM/protector identifiers (Alibaba/Bangcle/Ijiami/Jiagu/DexProtector/Kony/AppSolid/IL2CPP/Unity/SandHook/UnicomSDK).
+- **New `lolbin-scan` action** (aliases: `find-lolbins`, `lolbins`). Scans a PE for embedded references to known living-off-the-land binaries (certutil, bitsadmin, etc.).
+- **Endpoint enrichment** — dyndns provider list (33 suffixes), valid-TLD whitelist (1,381 TLDs), LOLBin list (101 names) — applied as attributes on existing endpoint/PE nodes.
+
+### Tests
+- 344 → **356 tests** (+12).
+
+---
+
 ## [5.44.0] — 2026-05-01
 
 ### Added (Ship 5 #2 — DiE EP-pattern fingerprint detector)
