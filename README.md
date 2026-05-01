@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.25.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.25.1 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -514,6 +514,10 @@ Pure-static parsers consuming captured artifacts. **Codemap never makes network 
 ---
 
 ## Examples
+
+For end-to-end scenario walkthroughs (audit, Android APK analysis, passive web recon, binary diff, `think`-first), see [`examples/README.md`](./examples/README.md). The snippets below are quick reference; the walkthroughs explain how the actions compose.
+
+To contribute: see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ### Quick codebase health check
 

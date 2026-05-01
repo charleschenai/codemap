@@ -2291,3 +2291,57 @@ unaffected.
   are now shipped. What's left is housekeeping — examples/
   directory + CONTRIBUTING.md, plus deferred ARM-call-edges via
   yaxpeax-arm if demand emerges.
+
+
+[2026-05-01] docs: 5.25.1 — CONTRIBUTING.md + examples/ scenarios (#60)
+  source: post-5.25.0 housekeeping. Two doc gaps were the only
+  remaining items from the second-opinion review's high-impact-
+  usability list (the criticals — Mobile + Think — already
+  shipped in 5.23-5.25). Both addressed in one ship since they're
+  complementary contributor + user docs.
+
+  CONTRIBUTING.md (~270 LOC):
+    - Build + test, repo layout, dispatch architecture
+    - How to add a new action (5-step recipe)
+    - How to wire findings to the graph (THE canonical pattern
+      from the 5.16.2 -> 5.25.0 arc — every action that parses
+      structured data should register typed nodes + edges)
+    - How to add a new EntityKind (5-place checklist with refs
+      to the actual commits that did it: 5.17, 5.19, 5.20, 5.21)
+    - Testing conventions (unit vs integration, parser-rejects-
+      bad-input mandatory, cap-enforcement mandatory)
+    - Hard rules (no network, pure-Rust deps, --dir always,
+      default-scan invariant, caps everywhere)
+    - Commit + version + EVOLUTION.log conventions
+    - Filing issues template
+
+  examples/README.md (~210 LOC):
+    Five scenario walkthroughs that show how actions compose:
+    1. Audit an unfamiliar codebase — audit + callers + blast-
+       radius + hotspots + churn
+    2. Android APK analysis — apk-info (DEX walker + permission
+       heuristics from 5.23) + bin-disasm on lib/arm64-v8a/*.so
+       (from 5.24). The mobile use case Charles flagged.
+    3. Passive web recon — capture-then-parse workflow with
+       web-dom + web-fingerprint + robots-parse + web-sitemap-
+       parse + crt-parse. Concretely demonstrates the right path
+       so the AI doesn't default to live scraping.
+    4. Diff two binary versions — binary-diff cross-graph
+       (from 5.22) with diff_status filtering and pagerank.
+    5. codemap think first — the "I don't know what to run"
+       entry point (from 5.25). Includes the URL-rejection
+       message + path-detection demo + fallback-as-menu pattern.
+
+  README updated to link both docs from the Examples section.
+
+  Tests: 209 passing (unchanged — docs only). Action count: 164
+  (unchanged). EntityKinds: 33 (unchanged).
+
+  Now closes the entire post-arc review backlog:
+    [x] Mobile (DEX walker + ARM/AArch64 disasm) — 5.23 + 5.24
+    [x] codemap think orchestrator                 — 5.25.0
+    [x] CONTRIBUTING.md + examples/                — 5.25.1
+    [ ] ARM call-edges via yaxpeax-arm             — wait for demand
+
+  No urgent work left. The next ship is whatever Charles names —
+  this is a clean stopping point for the entire arc.

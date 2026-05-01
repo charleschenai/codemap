@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.25.1] — 2026-05-01
+
+### Added (docs only — no code change)
+- **`CONTRIBUTING.md`** — full contributor guide. Build + test, repo layout, how to add an action, how to wire findings to the graph (the canonical pattern from the 5.16.2 → 5.25.0 arc), how to add an `EntityKind` (the 5-place checklist), testing conventions, hard rules (no network, pure-Rust deps, `--dir` always, default-scan invariant, caps everywhere), commit + version conventions.
+- **`examples/README.md`** — five end-to-end scenario walkthroughs:
+  1. Audit an unfamiliar codebase (`audit` + drill-down)
+  2. Android APK analysis (`apk-info` + permission heuristics + native-lib `bin-disasm`) — showcases 5.23.0 + 5.24.0
+  3. Passive web recon (`web-dom` + `web-fingerprint` + `robots-parse` + `web-sitemap-parse` + `crt-parse`) — addresses the "AI defaults to live scraping" friction by showing the capture-then-parse path concretely
+  4. Diff two binary versions (`binary-diff` cross-graph) — showcases 5.22.0
+  5. `codemap think` first — when you don't know what to run
+- README now points at `examples/README.md` and `CONTRIBUTING.md` from the Examples section header.
+
+### Notes
+- No behavior change. Tests unchanged at 209.
+
+---
+
 ## [5.25.0] — 2026-05-01
 
 ### Added
