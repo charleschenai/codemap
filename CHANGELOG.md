@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.43.0] — 2026-05-01
+
+### Added (Ship 5 #2 + #3 — section-entropy + disalign-bytes)
+- **New `section-entropy` action** (aliases: `entropy`, `pe-entropy`). Per-section Shannon byte entropy across PE/ELF/Mach-O. Sections at ≈8.0 bits/byte = packed/encrypted. Tags BinarySection nodes with `entropy:f32` + flags binaries with `packed:true`.
+- **New `disalign-bytes` action** (aliases: `disalign`, `anti-disasm`, `instruction-overlap`). Linear-sweep + recursive-descent overlap detector — flags opaque-predicate jump-into-mid-instruction tricks (VMProtect / Themida).
+- Both clean-room from Tim Blazytko's published heuristics. Both run without BB-CFG.
+
+### Tests
+- 320 → **332 tests** (+12).
+
+---
+
 ## [5.42.0] — 2026-05-01
 
 ### Added (Ship 5 — Source-language identification)

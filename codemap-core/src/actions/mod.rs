@@ -46,6 +46,8 @@ pub mod vtable_detect;
 pub mod pe_carve;
 pub mod com_scan;
 pub mod lang_id;
+pub mod section_entropy;
+pub mod disalign_bytes;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -306,20 +308,16 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
-        // Embedded-PE XOR carver (5.39.0). Brute-forces every single-
-        // byte XOR key for "MZ"/"PE\0\0" sentinel pairs to surface
-        // staged / dropper-style payloads hidden inside a larger
-        // binary. Mirrors the GGUF overlay carve (Ship 2 #23).
+        // Embedded-PE XOR carver (5.39.0).
         "pe-carve" | "carve-pe" | "embedded-pe" | "pe-extract" => Ok(pe_carve::pe_carve(graph, target)),
-        // COM CLSID/IID scanner (5.41.0 — Ship 5 #1). 3,639 CLSIDs +
-        // 25,306 IIDs from capa (Apache-2.0). Two-pass: ASCII GUID
-        // regex + raw 16-byte (with Microsoft byte-order swap).
+        // COM CLSID/IID scanner (5.41.0 — Ship 5 #1).
         "com-scan" | "com" | "com-guids" | "clsid-iid" | "windows-com" => Ok(com_scan::com_scan(graph, target)),
-        // Source-language identification (5.42.0 — Ship 5). Tags PE /
-        // ELF / Mach-O binaries with language=rust|go|dotnet, plus
-        // version when a rustc commit-hash or Go pclntab magic is
-        // present. FLOSS-derived but extended past PE-only.
+        // Source-language identification (5.42.0 — Ship 5).
         "lang-id" | "language" | "detect-language" | "source-lang" => Ok(lang_id::lang_id(graph, target)),
+        // Section-entropy scanner (5.43.0 — Ship 5 #2).
+        "section-entropy" | "entropy" | "pe-entropy" => Ok(section_entropy::section_entropy(graph, target)),
+        // Disalign-bytes anti-disasm detector (5.43.0 — Ship 5 #3).
+        "disalign-bytes" | "disalign" | "anti-disasm" | "instruction-overlap" => Ok(disalign_bytes::disalign_bytes(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
