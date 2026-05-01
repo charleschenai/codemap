@@ -174,6 +174,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             Dependency        => (179, 229, 252),
             MlTensor          => (255, 224, 178),
             MlOperator        => (206, 147, 216),
+            BinarySection     => (207, 216, 220),
         }
     }
 

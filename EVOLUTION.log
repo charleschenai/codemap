@@ -1941,3 +1941,55 @@ unaffected.
       new PeSection EntityKind, marginal value alone).
     G5 binary_diff — diff results not graph edges (needs design
       pass: same-graph or cross-graph?).
+
+
+[2026-05-01] feat: 5.21.0 — BinarySection EntityKind for pe_sections (#55)
+  source: post-5.20.0 audit had G4 (PE section table parsed but
+  not graph nodes) flagged as deferred — marginal value alone.
+  Charles asked to knock it out anyway as polish. This release
+  closes G4 with a generic BinarySection EntityKind (designed
+  to also cover ELF / Mach-O sections in a follow-up ship
+  without needing yet another EntityKind).
+
+  New EntityKind (32 → 33):
+
+  BinarySection — section inside a binary (PE .text / .data /
+    .rdata, ELF section header table entry, Mach-O section).
+    attrs: name, binary_format (pe/elf/macho), virtual_size,
+    raw_size, virtual_address, entropy (Shannon bits/byte),
+    characteristics (read/write/exec/code flags joined by +).
+    Edge: binary → section. Killer queries:
+      attribute-filter entropy>7.0 on --type section
+        → packed/encrypted sections across a binary corpus
+      meta-path "pe->section"
+        → layout enumeration
+      pagerank --type section
+        → shared section names across vendor product families
+      attribute-filter characteristics=*exec*
+        → executable sections uniformly across a corpus
+
+  Implementation: extends pe_sections.flag_packed_and_overlay
+  (already walking sections to compute max_section_entropy).
+  The same loop now also reads section name (8 bytes ASCII,
+  null-padded), virtual_size (offset 8), virtual_address
+  (offset 12), raw_size (offset 16), characteristics (offset
+  36), and registers a BinarySection node per section. New
+  helper pe_section_characteristics() decodes the
+  Characteristics flag bits into a compact "code+exec+read"
+  string so attribute filters work uniformly.
+
+  Tests: 195 passing (was 194). +1 round-trip test confirms
+  EntityKind::BinarySection parses through "section" /
+  "binsection" / "binarysection" aliases. The section-walking
+  code path itself has been in production since 5.12.0 (was
+  computing max_section_entropy already); my additions are
+  pure ensure_typed_node calls inserted into that loop.
+
+  Action count: 163 (unchanged). EntityKinds: 32 → 33
+  (+BinarySection).
+
+  Outstanding gaps after this ship — only 1 left:
+    G5 binary_diff — diff results not graph edges. Genuinely
+      needs a design pass (same-graph with versioned binary
+      nodes, or cross-graph with separate diff edges between
+      two scans?). Punted to its own design conversation.

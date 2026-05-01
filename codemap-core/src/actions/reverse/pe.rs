@@ -1455,6 +1455,23 @@ fn is_leap_year(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+/// Decode PE section Characteristics flag bits into a compact string
+/// (e.g. "code+exec+read"). Used for the BinarySection node attr so
+/// `attribute-filter characteristics=*exec*` finds executable sections
+/// uniformly across a binary corpus.
+fn pe_section_characteristics(flags: u32) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if flags & 0x0000_0020 != 0 { parts.push("code"); }
+    if flags & 0x0000_0040 != 0 { parts.push("init_data"); }
+    if flags & 0x0000_0080 != 0 { parts.push("uninit_data"); }
+    if flags & 0x0200_0000 != 0 { parts.push("discardable"); }
+    if flags & 0x1000_0000 != 0 { parts.push("shared"); }
+    if flags & 0x2000_0000 != 0 { parts.push("exec"); }
+    if flags & 0x4000_0000 != 0 { parts.push("read"); }
+    if flags & 0x8000_0000 != 0 { parts.push("write"); }
+    if parts.is_empty() { "none".into() } else { parts.join("+") }
+}
+
 // ── 6. pe_sections ──────────────────────────────────────────────────
 
 pub fn pe_sections(graph: &mut Graph, target: &str) -> String {
@@ -1507,13 +1524,51 @@ fn flag_packed_and_overlay(graph: &mut Graph, target: &str, data: &[u8]) {
     let mut max_entropy = 0.0_f64;
     for i in 0..n_sections.min(64) {
         let off = sec_table + i * 40;
-        if off + 24 > data.len() { break; }
+        if off + 40 > data.len() { break; }
+        // Section name (null-padded ASCII, 8 bytes).
+        let name_bytes = &data[off..off + 8];
+        let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
+        let name: String = name_bytes[..name_end].iter()
+            .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
+            .collect();
+        let virtual_size = u32::from_le_bytes([data[off + 8], data[off + 9], data[off + 10], data[off + 11]]);
+        let virtual_address = u32::from_le_bytes([data[off + 12], data[off + 13], data[off + 14], data[off + 15]]);
         let raw_size = u32::from_le_bytes([data[off + 16], data[off + 17], data[off + 18], data[off + 19]]) as usize;
         let raw_off = u32::from_le_bytes([data[off + 20], data[off + 21], data[off + 22], data[off + 23]]) as usize;
-        if raw_size == 0 || raw_off >= data.len() { continue; }
-        let end = (raw_off + raw_size).min(data.len());
-        let h = crate::actions::overlay::shannon_entropy(&data[raw_off..end]);
-        if h > max_entropy { max_entropy = h; }
+        let characteristics = u32::from_le_bytes([data[off + 36], data[off + 37], data[off + 38], data[off + 39]]);
+
+        let entropy = if raw_size == 0 || raw_off >= data.len() {
+            0.0_f64
+        } else {
+            let end = (raw_off + raw_size).min(data.len());
+            let h = crate::actions::overlay::shannon_entropy(&data[raw_off..end]);
+            if h > max_entropy { max_entropy = h; }
+            h
+        };
+
+        // 5.21.0: promote each section to a BinarySection graph node
+        // with edge from the PE binary. Enables `attribute-filter
+        // entropy>7.0` for packed-section discovery, `meta-path
+        // "pe->section"` for layout enumeration, and section-name
+        // PageRank across vendor product families.
+        if !name.is_empty() {
+            let sec_id = format!("section:pe:{target}::{name}");
+            let vsize = virtual_size.to_string();
+            let vaddr = format!("{virtual_address:#010x}");
+            let rsize = raw_size.to_string();
+            let entropy_str = format!("{entropy:.3}");
+            let chars_str = pe_section_characteristics(characteristics);
+            graph.ensure_typed_node(&sec_id, EntityKind::BinarySection, &[
+                ("name", &name),
+                ("binary_format", "pe"),
+                ("virtual_size", &vsize),
+                ("virtual_address", &vaddr),
+                ("raw_size", &rsize),
+                ("entropy", &entropy_str),
+                ("characteristics", &chars_str),
+            ]);
+            graph.add_edge(&bin_id, &sec_id);
+        }
     }
     if let Some(node) = graph.nodes.get_mut(&bin_id) {
         node.attrs.insert("max_section_entropy".into(), format!("{max_entropy:.3}"));

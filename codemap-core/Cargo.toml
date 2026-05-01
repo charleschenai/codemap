@@ -1,9 +1,9 @@
 [package]
 name = "codemap-core"
-version = "5.20.0"
+version = "5.21.0"
 edition = "2021"
 license = "MIT"
-description = "Heterogeneous-graph codebase analysis library — 163 actions, 32 EntityKinds, across source AST, binary RE, schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, and ML model architecture (tensors + operators)"
+description = "Heterogeneous-graph codebase analysis library — 163 actions, 33 EntityKinds, across source AST, binary RE (incl. section-level promotion), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, and ML model architecture"
 repository = "https://github.com/charleschenai/codemap"
 
 [dependencies]

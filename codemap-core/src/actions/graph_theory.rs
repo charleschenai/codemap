@@ -603,6 +603,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         Dependency        => "shape=tab, fillcolor=\"#b3e5fc\", style=filled, fontsize=10",
         MlTensor          => "shape=cylinder, fillcolor=\"#ffe0b2\", style=filled, fontsize=9",
         MlOperator        => "shape=hexagon, fillcolor=\"#ce93d8\", style=filled, fontsize=10",
+        BinarySection     => "shape=folder, fillcolor=\"#cfd8dc\", style=filled, fontsize=9",
     }
 }
 
@@ -755,6 +756,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         Dependency        => "dependency",
         MlTensor          => "tensor",
         MlOperator        => "ml_operator",
+        BinarySection     => "section",
     }
 }
 

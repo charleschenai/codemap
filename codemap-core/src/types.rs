@@ -224,6 +224,17 @@ pub enum EntityKind {
     /// op types across a corpus, attribute filter on op_type for
     /// "every model that uses LSTM".
     MlOperator,
+    /// Section inside a binary (PE `.text`/`.data`/`.rdata`/etc.,
+    /// ELF section header table entry, Mach-O section). Edges:
+    /// binary → section. attrs: name, binary_format (pe/elf/macho),
+    /// virtual_size, raw_size, virtual_address, entropy (Shannon
+    /// bits/byte), characteristics (read/write/exec/code flags
+    /// joined by `+`). Killer queries: `attribute-filter
+    /// entropy>7.0` finds packed/encrypted sections across a
+    /// binary corpus, `meta-path "pe->section"` enumerates per-
+    /// binary layout, `pagerank --type section` ranks shared
+    /// section names across vendor product families.
+    BinarySection,
 }
 
 impl EntityKind {
@@ -262,6 +273,7 @@ impl EntityKind {
             EntityKind::Dependency => "dependency",
             EntityKind::MlTensor => "tensor",
             EntityKind::MlOperator => "ml_operator",
+            EntityKind::BinarySection => "section",
         }
     }
 
@@ -302,6 +314,7 @@ impl EntityKind {
             "dep" | "dependency" | "package" => EntityKind::Dependency,
             "tensor" | "mltensor" | "weight" => EntityKind::MlTensor,
             "ml_operator" | "mlop" | "op" | "operator" => EntityKind::MlOperator,
+            "section" | "binsection" | "binarysection" => EntityKind::BinarySection,
             _ => return None,
         })
     }

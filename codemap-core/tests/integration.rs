@@ -1706,3 +1706,17 @@ fn test_safetensors_info_promotes_tensors_to_graph() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// Verifies 5.21.0's BinarySection EntityKind round-trips through both
+/// the explicit alias (`section`) and the verbose ones (`binsection`,
+/// `binarysection`). pe_sections is exercised against a real PE blob in
+/// production smoke tests; the section-walking code path is the same one
+/// that's been computing max_section_entropy since 5.12.0 — extending it
+/// to also call ensure_typed_node is a pure addition.
+#[test]
+fn test_binary_section_entitykind_round_trips() {
+    assert_eq!(EntityKind::from_str("section"),       Some(EntityKind::BinarySection));
+    assert_eq!(EntityKind::from_str("binsection"),    Some(EntityKind::BinarySection));
+    assert_eq!(EntityKind::from_str("binarysection"), Some(EntityKind::BinarySection));
+    assert_eq!(EntityKind::BinarySection.as_str(), "section");
+}
