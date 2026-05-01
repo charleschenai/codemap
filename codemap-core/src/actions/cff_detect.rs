@@ -194,6 +194,7 @@ mod tests {
             cff_dispatcher_va: Some(0x1100),
             cff_dispatcher_hits: (be as f64 * score).round() as usize,
             cff_score: score,
+            opaque_pred_count: 0,
             is_entry: false,
         }
     }

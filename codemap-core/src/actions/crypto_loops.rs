@@ -160,6 +160,7 @@ mod tests {
             cff_dispatcher_va: None,
             cff_dispatcher_hits: 0,
             cff_score: 0.0,
+            opaque_pred_count: 0,
             is_entry: false,
         }
     }

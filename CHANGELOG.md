@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.36.0] — 2026-05-01
+
+### Added (Ship 3 #6 — opaque-predicate detector, heuristic v1)
+- **New `opaque-pred` action** (aliases: `opaque-predicate`, `find-opaque`, `junk-control`). Surfaces functions containing tautological branch conditions — the signature pattern obfuscators use to insert junk control flow that *looks* conditional but always evaluates one way.
+- **Two patterns matched (v1):**
+  - `cmp reg, reg` followed within 3 instructions by a `Jcc` — registers are always equal, the conditional branch always goes one direction.
+  - `xor reg, reg` then `test reg, reg` followed within 3 instructions by `Jcc` — propagator-tracked: if the test is on a register the propagator knows is `RegState::Const(0)`, the branch is tautological. (We use `dataflow_local::RegFile::get` to verify, so plain `test reg, reg` on an unrelated register doesn't false-fire.)
+- **Detection runs as a side-effect of the existing decode pass** — adds a single `pending_self_compare: u8` countdown to `decode_functions`. Tick down each instruction; if a Jcc fires while pending > 0, increment `opaque_pred_count`.
+- **New field on `DisasmFunction`:** `opaque_pred_count: usize`. Confidence: high (≥ 5 patterns), medium (≥ 2), low (1).
+- **Each flagged function becomes an `AntiAnalysis` graph node** under `category=obfuscation`, namespace `anti-analysis/obfuscation/opaque-predicate`. Joins the Ship 1 #8 anti-analysis catalog under the same EntityKind so analysts can `attribute-filter category=obfuscation` to find all obfuscated binaries / functions.
+
+### Honest limitations (v1 → v2)
+- **No arithmetic-based opaque predicates** like `(x*x + x) % 2 == 0`. Real Tim Blazytko detection uses irreducible-loop analysis + Weisfeiler-Lehman block duplicate detection — both need basic-block CFG. Deferred to v2.
+- **`xor reg,reg` zero-init is sometimes legitimate** (compiler register zeroing before a function-call ABI). We rely on the propagator to confirm zero-state when that XOR was *recent*, but if the analyst sees low-count results they should validate before declaring obfuscation.
+
+### Architectural milestone — Ship 3 complete
+Ship 3 (Obfuscation Detection) shipped as 3 separate releases today:
+- 5.33.0 — #9b crypto-loop detector
+- 5.35.0 — #5 CFF detector (heuristic v1)
+- 5.36.0 — #6 opaque-predicate detector (heuristic v1)
+
+All three ride the existing `decode_functions` pass with zero added cost per instruction, leveraging the bounded backward propagator (now in `dataflow_local.rs`) for register-state queries. v2 of #5 + #6 (real Blazytko ports) is the natural follow-on once basic-block CFG extraction lands.
+
+### Tests
+- 274 → **277 tests** (+3). Confidence thresholds, 3-tier report grouping, empty-hits message.
+
+---
+
 ## [5.35.0] — 2026-05-01
 
 ### Added (Ship 3 #5 — CFF detector, heuristic v1)

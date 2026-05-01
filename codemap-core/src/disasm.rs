@@ -65,6 +65,18 @@ pub struct DisasmFunction {
     pub cff_dispatcher_va: Option<u64>,
     pub cff_dispatcher_hits: usize,
     pub cff_score: f64,
+    /// Opaque-predicate count (Ship 3 #6 heuristic v1). Counts the
+    /// number of "always-evaluable" comparison instructions in the
+    /// function — patterns the optimizer wouldn't emit because
+    /// they're tautological:
+    ///   - `cmp reg, reg` followed by a Jcc within 2 instructions
+    ///     (always-equal — Jcc taken or not taken depending on
+    ///     condition, but never depends on data).
+    ///   - `xor reg, reg` immediately followed by `test reg, reg`
+    ///     or `cmp reg, 0` then a Jcc (always-zero).
+    /// Functions with ≥ 2 such patterns are likely obfuscated with
+    /// opaque-predicate junk control flow.
+    pub opaque_pred_count: usize,
     pub is_entry: bool,
 }
 
@@ -456,6 +468,7 @@ fn functions_from_symbols(
             cff_dispatcher_va: None,
             cff_dispatcher_hits: 0,
             cff_score: 0.0,
+            opaque_pred_count: 0,
             is_entry: *va == entry_va,
         });
     }
@@ -491,6 +504,13 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
         // Crypto-loop tracking (Ship 3 #9b)
         let mut back_edges: Vec<(u64, u64)> = Vec::new(); // (target_va, source_va) with target < source
         let mut xor_const_sites: Vec<u64> = Vec::new();   // VAs of XOR instructions with a known-constant key
+        // Opaque-predicate tracking (Ship 3 #6). Two-state machine:
+        //   pending_self_compare: distance counter from a self-compare
+        //                         (cmp/test/xor reg,reg). Counts down
+        //                         each instruction; if a Jcc fires
+        //                         while > 0, increment opaque_pred_count.
+        let mut opaque_pred_count = 0usize;
+        let mut pending_self_compare: u8 = 0;
         let mut size = 0u64;
         let mut last_ip = *start_va;
         let mut instr = Instruction::default();
@@ -549,6 +569,41 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
                             back_edges.push((target, instr.ip()));
                         }
                     }
+                    // Opaque-predicate signal: Jcc fired while a recent
+                    // self-compare is still pending → that branch is
+                    // tautologically taken/not-taken.
+                    if pending_self_compare > 0 {
+                        opaque_pred_count += 1;
+                    }
+                }
+                // Self-compare patterns: cmp reg, reg — always equal → Jcc tautological.
+                // test reg, reg — sets ZF based on register's actual value
+                //   (NOT tautological in general, but `test reg, reg` after
+                //    `xor reg, reg` IS — caught via the xor case below).
+                Mnemonic::Cmp => {
+                    if instr.op_count() == 2
+                        && instr.op0_kind() == OpKind::Register
+                        && instr.op1_kind() == OpKind::Register
+                        && instr.op0_register() == instr.op1_register()
+                        && instr.op0_register() != iced_x86::Register::None
+                    {
+                        // cmp reg, reg → always equal
+                        pending_self_compare = 3;
+                    }
+                }
+                Mnemonic::Test => {
+                    // test reg, reg with reg recently zeroed via xor
+                    if instr.op_count() == 2
+                        && instr.op0_kind() == OpKind::Register
+                        && instr.op1_kind() == OpKind::Register
+                        && instr.op0_register() == instr.op1_register()
+                    {
+                        let r = instr.op0_register();
+                        if matches!(rf.get(r), crate::dataflow_local::RegState::Const(0)) {
+                            // test of a known-zero register → always zero → Jcc tautological
+                            pending_self_compare = 3;
+                        }
+                    }
                 }
                 // XOR instruction: candidate for crypto-loop detection.
                 // We count XORs whose source operand is either an
@@ -588,6 +643,12 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             // propagator reflects the post-instruction view available
             // to subsequent instructions.
             record_instr(&mut rf, &instr);
+
+            // Bounded decay of the opaque-predicate "pending" window —
+            // every instruction past the self-compare drops one tick.
+            if pending_self_compare > 0 {
+                pending_self_compare -= 1;
+            }
 
             // Stop if we hit the next function boundary
             if next_ip >= next_start { break; }
@@ -641,6 +702,7 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             cff_dispatcher_va,
             cff_dispatcher_hits,
             cff_score,
+            opaque_pred_count,
             is_entry: *start_va == entry_va,
         });
     }
@@ -829,6 +891,7 @@ mod tests {
             calls: vec![], indirect_calls: 0, jump_targets: vec![],
             crypto_xor_in_loop: 0, back_edge_count: 0,
             cff_dispatcher_va: None, cff_dispatcher_hits: 0, cff_score: 0.0,
+            opaque_pred_count: 0,
             is_entry: false,
         };
         let _ = format!("{f:?}");

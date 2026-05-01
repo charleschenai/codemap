@@ -41,6 +41,7 @@ pub mod cuda_trace;
 pub mod crypto_loops;
 pub mod switch_recovery;
 pub mod cff_detect;
+pub mod opaque_pred;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -293,6 +294,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // functions where back-edges converge on a single dispatcher
         // AND a switch table is present. Real Blazytko-port = v2.
         "cff-detect" | "find-cff" | "flatten-detect" | "obfuscation-detect" => Ok(cff_detect::cff_detect(graph, target)),
+        // Opaque-predicate detector (5.36.0 — Ship 3 #6). Heuristic v1:
+        // matches cmp reg,reg + Jcc and xor-then-test patterns within
+        // 3 instructions of a Jcc. Real Blazytko port = v2.
+        "opaque-pred" | "opaque-predicate" | "find-opaque" | "junk-control" => Ok(opaque_pred::opaque_pred(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
