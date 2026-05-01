@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (capa #3 — embedded-PE XOR carver)
+- **New `pe-carve` action** (aliases: `carve-pe`, `embedded-pe`, `pe-extract`). Detects PE files smuggled inside dropper / packed / staged malware that hide the second-stage payload behind a single-byte XOR key. Mirrors the GGUF overlay carve (Ship 2 #23) so codemap exposes a uniform "carve" family across binary formats (PE → PE, GGUF → overlay, ML → operator graph).
+- **Algorithm:** brute-force every key 0x00..=0xFF.
+  - Precompute (MZ⊕key, PE⊕key) pairs once.
+  - Linear scan for the encoded "MZ" sentinel.
+  - At each hit, decode `e_lfanew` (4 LE bytes at +0x3C, also XOR'd) and verify the encoded "PE\0\0" magic sits at that offset.
+  - Yield (file_offset, xor_key) for every confirmed embedded PE.
+- **Pure byte search.** No execution, no new dependencies, no heuristic tuning beyond a sanity range on `e_lfanew`. Reformulated freely from the algorithm originally documented in vivisect's `PE/carve.py` and ported by capa.
+- **Each match becomes a child `EntityKind::PeBinary` node** attached to the parent binary with attrs `carved=true`, `xor_key`, `file_offset`, `parent_path`. Existing PE actions (pe-meta, pe-imports, pe-cert, cve-match) compose against the carved node once the dump is written.
+- **Best-effort dump** to `/tmp/<basename>.carved-<offset>-<key>.bin` — analyst can immediately run `codemap pe-meta` / `codemap pe-imports` against the second-stage payload without re-XOR'ing by hand.
+
+### Tests
+- 283 → **288 tests** (+5). Single-key carve at planted offset, plaintext PE detected as key 0x00, multi-payload buffer surfaces every distinct key, empty buffer yields nothing, structured-noise false-positive rate stays bounded.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

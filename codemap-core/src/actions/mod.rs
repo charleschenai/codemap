@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod pe_carve;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // Embedded-PE XOR carver (5.38.0). Brute-forces every single-
+        // byte XOR key for "MZ"/"PE\0\0" sentinel pairs to surface
+        // staged / dropper-style payloads hidden inside a larger
+        // binary. Mirrors the GGUF overlay carve (Ship 2 #23).
+        "pe-carve" | "carve-pe" | "embedded-pe" | "pe-extract" => Ok(pe_carve::pe_carve(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
