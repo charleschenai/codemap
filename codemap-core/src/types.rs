@@ -302,6 +302,20 @@ pub enum EntityKind {
     /// vtable` ranks the most-shared vtables; `meta-path
     /// "vtable->bin_func"` enumerates virtual methods per class.
     VTable,
+    /// capa-rules YAML rule match (Ship 5 #13). Emitted by the
+    /// `capa-scan` action when a vendored Mandiant capa-rules YAML
+    /// (codemap-core/data/capa-rules/, Apache 2.0) fires against the
+    /// features codemap extracts (PE imports, sections, exports, file
+    /// strings, format/os/arch tags). Edges: binary → capa_match.
+    /// attrs: rule_name, namespace (capa rule path, e.g.
+    /// "anti-analysis/packer/upx"), category (top-level capa
+    /// namespace), evidence (matched feature literals), confidence
+    /// (high / medium / low — `low` for nursery rules), attack_ids
+    /// (T1027 etc., `+`-joined), mbc_ids. Killer queries:
+    /// `attribute-filter att&ck:T1027` finds every obfuscated binary,
+    /// `meta-path "pe->capa_match"` enumerates capabilities across a
+    /// binary corpus.
+    CapaMatch,
 }
 
 impl EntityKind {
@@ -346,6 +360,7 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::CapaMatch => "capa_match",
         }
     }
 
@@ -392,6 +407,7 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "capa_match" | "capa" | "capability" | "capabilities" | "capamatch" => EntityKind::CapaMatch,
             _ => return None,
         })
     }

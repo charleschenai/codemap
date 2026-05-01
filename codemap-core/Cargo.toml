@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.37.0"
+version = "5.38.0"
 edition = "2021"
 license = "MIT"
 description = "Heterogeneous-graph codebase analysis library — 164 actions (incl. `think` natural-language goal router), 33 EntityKinds, across source AST, binary RE (ARM/AArch64 + section-level promotion + diff-namespace cross-graph + DEX bytecode + Android permission heuristics), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, ML model architecture"
@@ -40,3 +40,12 @@ iced-x86 = { version = "1", default-features = false, features = ["std", "decode
 # (real APKs always deflate-compress the large bytecode entries). No
 # system libs, MIT/Apache. Used only inside actions/apk.rs.
 miniz_oxide = "0.8"
+# YAML parser for capa-rules corpus (Ship 5 #13). The 1,045 capa rules
+# under data/capa-rules/ are vendored Apache-2.0 YAML; serde_yaml lets
+# us parse them via the untyped `Value` API so the loader stays
+# resilient to upstream schema additions. Used only inside actions/capa.rs.
+serde_yaml = "0.9"
+# Compile-time directory embedding so the capa rule corpus ships with
+# the binary (offline operation — no run-time disk dependency).
+# 1,045 YAML files, ~6.5 MB. Used only inside actions/capa.rs.
+include_dir = "0.7"

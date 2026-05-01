@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #13 — capa-rules YAML loader, file-scope subset)
+- **New `capa-scan` action** (aliases: `capa`, `capabilities`, `capa-rules`). Loads Mandiant's capa-rules corpus (1,045 YAML rules, Apache 2.0) and evaluates the **file-scope subset** against the artifacts codemap already extracts: PE imports, sections, exports, embedded strings, format / os / arch tags. Day-1 detection coverage for 22 packers (UPX, ASPack, Themida, VMProtect, PECompact, …), 19 compilers (Go, Rust, .NET, Delphi, AutoIT, …), 3 runtimes, 29 linking targets, plus the full anti-VM string corpus (~250 regex/literal patterns covering VirtualBox / VMware / QEMU / Xen / Hyper-V / Parallels / Sandboxie / Bochs).
+- **Vendored corpus** at `codemap-core/data/capa-rules/` (6.5 MB, embedded via `include_dir!` for offline operation). Apache-2.0 `LICENSE.txt` + `NOTICE` retained.
+- **New `EntityKind::CapaMatch`** (aliases: `capa`, `capability`, `capabilities`, `capa_match`, `capamatch`). Each match becomes a graph node attached to the binary, with attrs `rule_name` / `namespace` / `category` / `confidence` / `evidence` / `att&ck` / `mbc`.
+- **Recursive boolean evaluator** over capa's DSL: `and` / `or` / `not` / `N or more` / `optional` / `count(...)` combinators with typed feature leaves (`api`, `string`, `substring`, regex strings (`/.../i`), `match`, `number`, `bytes`, `format`, `os`, `arch`, `section`, `import`, `export`, `mnemonic`).
+- **Two-pass match resolver** for cross-rule references (`match: <other-rule-name>`). Lib rules fire as predicates; composite rules that depend on them light up transitively (fixpoint capped at 5 passes — capa's rule graph is shallow).
+- **ATT&CK / MBC tag propagation** — meta tags from each YAML rule are extracted (bracketed IDs lifted, e.g. `T1027.002` from "Defense Evasion::… [T1027.002]") and stored as `att&ck` / `mbc` attributes on each emitted node. New killer queries: `attribute-filter att&ck:T1027` finds every obfuscated binary across a corpus, `meta-path "pe->capa_match"` enumerates capabilities per binary.
+
+### Architectural notes
+- **Static-purity preserved.** Dynamic-scope rules (process / thread / span_of_calls / call) are parsed but never fire. Function-scope and basic-block-scope rules parse cleanly so the corpus loads end-to-end; their `number:` / `mnemonic:` / `operand[N].number` features quietly evaluate to false at file scope. When the bounded propagator (`dataflow_local.rs`) extracts further, the same loader runs the additional 825 rules with no schema changes.
+- **Anti-analysis hardcoded ruleset** in `actions/anti_analysis.rs` (35 rules) is now redundant for the file-scope coverage it offered. Left in place because the `anti-analysis` action's surface is independently documented; future cleanup can delete it.
+- **Two new dependencies:** `serde_yaml = "0.9"` (untyped `Value` parsing keeps the loader resilient to upstream schema additions) and `include_dir = "0.7"` (compile-time directory embedding so the corpus ships with the binary). 5 transitive crates total.
+
+### Tests
+- `corpus_loads_all_rules` — verifies ≥ 1,000 rules parse from the vendored `.yml` files (1,042 of 1,045 currently load; the 3 misses are doc-only YAML, not rules).
+- `corpus_has_known_rule_names` — confirms canonical rules ("packed with UPX", "compiled with Go", "compiled to the .NET platform", "packed with ASPack") loaded.
+- `evaluator_fires_upx_on_pe_section` / `aspack` / `dotnet` / `vbox` / `go` — synthetic feature bags exercise the boolean evaluator against hand-picked file-scope rules.
+- `attack_ids_are_extracted` — verifies bracketed-ID extraction on the UPX rule (`T1027.002`).
+- `match_resolver_propagates_lib_rules` — confirms `lib/allocate-memory.yml` fires when `kernel32.VirtualAlloc` is imported.
+- `graph_emits_capa_match_nodes_with_attrs` — end-to-end check that emitted nodes carry the `rule_name` attribute.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

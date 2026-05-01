@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod capa;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,7 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        "capa-scan" | "capa" | "capabilities" | "capa-rules" => Ok(capa::capa_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
