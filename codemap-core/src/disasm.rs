@@ -16,6 +16,7 @@
 // action turns into BinaryFunction nodes in the graph.
 
 use iced_x86::{Decoder, DecoderOptions, Instruction, Mnemonic, OpKind};
+use crate::disasm_jt::{RegFile, SectionMap, SectionView, record_instr, resolve_indirect_jmp};
 
 #[derive(Debug, Clone)]
 pub struct DisasmFunction {
@@ -31,6 +32,11 @@ pub struct DisasmFunction {
     /// import-table RVAs depending on what the binary type lets us
     /// resolve cheaply. For now we just count them.
     pub indirect_calls: usize,
+    /// Indirect-jump targets recovered by the jump-table resolver
+    /// (Ship 1 #7). Each entry is an absolute VA the function may
+    /// branch to via a switch table. Empty for stripped binaries
+    /// or ARM/AArch64 (resolver is x86/x64 only for v1).
+    pub jump_targets: Vec<u64>,
     pub is_entry: bool,
 }
 
@@ -92,12 +98,15 @@ fn disasm_pe(data: &[u8]) -> Result<DisasmResult, String> {
         u32::from_le_bytes([data[opt_off + 28], data[opt_off + 29], data[opt_off + 30], data[opt_off + 31]]) as u64
     };
 
-    // Walk section table for .text
+    // Walk section table — capture both .text bounds AND every
+    // section's VA→file mapping for the jump-table resolver, which
+    // needs to read jump-table bytes from .rdata / .data.rel.ro / etc.
     let sec_table = coff + 20 + opt_size;
     let mut text_va = 0u64;
     let mut text_size = 0u64;
     let mut text_off = 0usize;
     let mut text_raw_size = 0u64;
+    let mut sec_map = SectionMap::new();
     for i in 0..n_sections {
         let off = sec_table + i * 40;
         if off + 24 > data.len() { break; }
@@ -106,12 +115,15 @@ fn disasm_pe(data: &[u8]) -> Result<DisasmResult, String> {
         let virt_addr = u32::from_le_bytes([data[off + 12], data[off + 13], data[off + 14], data[off + 15]]) as u64;
         let raw_size = u32::from_le_bytes([data[off + 16], data[off + 17], data[off + 18], data[off + 19]]) as u64;
         let raw_off = u32::from_le_bytes([data[off + 20], data[off + 21], data[off + 22], data[off + 23]]) as u64 as usize;
-        if name.starts_with(b".text") {
+        // Use the smaller of virt_size / raw_size — virt_size can be
+        // larger than what's actually on disk (e.g. .bss-style padding).
+        let mapped = virt_size.min(raw_size);
+        sec_map.push(image_base + virt_addr, mapped, raw_off, mapped as usize);
+        if name.starts_with(b".text") && text_size == 0 {
             text_va = image_base + virt_addr;
             text_size = virt_size;
             text_off = raw_off;
             text_raw_size = raw_size;
-            break;
         }
     }
     if text_size == 0 {
@@ -174,7 +186,8 @@ fn disasm_pe(data: &[u8]) -> Result<DisasmResult, String> {
     }
 
     let entry_va = image_base + entry_rva;
-    let funcs = decode_functions(text_bytes, text_va, bitness, &starts, entry_va);
+    let sv = SectionView::new(data, &sec_map);
+    let funcs = decode_functions(text_bytes, text_va, bitness, &starts, entry_va, &sv);
     let arch = if bitness == 64 { "x64" } else { "x86" };
     Ok(DisasmResult {
         format: "pe",
@@ -289,6 +302,16 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
     let text_end = (text_off + text_size as usize).min(data.len());
     let text_bytes = &data[text_off..text_end];
 
+    // Build a SectionMap covering every loaded section so the
+    // jump-table resolver can read .rodata / .data.rel.ro entries.
+    // SHT_NOBITS sections (.bss) skipped — no bytes on disk.
+    let mut sec_map = SectionMap::new();
+    for s in &sections {
+        if s.sh_type == 8 { continue; } // SHT_NOBITS
+        if s.size == 0 || s.addr == 0 { continue; }
+        sec_map.push(s.addr, s.size, s.offset as usize, s.size as usize);
+    }
+
     // Read .symtab + .strtab if present, else .dynsym + .dynstr.
     // Each entry: (name, va, st_size). st_size is used by the ARM/AArch64
     // path (no disasm) to set function size; the x86/x64 path ignores it
@@ -349,7 +372,8 @@ fn disasm_elf(data: &[u8]) -> Result<DisasmResult, String> {
         let starts_xy: Vec<(String, u64)> = starts.iter()
             .map(|(n, v, _)| (n.clone(), *v))
             .collect();
-        decode_functions(text_bytes, text_va, bitness, &starts_xy, entry_va)
+        let sv = SectionView::new(data, &sec_map);
+        decode_functions(text_bytes, text_va, bitness, &starts_xy, entry_va, &sv)
     } else {
         functions_from_symbols(&starts, text_va, text_size, entry_va, arch)
     };
@@ -398,6 +422,7 @@ fn functions_from_symbols(
             instruction_count: instr_count,
             calls: Vec::new(),
             indirect_calls: 0,
+            jump_targets: Vec::new(),
             is_entry: *va == entry_va,
         });
     }
@@ -406,7 +431,7 @@ fn functions_from_symbols(
 
 // ── Decoder / boundary detection ───────────────────────────────────
 
-fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, u64)], entry_va: u64) -> Vec<DisasmFunction> {
+fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, u64)], entry_va: u64, sv: &SectionView<'_>) -> Vec<DisasmFunction> {
     let mut sorted: Vec<(String, u64)> = starts.iter()
         .filter(|(_, va)| *va >= text_va && *va < text_va + text.len() as u64)
         .cloned()
@@ -429,19 +454,25 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
         let mut instr_count = 0usize;
         let mut calls = Vec::new();
         let mut indirect_calls = 0usize;
+        let mut jump_targets: Vec<u64> = Vec::new();
         let mut size = 0u64;
         let mut last_ip = *start_va;
         let mut instr = Instruction::default();
+        let mut rf = RegFile::new();
+        // Text bounds for the jump-table resolver. Targets outside
+        // [text_start, text_end) terminate table walks.
+        let text_end_va = text_va + text.len() as u64;
         while decoder.can_decode() {
             decoder.decode_out(&mut instr);
             if instr.is_invalid() { break; }
             instr_count += 1;
-            let ip = instr.ip();
+            let _ip = instr.ip();
             let next_ip = instr.next_ip();
             size = next_ip - start_va;
             last_ip = next_ip;
 
-            // Track call targets
+            // Track call / jump targets BEFORE updating the propagator
+            // — the JMP itself is the resolution point, not its result.
             match instr.mnemonic() {
                 Mnemonic::Call => {
                     if instr.op_count() == 1 && matches!(instr.op0_kind(), OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64) {
@@ -451,21 +482,41 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
                         indirect_calls += 1;
                     }
                 }
+                Mnemonic::Jmp => {
+                    if instr.op_count() == 1 && matches!(instr.op0_kind(), OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64) {
+                        // Direct unconditional jump; falls into the
+                        // function-end logic below.
+                    } else {
+                        // Indirect JMP — try to resolve as a jump table.
+                        let resolved = resolve_indirect_jmp(&instr, &rf, sv, bitness, text_va, text_end_va);
+                        if !resolved.is_empty() {
+                            jump_targets.extend_from_slice(&resolved);
+                        }
+                    }
+                }
                 Mnemonic::Ret | Mnemonic::Retf => {
-                    // Hit a return, end the function here unless the
-                    // next instruction is still within max_size and is
-                    // padding (handled below by next_ip update).
-                    // For simplicity: stop at first ret + padding.
                     break;
                 }
                 _ => {}
             }
+
+            // Update register state AFTER call/jmp inspection so the
+            // propagator reflects the post-instruction view available
+            // to subsequent instructions.
+            record_instr(&mut rf, &instr);
+
             // Stop if we hit the next function boundary
             if next_ip >= next_start { break; }
         }
         let _ = last_ip;
         // Skip empty functions
         if size == 0 { continue; }
+
+        // Dedup jump-table targets (resolver may produce duplicates if
+        // the same JMP is decoded twice through some shape we don't
+        // model, or if a switch table has overlapping default cases).
+        jump_targets.sort_unstable();
+        jump_targets.dedup();
 
         out.push(DisasmFunction {
             name: name.clone(),
@@ -474,6 +525,7 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             instruction_count: instr_count,
             calls,
             indirect_calls,
+            jump_targets,
             is_entry: *start_va == entry_va,
         });
     }
@@ -532,13 +584,134 @@ mod tests {
             "error should list newly-supported archs: {err}");
     }
 
+    // ── Ship 1 #7: end-to-end jump-table resolution through decode_functions ──
+    //
+    // These tests exercise the SectionView/RegFile wiring that links
+    // the disasm decoder to the disasm_jt resolver. Pure-resolver
+    // unit tests live in disasm_jt::tests; these confirm the integration
+    // is correct by feeding crafted x64 bytes through the real
+    // decode_functions entry point that PE/ELF callers go through.
+
+    /// Pattern A — GCC/Clang PIC-style switch (relative offset table).
+    ///   lea    rdx, [rip+TABLE]         ; rdx = 0x2000
+    ///   movsxd rax, dword [rdx + rcx*4] ; rax = sign_extend(table[idx])
+    ///   add    rax, rdx                 ; rax = TABLE_BASE + offset
+    ///   jmp    rax
+    #[test]
+    fn decode_functions_resolves_pattern_a_switch() {
+        use crate::disasm_jt::{SectionMap, SectionView};
+
+        // 0x3000 byte image: text at va 0x1000..0x2000, table at 0x2000..0x3000
+        let mut data = vec![0u8; 0x3000];
+
+        // Function bytes at va 0x1000
+        // LEA rdx, [rip+0xff9]  → rip after instr is 0x1007, target = 0x2000
+        let code: [u8; 17] = [
+            0x48, 0x8d, 0x15, 0xf9, 0x0f, 0x00, 0x00, // lea rdx, [rip+0xff9]
+            0x48, 0x63, 0x04, 0x8a,                   // movsxd rax, dword ptr [rdx+rcx*4]
+            0x48, 0x01, 0xd0,                         // add rax, rdx
+            0xff, 0xe0,                               // jmp rax
+            0xc3,                                     // ret
+        ];
+        data[0x1000..0x1011].copy_from_slice(&code);
+
+        // Three valid case targets (offsets from TABLE_BASE=0x2000):
+        //   0x1100 = 0x2000 + (-0x0F00)
+        //   0x1200 = 0x2000 + (-0x0E00)
+        //   0x1300 = 0x2000 + (-0x0D00)
+        data[0x2000..0x2004].copy_from_slice(&(-0x0F00i32).to_le_bytes());
+        data[0x2004..0x2008].copy_from_slice(&(-0x0E00i32).to_le_bytes());
+        data[0x2008..0x200C].copy_from_slice(&(-0x0D00i32).to_le_bytes());
+        // Sentinel (out-of-text target → terminates walk):
+        data[0x200C..0x2010].copy_from_slice(&0x10_0000i32.to_le_bytes());
+
+        let mut map = SectionMap::new();
+        map.push(0x1000, 0x1000, 0x1000, 0x1000); // text
+        map.push(0x2000, 0x1000, 0x2000, 0x1000); // rdata
+        let sv = SectionView::new(&data, &map);
+
+        let text_bytes = &data[0x1000..0x2000];
+        let starts = vec![("dispatch".to_string(), 0x1000u64)];
+        let funcs = decode_functions(text_bytes, 0x1000, 64, &starts, 0x1000, &sv);
+
+        assert_eq!(funcs.len(), 1, "exactly one function decoded");
+        assert_eq!(funcs[0].name, "dispatch");
+        assert_eq!(funcs[0].jump_targets, vec![0x1100, 0x1200, 0x1300],
+            "Pattern A switch should resolve to three case targets");
+    }
+
+    /// Pattern B — Windows MSVC x64 absolute-pointer table.
+    ///   jmp    qword ptr [rcx*8 + 0x2000]
+    /// All target VAs come straight from the table — no register
+    /// state needed. Table holds 4 absolute u64 targets.
+    #[test]
+    fn decode_functions_resolves_pattern_b_absolute_table() {
+        use crate::disasm_jt::{SectionMap, SectionView};
+
+        let mut data = vec![0u8; 0x3000];
+
+        // jmp qword ptr [rcx*8 + 0x2000]
+        // Encoding: FF 24 CD 00 20 00 00
+        let code: [u8; 8] = [
+            0xff, 0x24, 0xcd, 0x00, 0x20, 0x00, 0x00, 0xc3,
+        ];
+        data[0x1000..0x1008].copy_from_slice(&code);
+
+        // Four absolute u64 targets within text [0x1000, 0x2000)
+        for (i, t) in [0x1100u64, 0x1200, 0x1300, 0x1400].iter().enumerate() {
+            data[0x2000 + i * 8..0x2000 + i * 8 + 8].copy_from_slice(&t.to_le_bytes());
+        }
+        // Sentinel
+        data[0x2020..0x2028].copy_from_slice(&0x9999u64.to_le_bytes());
+
+        let mut map = SectionMap::new();
+        map.push(0x1000, 0x1000, 0x1000, 0x1000);
+        map.push(0x2000, 0x1000, 0x2000, 0x1000);
+        let sv = SectionView::new(&data, &map);
+
+        let text_bytes = &data[0x1000..0x2000];
+        let starts = vec![("dispatch".to_string(), 0x1000u64)];
+        let funcs = decode_functions(text_bytes, 0x1000, 64, &starts, 0x1000, &sv);
+
+        assert_eq!(funcs.len(), 1);
+        assert_eq!(funcs[0].jump_targets, vec![0x1100, 0x1200, 0x1300, 0x1400]);
+    }
+
+    /// Stripped-binary case: indirect JMP with no recoverable history
+    /// (no LEA before it). Resolver must return empty without crashing.
+    #[test]
+    fn decode_functions_unresolvable_jmp_yields_no_targets() {
+        use crate::disasm_jt::{SectionMap, SectionView};
+
+        let mut data = vec![0u8; 0x2000];
+
+        // mov rax, rcx ; jmp rax ; ret  — rax untracked, JMP REG should not resolve
+        let code: [u8; 6] = [
+            0x48, 0x89, 0xc8,   // mov rax, rcx
+            0xff, 0xe0,         // jmp rax
+            0xc3,               // ret
+        ];
+        data[0x1000..0x1006].copy_from_slice(&code);
+
+        let mut map = SectionMap::new();
+        map.push(0x1000, 0x1000, 0x1000, 0x1000);
+        let sv = SectionView::new(&data, &map);
+
+        let text_bytes = &data[0x1000..0x2000];
+        let starts = vec![("opaque".to_string(), 0x1000u64)];
+        let funcs = decode_functions(text_bytes, 0x1000, 64, &starts, 0x1000, &sv);
+        assert_eq!(funcs.len(), 1);
+        assert!(funcs[0].jump_targets.is_empty(),
+            "no resolvable history → no jump targets, got {:?}", funcs[0].jump_targets);
+    }
+
     /// Ensure the existing DisasmFunction Debug derive is enough — used
     /// by the assertion message in functions_from_symbols_handles_*.
     #[test]
     fn disasm_function_debug_round_trip() {
         let f = DisasmFunction {
             name: "x".to_string(), address: 0, size: 0, instruction_count: 0,
-            calls: vec![], indirect_calls: 0, is_entry: false,
+            calls: vec![], indirect_calls: 0, jump_targets: vec![], is_entry: false,
         };
         let _ = format!("{f:?}");
     }

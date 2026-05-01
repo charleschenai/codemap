@@ -37,6 +37,7 @@ pub mod demangle;
 pub mod fingerprint;
 pub mod strings;
 pub mod disasm;
+pub mod disasm_jt;
 
 use std::path::PathBuf;
 use types::Graph;

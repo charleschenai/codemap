@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.27.0] — 2026-05-01
+
+### Added (Ship 1 #7 — jump-table resolver)
+- **`bin-disasm` now recovers compiler-emitted switch tables.** Indirect `JMP` instructions inside x86/x64 functions are run through a new resolver that walks back through the preceding instructions, recovers the table base + stride, reads the table bytes from the binary's section view, and emits each resolved case target as an edge in the BinaryFunction graph.
+
+  Three patterns covered (~95% of real-world switch dispatch):
+
+  - **Pattern A — PIC, GCC/Clang relative-offset table:**
+    `lea rdx, [rip+T] / movsxd rax, [rdx+idx*4] / add rax, rdx / jmp rax`
+  - **Pattern B — Windows MSVC x64 absolute pointer table:**
+    `jmp qword ptr [rip+T + idx*8]`
+  - **Pattern C — x86 32-bit absolute pointer table:**
+    `jmp dword ptr [T + idx*4]`
+
+  Pattern B/C resolve from the JMP itself; Pattern A uses a bounded backward constant-propagator (≤ 16 instructions). The propagator is the shared primitive Ship 1 #8, Ship 3 #5/#6, and Ship 4 #14 will reuse — when #8 lands as the second consumer, it'll be lifted into `dataflow_local.rs`.
+
+- **New `BinaryFunction.jump_targets` attribute** (count of recovered case targets per function) — surfaces switch-heavy code: parsers, opcode dispatchers, big-state-machine handlers. Functions are connected to other functions whose entry point matches a recovered target, catching tail-call style switch dispatchers (e.g. interpreter handlers as standalone functions).
+
+- **`bin-disasm` report shows `jt=N`** in the per-function summary line and a new `Jump-table targets: N resolved across M functions` aggregate line.
+
+- **New `SectionView` / `SectionMap` structs** in `disasm_jt.rs` — generic VA→file-offset mapper built once per binary, reused across all jump-table reads. PE walks every section into the map; ELF skips SHT_NOBITS (`.bss`) but keeps everything else.
+
+- **Bounds applied:** ≤ 64 entries per table, hard cap on out-of-`.text` targets, terminate walk on first invalid read or out-of-text target. Malformed binaries can't cause runaway.
+
+### Tests
+- 209 → **223 tests** (+14). Resolver unit tests cover all three patterns + RegFile state transitions (LEA / MOV / MOVSXD / MOVSX / MOVZX / ADD) + invalidation + negative cases. Three end-to-end tests in `disasm.rs` craft x64 byte sequences with real switch dispatchers and verify `decode_functions` populates `jump_targets` correctly through the SectionView/RegFile wiring.
+
+### Notes
+- ARM/AArch64 path (`functions_from_symbols`) initializes `jump_targets: vec![]` — resolver is x86/x64 only for v1. ARM jump-table recovery would need a yaxpeax-arm decoder; deferred.
+
+---
+
 ## [5.26.4] — 2026-05-01
 
 ### Added (docs only)

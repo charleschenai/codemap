@@ -65,6 +65,7 @@ fn register_into_graph(graph: &mut Graph, target: &str, r: &DisasmResult) {
         let size = func.size.to_string();
         let icnt = func.instruction_count.to_string();
         let icalls = func.indirect_calls.to_string();
+        let jt_count = func.jump_targets.len().to_string();
         let mut attrs: Vec<(&str, &str)> = vec![
             ("name", display.as_str()),
             ("address", &addr),
@@ -73,6 +74,12 @@ fn register_into_graph(graph: &mut Graph, target: &str, r: &DisasmResult) {
             ("indirect_calls", &icalls),
             ("binary_format", r.arch),
         ];
+        // Annotate functions whose switch tables we recovered. Useful
+        // for `pagerank --type bin_func`-style queries — high jump-target
+        // counts mark real switch-heavy code (parsers, dispatchers).
+        if !func.jump_targets.is_empty() {
+            attrs.push(("jump_targets", &jt_count));
+        }
         if func.is_entry { attrs.push(("is_entry", "true")); }
         // Always include the raw mangled name as fallback if demangling changed it
         if display != func.name {
@@ -86,6 +93,20 @@ fn register_into_graph(graph: &mut Graph, target: &str, r: &DisasmResult) {
             if by_addr.contains_key(callee_addr) {
                 let callee_id = format!("bin_func:{target}::{:#x}", callee_addr);
                 graph.add_edge(&func_id, &callee_id);
+            }
+        }
+
+        // Jump-table edges (Ship 1 #7). For each resolved switch-table
+        // target, if it lands at another function's entry point we
+        // emit an edge — this catches tail-call style switch dispatchers
+        // (e.g. interpreter big-switch handlers each implemented as a
+        // standalone function). Targets that fall into the middle of
+        // the same function are intra-function basic-block jumps and
+        // don't get edges (we don't have BB nodes in v1).
+        for jt in &func.jump_targets {
+            if by_addr.contains_key(jt) && *jt != func.address {
+                let target_id = format!("bin_func:{target}::{:#x}", jt);
+                graph.add_edge(&func_id, &target_id);
             }
         }
     }
@@ -113,10 +134,16 @@ fn format_report(target: &str, r: &DisasmResult) -> String {
         for f in by_size.iter().take(n_show) {
             let demangled = crate::demangle::demangle(&f.name).unwrap_or_else(|| f.name.clone());
             let entry_marker = if f.is_entry { " (ENTRY)" } else { "" };
+            let jt_marker = if f.jump_targets.is_empty() {
+                String::new()
+            } else {
+                format!("  jt={}", f.jump_targets.len())
+            };
             lines.push(format!(
-                "  {:#012x}  size={:>6}  insns={:>5}  calls={:>3}+{:<3} ind  {}{}",
+                "  {:#012x}  size={:>6}  insns={:>5}  calls={:>3}+{:<3} ind{}  {}{}",
                 f.address, f.size, f.instruction_count,
                 f.calls.len(), f.indirect_calls,
+                jt_marker,
                 truncate(&demangled, 60),
                 entry_marker,
             ));
@@ -129,10 +156,13 @@ fn format_report(target: &str, r: &DisasmResult) -> String {
     // Internal call graph stats
     let total_calls: usize = r.functions.iter().map(|f| f.calls.len()).sum();
     let total_indirect: usize = r.functions.iter().map(|f| f.indirect_calls).sum();
+    let total_jt: usize = r.functions.iter().map(|f| f.jump_targets.len()).sum();
+    let funcs_with_jt: usize = r.functions.iter().filter(|f| !f.jump_targets.is_empty()).count();
     let entries_found = r.functions.iter().filter(|f| f.is_entry).count();
     lines.push(String::new());
     lines.push(format!("Internal direct calls:    {total_calls}"));
     lines.push(format!("Indirect/imported calls:  {total_indirect}"));
+    lines.push(format!("Jump-table targets:       {total_jt} resolved across {funcs_with_jt} functions"));
     lines.push(format!("Entry point matched in functions: {}", if entries_found > 0 { "yes" } else { "no" }));
     lines.push(String::new());
     lines.push("Try: codemap pagerank --type bin_func  (rank functions inside the binary)".to_string());
