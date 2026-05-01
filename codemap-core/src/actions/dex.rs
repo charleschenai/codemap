@@ -15,7 +15,6 @@
 // Out of scope for v1: full Dalvik opcode catalog (we only decode invoke-*),
 // parameter type signatures, annotations, native method signatures.
 
-use std::collections::HashMap;
 
 /// One method discovered inside a DEX file.
 pub struct DexMethod {

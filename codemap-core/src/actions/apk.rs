@@ -297,7 +297,7 @@ fn walk_zip_entries(data: &[u8]) -> Vec<ZipEntry> {
 /// permission name patterns in the UTF-8 / UTF-16 string pool.
 fn parse_axml(data: &[u8]) -> (String, BTreeSet<String>) {
     let mut permissions = BTreeSet::new();
-    let mut package_name = String::new();
+    let package_name = String::new();
 
     // The string pool in compiled AXML stores strings as length-prefixed
     // UTF-16. Permission strings always follow the form

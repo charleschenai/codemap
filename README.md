@@ -1,10 +1,10 @@
 # codemap
 
-Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers, builds a file-level import graph and a function-level call graph, and exposes 164 analysis actions — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, spectral analysis (Fiedler bisection + Shi-Malik clustering + eigengap), backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies), web scraper blueprinting, LSP integration, and more — through a flat CLI.
+Rust-native codebase dependency analysis and binary reverse engineering. A single binary that scans your repo with tree-sitter AST parsers (18 languages), builds a file-level import graph and a function-level call graph, and exposes 180+ analysis actions across 47 EntityKinds — PageRank, HITS, articulation points, 17 centrality measures, Leiden community detection, dominator trees, Tarjan SCC, link prediction, temporal graph evolution, spectral analysis (Fiedler bisection + Shi-Malik clustering + eigengap), backward slicing, taint analysis, cross-language bridges, binary format analysis (PE/ELF/Mach-O/Java/WASM), x86/x64 disassembly with bounded backward propagator + jump-table resolver + CFF / opaque-pred / vtable / switch-table recovery, basic-block CFG + dominator tree + natural-loop discovery, **malware-triage trio** (anti-analysis ~250+ rules + crypto-const 47 sigs + signsrch 2,338 sigs + decoder-find heuristic scorer + capa-rules 1,045 YAML rules + PEiD 4,445 packer signatures + DiE EP-pattern fingerprints + COM CLSID/IID DB 28K entries + generic YARA via yara-x), source-language identification (Rust/Go/.NET), ELF OS detection cascade, embedded-PE XOR carver, schema parsing (Protobuf/OpenAPI/GraphQL/Docker/Terraform), security scanning (secrets, dependencies, LOLBins), web scraper blueprinting, LSP integration, and more — through a flat CLI.
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.26.4 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.52.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -21,11 +21,14 @@ The trigger phrases are case-insensitive substrings. The "use this" column is wh
 
 Reach for `codemap` BEFORE grep/find/Read whenever the user asks a structural,
 cross-file, or "what depends on what" question. codemap is a single Rust
-binary with 164 actions over a heterogeneous graph (33 EntityKinds covering
+binary with 180+ actions over a heterogeneous graph (47 EntityKinds covering
 source files, binaries, schemas, secrets, dependencies, ML model tensors,
-Android APKs, recon artifacts). Sub-second cold-cache on 800-3,200 file
-repos; ~96% fewer tool calls than grep-based exploration on equivalent
-questions. Pure-static — never makes network requests.
+Android APKs, recon artifacts, COM CLSID/IID, capa-rule matches, YARA-rule
+matches, packer fingerprints, decoder-function candidates, anti-analysis
+findings, crypto constants, vtables, switch tables, CUDA kernels). Sub-second
+cold-cache on 800-3,200 file repos; ~96% fewer tool calls than grep-based
+exploration on equivalent questions. Pure-static — never makes network
+requests.
 
 **Always pass `--dir <small_path>`.** Without it, codemap walks CWD recursively;
 from `~` that's 192K+ files and ~50 GB heap before OOM.
@@ -201,8 +204,30 @@ For non-source-file rankings, append a kind: `pagerank --type bin_func`, `betwee
 | "android native lib", "Flutter / RN .so", "AArch64 binary" | `unzip app.apk lib/arm64-v8a/libapp.so -d /tmp` then `codemap bin-disasm /tmp/lib/arm64-v8a/libapp.so` | AArch64 function inventory from STT_FUNC. |
 | "disassemble x86 / x64 / ARM / AArch64 binary" | `codemap bin-disasm /path/to/binary` | iced-x86 disasm + intra-binary call graph (x86/x64). Symbol-table-only function discovery (ARM/AArch64). |
 | "what language is this binary", "Go / Rust / .NET / PyInstaller / Electron" | `codemap lang-fingerprint /path/to/binary` | Section names + signature strings. → `Compiler` node. |
+| "what source language", "is this Rust / Go / .NET", "rustc version", "Go pclntab" | `codemap lang-id /path/to/binary` | FLOSS-derived: rustc commit-hash DB (119 mappings) + Go pclntab magic + .NET COM-descriptor → `language` + `language_version` attrs. Cross-OS (PE/ELF/Mach-O). |
+| "what OS does this ELF target", "Linux / FreeBSD / Android", "kernel module" | `codemap elf-os /path/to/binary` | 9-heuristic capa cascade: PT_NOTE / PT_INTERP / GLIBC verneed / NEEDED / .comment / Go buildinfo / OS-ABI byte → `os` attribute (24-variant enum). |
 | "is this packed", "NSIS / Inno / PyInstaller / 7z self-extract" | `codemap overlay-info /path/to/binary` | Detects appended data past EOS + classifies. |
+| "what packer is this", "UPX / Themida / VMProtect / ASPack / Enigma", "PEiD" | `codemap peid-scan /path/to/binary.exe` | 4,445 wildcarded byte sigs from Detect-It-Easy. Names packers, protectors, installers, compilers, joiners, SFX archives → `Packer` node with category. |
+| "DiE-style fingerprint", "Detect-It-Easy", "7-axis taxonomy" | `codemap die-fingerprint /path/to/binary` | DiE EP-pattern miner output → packer/protector/cryptor/installer/sfx/joiner/patcher/compiler/library/format axes. |
+| "section entropy", "is this packed by entropy" | `codemap section-entropy /path/to/binary` | Shannon entropy per section. >7.0 bits/byte = `packed:true` flag. |
+| "embedded PE", "second-stage payload", "XOR-encoded MZ", "dropper" | `codemap pe-carve /path/to/dropper.exe` | Brute-forces all 256 single-byte XOR keys for "MZ"/"PE\0\0" sentinels. Dumps carved PE to `/tmp/<basename>.carved-<offset>-<key>.bin`. |
+| "anti-disasm tricks", "opaque predicate jump-into-mid-instruction", "VMProtect / Themida" | `codemap disalign-bytes /path/to/binary` | Linear-sweep + recursive-descent overlap detector. x86/x64 only. |
 | "find binary variants in a fleet", "fuzzy match malware" | `codemap fuzzy-hash /path/to/bin` per binary, then `codemap fuzzy-match` | TLSH + ssdeep. Adds `similar_binary` edges. |
+
+#### Malware triage / static rule scanning
+
+| User says... | Reach for | Why |
+|--------------|-----------|-----|
+| "is this malware", "anti-VM / anti-debug / anti-sandbox checks", "evasion tradecraft" | `codemap anti-analysis /path/to/binary` | 250+ rules from al-khaser + pafish corpora with vendor sub-taxonomy (vbox/vmware/qemu/kvm/xen/cuckoo/sandboxie/wine) + (API,constant) propagator-backed call-site matcher + RTT detector. |
+| "what crypto is this binary doing", "AES / SHA / ChaCha20 / RC4", "find the keys" | `codemap crypto-const /path/to/binary` | 47 modern + classical crypto signatures (ChaCha20/Salsa20/Twofish/Camellia/SkipJack/XTEA/SPECK/CHASKEY/Sosemanuk/+ MD5/SHA/AES/DES/Blowfish/CRC tables). |
+| "deep crypto scan", "compression detection", "EC curves", "every algorithm signsrch finds" | `codemap signsrch /path/to/binary` | 2,338 byte-pattern sigs from Auriemma's signsrch corpus. 30× expansion of crypto coverage; routes anti-debug subset through anti-analysis. |
+| "capabilities of this binary", "ATT&CK technique identification", "MITRE tags", "what is this binary capable of" | `codemap capa-scan /path/to/binary` | 1,045 vendored Mandiant capa-rules YAML (Apache-2.0). File-scope subset. ATT&CK + MBC tags propagate to `CapaMatch` attrs. |
+| "scan with my YARA rules", "run signature-base", "custom YARA corpus" | `codemap yara-scan --rules-file <my.yar> /path/to/binary` | Generic engine via yara-x (BSD-3, no libyara C-FFI). Per-section VA-correct match output. |
+| "find the string decoder", "where's the decryption routine", "FLOSS-style decoder ID" | `codemap decoder-find /path/to/binary` | FLOSS-derived heuristic per-function CFG scorer. Pure-static — no emulation. x86/x64 only. |
+| "extract stackstrings", "cmp/mov-immediate stack-built strings" | `codemap stackstrings-quick /path/to/binary` | Regex pass over .text. |
+| "Windows COM usage", "what CLSIDs / IIDs does this binary touch", "Outlook / Office / Shell automation" | `codemap com-scan /path/to/binary.exe` | 3,639 CLSIDs + 25,306 IIDs from capa Apache-2.0 DB. ASCII GUID regex + raw 16-byte form (Microsoft byte-order swap). |
+| "Android protector", "Bangcle / Ijiami / DexProtector", "is this APK protected" | `codemap apk-fingerprint /path/to/app.apk` | 64 DiE-derived signatures: Alibaba / Bangcle / Ijiami / Jiagu / DexProtector / Kony / AppSolid / IL2CPP / Unity / SandHook. |
+| "LOLBin usage", "certutil / bitsadmin / mshta in this binary" | `codemap lolbin-scan /path/to/binary` | 101-name LOLBin list. Tags PE node with `uses_lolbin:true` + matched names. |
 
 #### Schemas / IaC
 

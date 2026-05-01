@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Heterogeneous-graph codebase analysis with 163 actions. ONE graph spans source files, PE/ELF/Mach-O binaries, DLL/symbol/function nodes, HTTP endpoints, schema tables, ML models, IaC resources, licenses, CVEs, certificates, Android packages, permissions — every graph algorithm (PageRank, Leiden, Fiedler, betweenness) runs uniformly across kinds. 17 NetworkX centrality measures, Leiden community detection, classical algorithms (Bellman-Ford / A* / Floyd-Warshall / SCC / dominator-tree / Steiner / VF2), spectral analysis (Fiedler bisection / Shi-Malik clustering / eigengap), temporal graph evolution from git history, link prediction, AST-powered call graphs across 15 languages, x86/x64 binary disassembly with intra-binary call graphs, supply-chain analysis (license-scan + offline CVE matching + SPDX/CycloneDX SBOM export + fuzzy hashing + Authenticode cert nodes), recon-artifact parsers (robots/sitemap/Wappalyzer-fingerprint/crt.sh). Pure static analyzer — consumes captured artifacts; never makes network requests. TRIGGER when asked to understand code structure, run an architectural audit, find load-bearing files, trace cross-domain dependencies (source→endpoint, binary→dll→cve), find graph bottlenecks (Fiedler), reverse engineer binaries, map APIs, scan for secrets, surface git-history hotspots, generate SBOMs, or parse recon artifacts (robots.txt, sitemap, crt.sh dumps).
+description: Heterogeneous-graph codebase analysis with 180+ actions across 47 EntityKinds. ONE graph spans source files, PE/ELF/Mach-O binaries (with their sections + entry points), DLL/symbol/function nodes, HTTP endpoints, schema tables, ML models (with their tensors + operators), IaC resources, licenses, CVEs, certificates, Android packages, permissions, hardcoded secrets, package-manifest dependencies, LSP-derived symbols, COM CLSID/IID, packer/protector fingerprints, capa-rule matches, YARA-rule matches, decoder-function candidates — every graph algorithm (PageRank, Leiden, Fiedler, betweenness) runs uniformly across kinds. 17 NetworkX centrality measures, Leiden community detection, classical algorithms (Bellman-Ford / A* / Floyd-Warshall / SCC / dominator-tree / Steiner / VF2), spectral analysis, temporal graph evolution, link prediction, AST-powered call graphs across 18 languages, x86/x64 binary disassembly with bounded backward propagator + jump-table resolver + CFF / opaque-pred / vtable / switch-table recovery, supply-chain analysis (license-scan + offline CVE matching + SPDX/CycloneDX SBOM + fuzzy hashing + Authenticode cert nodes), recon-artifact parsers (robots/sitemap/Wappalyzer-fingerprint/crt.sh), basic-block CFG + dominator tree + natural-loop discovery, malware-triage trio (anti-analysis ~250 rules + crypto-const 47 sigs + signsrch 2,338 sigs + decoder-find heuristic scorer + capa-rules 1,045 YAML rules + PEiD 4,445 packer signatures + DiE EP-pattern fingerprints + COM CLSID/IID DB 28K entries), source-language ID (Rust/Go/.NET), ELF OS detection cascade, embedded-PE XOR carver, section-entropy + disalign-bytes anti-disasm, APK protector fingerprinting, generic YARA scanner via yara-x. Pure static analyzer — consumes captured artifacts; never makes network requests. TRIGGER when asked to understand code structure, run an architectural audit, find load-bearing files, trace cross-domain dependencies, find graph bottlenecks (Fiedler), reverse engineer binaries, identify packers/protectors, detect crypto / anti-analysis / decoder functions, scan with capa or YARA rules, identify source language of a stripped binary, find embedded PE payloads, scan for secrets, surface git-history hotspots, generate SBOMs, or parse recon artifacts.
 user-invocable: true
 allowed-tools:
   - Bash(codemap *)
@@ -10,11 +10,11 @@ allowed-tools:
   - Grep
 ---
 
-# /codemap — Heterogeneous-Graph Codebase Analysis (163 actions)
+# /codemap — Heterogeneous-Graph Codebase Analysis (180+ actions)
 
-Single Rust binary. **One graph, many node types** (28 EntityKinds): source files coexist with PE/ELF/Mach-O binaries + their disassembled functions, DLLs, imported symbols, HTTP endpoints, web forms, schema tables, Protobuf/GraphQL/OpenAPI types, Docker/Terraform resources, ML model files, compilers, string literals, overlays, certificates, CVEs, licenses, Android packages, and permissions. Every graph algorithm runs uniformly across kinds — `pagerank --type bin_func` ranks functions inside binaries; `meta-path "source->dll->cve"` traces vulnerable transitive deps.
+Single Rust binary. **One graph, many node types** (47 EntityKinds): source files coexist with PE/ELF/Mach-O binaries + their disassembled functions, DLLs, imported symbols, HTTP endpoints, web forms, schema tables, Protobuf/GraphQL/OpenAPI types, Docker/Terraform resources, ML model files (+ tensors + operators), compilers, string literals, overlays, certificates, CVEs, licenses, Android packages, permissions, secrets, package-manifest deps, LSP symbols, switch/jump tables, vtables, **COM CLSID/IID, capa-rule matches, YARA-rule matches, packer fingerprints, decoder-function candidates, anti-analysis findings, crypto constants, CUDA kernels, binary-fingerprint nodes**. Every graph algorithm runs uniformly across kinds — `pagerank --type bin_func` ranks functions inside binaries; `meta-path "source->dll->cve"` traces vulnerable transitive deps; `meta-path "pe->capa_match"` enumerates malware capabilities.
 
-15 languages via tree-sitter AST. Pure static analyzer — codemap **never makes network requests**. Consumes captured artifacts (files you name explicitly).
+18 languages via tree-sitter AST. Pure static analyzer — codemap **never makes network requests**. Consumes captured artifacts (files you name explicitly).
 
 ---
 
@@ -212,7 +212,7 @@ Intent → action lookup. Most codebase questions resolve to one of these:
 
 ## Tier 3 — Full action catalog by category
 
-163 actions total. Tier 1+2 above covers the questions you'll actually ask. The rest of this section is a reference index.
+180+ actions total. Tier 1+2 above covers the questions you'll actually ask. The rest of this section is a reference index.
 
 ### Analysis (14)
 `stats` `trace` `blast-radius` `phone-home` `coupling` `dead-files` `circular` `exports`/`functions` `callers` `hotspots` `size` `layers` `diff` `orphan-exports`
@@ -259,8 +259,23 @@ Intent → action lookup. Most codebase questions resolve to one of these:
 ### Reverse engineering — non-PE (4)
 `elf-info` (demangled symbols + DT_NEEDED → Dll edges + free-form string promotion) `macho-info` (LC_LOAD_DYLIB) `java-class` (constant pool + methods) `wasm-info` (function-level call graph)
 
-### Binary triage / fingerprinting (4)
-`lang-fingerprint` (compiler / runtime detection) `overlay-info` (NSIS/Inno/PyInstaller/ZIP/entropy classification) `fuzzy-hash` (TLSH + ssdeep) `fuzzy-match` (similarity edges)
+### Binary triage / fingerprinting (8)
+`lang-fingerprint` (compiler / runtime detection) `overlay-info` (NSIS/Inno/PyInstaller/ZIP/entropy classification) `fuzzy-hash` (TLSH + ssdeep) `fuzzy-match` (similarity edges) `lang-id` (Rust commit-hash + Go pclntab + .NET COM-descriptor → `language` attribute, cross-OS) `peid-scan` (4,445 PEiD wildcarded byte sigs from DiE — names UPX/Themida/VMProtect/ASPack/Enigma/etc.) `die-fingerprint` (DiE EP-pattern miner output → 7-axis taxonomy) `elf-os` (9-heuristic OS-detection cascade ported from capa: PT_NOTE / PT_INTERP / GLIBC verneed / NEEDED / .comment / Go buildinfo / OS-ABI byte → `os` attribute, 24-variant enum)
+
+### Malware triage / static rule scanning (10)
+`anti-analysis` (~250+ rules; al-khaser + pafish unified YAML corpus + family sub-taxonomy + (API,constant) propagator-backed call-site matcher + RTT detector) `crypto-const` (47 modern + classical sigs — ChaCha20/Salsa20/Twofish/Camellia/SkipJack/XTEA/SPECK/CHASKEY/Sosemanuk/WellRNG512/+ legacy MD5/SHA/AES/DES/Blowfish/RC6/CRC tables/Base64) `signsrch` (2,338 byte-pattern sigs from Auriemma's signsrch corpus — 30× expansion of crypto coverage; routes anti-debug subset through anti-analysis) `capa-scan` (1,045 vendored Mandiant capa-rules YAML; file-scope subset; ATT&CK + MBC tagging) `yara-scan` (generic engine via yara-x; user-supplied --rules-file / --rules-dir; per-section VA-correct match output) `decoder-find` (FLOSS-derived heuristic per-function CFG scorer for string-decoder candidates; x86/x64 only) `stackstrings-quick` (regex pass over .text for cmp/mov-immediate stackstring patterns) `section-entropy` (Shannon byte entropy per section → `packed:true` flag at >7.0 bits/byte) `disalign-bytes` (linear-sweep + recursive-descent overlap detector → opaque-predicate jump-into-mid-instruction; x86/x64 only) `pe-carve` (XOR-keyed embedded-PE carver — brute-forces 256 single-byte keys for "MZ"/"PE\0\0" sentinels)
+
+### Windows / COM (1)
+`com-scan` (3,639 CLSIDs + 25,306 IIDs from capa Apache-2.0 DB; ASCII GUID regex + raw 16-byte with Microsoft byte-order swap → ComClass / ComInterface nodes)
+
+### Android (2)
+`apk-info` (ZIP walk + permission scan + dangerous-perm flag) `apk-fingerprint` (64 DiE-derived Android protector / packer signatures: Bangcle / Ijiami / Jiagu / DexProtector / IL2CPP / Unity / SandHook / etc.)
+
+### Endpoint enrichment (1)
+`lolbin-scan` (101 LOLBin name list + dyndns-provider / valid-TLD whitelists applied as attributes on PE / endpoint nodes)
+
+### Basic-block CFG infrastructure (foundational)
+The `cfg::` module (used internally by detectors): `build_cfg(insns) → BbCfg`, `dominators(cfg, entry)`, `natural_loops(cfg, doms)`, `sccs(cfg)`. Block-type / edge-type / access-flag taxonomy modeled on Quokka. Underpins CFF / opaque-pred / vtable v2 detectors and the bounded backward propagator (`dataflow_local::RegFile::get`).
 
 ### Schemas (5)
 `proto-schema` `openapi-schema` `graphql-schema` `docker-map` `terraform-map`

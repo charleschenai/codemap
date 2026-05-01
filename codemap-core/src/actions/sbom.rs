@@ -127,7 +127,7 @@ pub fn to_spdx(graph: &Graph) -> String {
 pub fn to_cyclonedx(graph: &Graph) -> String {
     let now = chrono_iso8601_now();
     let scan_dir = &graph.scan_dir;
-    let doc_name = format!("codemap-sbom-{}", scan_dir.rsplit('/').next().unwrap_or("repo"));
+    let _doc_name = format!("codemap-sbom-{}", scan_dir.rsplit('/').next().unwrap_or("repo"));
     let serial = format!("urn:uuid:{}", fnv_hex(scan_dir.as_bytes()));
 
     // Components

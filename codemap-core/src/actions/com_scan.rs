@@ -196,7 +196,7 @@ fn scan(data: &[u8]) -> Vec<Match> {
     let mut seen: std::collections::HashSet<([u8; 16], &'static str)> =
         std::collections::HashSet::new();
 
-    let mut record = |guid: [u8; 16], source: &'static str, offset: usize, out: &mut Vec<Match>, seen: &mut std::collections::HashSet<([u8; 16], &'static str)>| {
+    let record = |guid: [u8; 16], source: &'static str, offset: usize, out: &mut Vec<Match>, seen: &mut std::collections::HashSet<([u8; 16], &'static str)>| {
         if let Some(name) = cls.lookup(&guid) {
             if seen.insert((guid, source)) {
                 out.push(Match { guid, name: name.to_string(), is_class: true, source, offset });
