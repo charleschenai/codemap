@@ -4,7 +4,7 @@ Rust-native codebase dependency analysis and binary reverse engineering. A singl
 
 No servers. No databases. No API keys. One static binary, `.codemap/cache.bincode` next to your repo for incremental scans, and a `/codemap` Claude Code skill that wraps the same binary.
 
-**Version:** 5.21.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
+**Version:** 5.22.0 | **Workspace:** `codemap-core` (library) + `codemap-cli` (binary) + `codemap-napi` (Node.js bindings) | **License:** MIT
 
 ---
 
@@ -275,7 +275,7 @@ For analyzing compiled binaries, legacy databases, and applications without sour
 | `dbf-schema <file>` | Parse dBASE III/IV/FoxPro `.DBF` file headers — version, last-update date, record count, full field descriptors. |
 | `dotnet-meta <file>` | .NET CLR metadata parser. **(5.15.2+)** Each MethodDef row registers as a `BinaryFunction` node with `attrs["binary_format"]=dotnet, kind_detail=method, rva=...` hanging off the `DotnetAssembly`. |
 | `sql-extract <file\|dir>` | Smart SQL extraction. Parses operation types (SELECT/INSERT/UPDATE/DELETE/CREATE/ALTER/EXEC), builds a table-to-operation access matrix, extracts JOIN relationships. |
-| `binary-diff <file1> <file2>` | Compare two PE binaries — imports / strings / version-info delta. |
+| `binary-diff <file1> <file2>` | Compare two PE binaries — imports / strings / version-info delta. **(5.22.0+)** Promotes the diff into a cross-graph: 2 versioned `PeBinary` nodes (`pe:diff:{session}:a` and `:b`), one `BinaryFunction` per unique imported symbol with `diff_status` attr (`added` / `removed` / `unchanged`), one `Dll` node per imported library with same status attr, all under a `diff:{session}:` namespace so they never conflict with main-scan nodes. Session ID is a stable hash of both file paths → re-running is idempotent. Killer queries: `attribute-filter diff_status=added` finds new functions across two versions, `pagerank --type bin_func` ranks by import-graph centrality across both sides, `meta-path "pe->bin_func"` enumerates per-side. |
 
 ### LSP (5)
 

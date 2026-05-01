@@ -2307,7 +2307,19 @@ fn read_compressed_uint(data: &[u8], offset: usize) -> (usize, usize) {
 
 // ── 8. binary_diff ─────────────────────────────────────────────────
 
-pub fn binary_diff(_graph: &mut Graph, target: &str) -> String {
+/// FNV-1a 64-bit hash for a stable diff session ID. Same input pair →
+/// same session ID across runs → idempotent diff promotion (re-running
+/// the same diff doesn't accumulate ghost nodes).
+fn binary_diff_session_id(p1: &str, p2: &str) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for byte in p1.bytes().chain(b"\0".iter().copied()).chain(p2.bytes()) {
+        h ^= byte as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+pub fn binary_diff(graph: &mut Graph, target: &str) -> String {
     let parts: Vec<&str> = target.splitn(2, ' ').collect();
     if parts.len() != 2 {
         return "Usage: binary-diff <file1> <file2>\nCompare two PE binaries.".to_string();
@@ -2397,11 +2409,111 @@ pub fn binary_diff(_graph: &mut Graph, target: &str) -> String {
             .flat_map(|d| d.functions.iter().map(|f| format!("{}!{}", d.name.to_ascii_lowercase(), f)))
             .collect();
 
-        let added_funcs: usize = all_funcs2.difference(&all_funcs1).count();
-        let removed_funcs: usize = all_funcs1.difference(&all_funcs2).count();
+        let added_funcs: BTreeSet<&String> = all_funcs2.difference(&all_funcs1).collect();
+        let removed_funcs: BTreeSet<&String> = all_funcs1.difference(&all_funcs2).collect();
+        let unchanged_funcs: BTreeSet<&String> = all_funcs1.intersection(&all_funcs2).collect();
 
-        out.push_str(&format!("  Added functions: {}\n", added_funcs));
-        out.push_str(&format!("  Removed functions: {}\n", removed_funcs));
+        out.push_str(&format!("  Added functions: {}\n", added_funcs.len()));
+        out.push_str(&format!("  Removed functions: {}\n", removed_funcs.len()));
+
+        // 5.22.0 (Option B cross-graph diff): all diff nodes live under
+        // the `diff:{session}:` namespace so they never conflict with
+        // main-scan nodes. Session ID is a stable hash of both file
+        // paths → re-running the same diff is idempotent (no ghost
+        // accumulation across runs).
+        let session = binary_diff_session_id(parts[0], parts[1]);
+        let bin_a = format!("pe:diff:{session}:a");
+        let bin_b = format!("pe:diff:{session}:b");
+        let added_count_str = added_funcs.len().to_string();
+        let removed_count_str = removed_funcs.len().to_string();
+        let added_dlls_count = added_dlls.len().to_string();
+        let removed_dlls_count = removed_dlls.len().to_string();
+        let size1_str = size1.to_string();
+        let size2_str = size2.to_string();
+        let delta_attr = (size2 as i64 - size1 as i64).to_string();
+
+        graph.ensure_typed_node(&bin_a, EntityKind::PeBinary, &[
+            ("path", parts[0]),
+            ("name", &fname1),
+            ("diff_session", &session),
+            ("diff_side", "a"),
+            ("size", &size1_str),
+            ("diff_added_funcs", &added_count_str),
+            ("diff_removed_funcs", &removed_count_str),
+            ("diff_added_dlls", &added_dlls_count),
+            ("diff_removed_dlls", &removed_dlls_count),
+        ]);
+        graph.ensure_typed_node(&bin_b, EntityKind::PeBinary, &[
+            ("path", parts[1]),
+            ("name", &fname2),
+            ("diff_session", &session),
+            ("diff_side", "b"),
+            ("size", &size2_str),
+            ("diff_size_delta", &delta_attr),
+            ("diff_added_funcs", &added_count_str),
+            ("diff_removed_funcs", &removed_count_str),
+        ]);
+
+        // Promote each unique imported function (across both sides)
+        // to a single bin_func node with diff_status attr. Capped at
+        // 5000 to stay consistent with other ML/string caps.
+        let mut written = 0usize;
+        let cap = 5000usize;
+        for f in all_funcs1.union(&all_funcs2) {
+            if written >= cap { break; }
+            let func_id = format!("bin_func:diff:{session}:{f}");
+            let in_a = all_funcs1.contains(f.as_str());
+            let in_b = all_funcs2.contains(f.as_str());
+            let status = match (in_a, in_b) {
+                (true, true)  => "unchanged",
+                (true, false) => "removed",
+                (false, true) => "added",
+                _             => continue,  // unreachable
+            };
+            // Split "dll!func" — keep as compound name but expose dll attr.
+            let (dll, func_name) = match f.split_once('!') {
+                Some((d, n)) => (d, n),
+                None         => (f.as_str(), f.as_str()),
+            };
+            graph.ensure_typed_node(&func_id, EntityKind::BinaryFunction, &[
+                ("name", func_name),
+                ("dll", dll),
+                ("binary_format", "pe"),
+                ("kind_detail", "imported_symbol"),
+                ("diff_status", status),
+                ("diff_session", &session),
+            ]);
+            if in_a { graph.add_edge(&bin_a, &func_id); }
+            if in_b { graph.add_edge(&bin_b, &func_id); }
+            written += 1;
+        }
+
+        // DLL-level diff nodes — same status pattern but coarser grain.
+        for dll in dlls1.union(&dlls2) {
+            let dll_id = format!("dll:diff:{session}:{dll}");
+            let in_a = dlls1.contains(dll);
+            let in_b = dlls2.contains(dll);
+            let status = match (in_a, in_b) {
+                (true, true)  => "unchanged",
+                (true, false) => "removed",
+                (false, true) => "added",
+                _             => continue,
+            };
+            graph.ensure_typed_node(&dll_id, EntityKind::Dll, &[
+                ("name", dll.as_str()),
+                ("diff_status", status),
+                ("diff_session", &session),
+            ]);
+            if in_a { graph.add_edge(&bin_a, &dll_id); }
+            if in_b { graph.add_edge(&bin_b, &dll_id); }
+        }
+
+        out.push_str(&format!(
+            "\n[graph] diff session {session}: 2 PeBinary nodes, {} bin_func nodes ({} added / {} removed / {} unchanged), {} Dll nodes — namespaced under `diff:{session}:`.\n",
+            written,
+            added_funcs.len(), removed_funcs.len(), unchanged_funcs.len(),
+            dlls1.union(&dlls2).count(),
+        ));
     } else {
         out.push_str("  (could not parse imports from one or both files)\n");
     }
@@ -2648,4 +2760,47 @@ fn extract_version_string(data: &[u8]) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 5.22.0: verifies binary_diff_session_id is deterministic across
+    /// invocations with the same input pair (so re-running binary-diff
+    /// produces idempotent diff:{session}: graph nodes — no ghost
+    /// accumulation), and that swapping the order of inputs produces a
+    /// distinct session (a vs b matters: side `a` is always the first
+    /// argument).
+    #[test]
+    fn binary_diff_session_id_is_stable_and_order_sensitive() {
+        let s1 = binary_diff_session_id("/tmp/foo.exe", "/tmp/bar.exe");
+        let s2 = binary_diff_session_id("/tmp/foo.exe", "/tmp/bar.exe");
+        assert_eq!(s1, s2, "same input pair must produce same session ID");
+
+        let s3 = binary_diff_session_id("/tmp/bar.exe", "/tmp/foo.exe");
+        assert_ne!(s1, s3, "swapped input order must produce distinct session");
+
+        // Hash should be a 16-char hex string for FNV-1a 64-bit.
+        assert_eq!(s1.len(), 16, "session ID should be 16 hex chars");
+        assert!(s1.chars().all(|c| c.is_ascii_hexdigit()),
+            "session ID should be hex-only: {s1}");
+    }
+
+    #[test]
+    fn binary_diff_handles_missing_file_gracefully() {
+        use crate::types::Graph;
+        use std::collections::HashMap;
+        let mut g = Graph {
+            nodes: HashMap::new(),
+            scan_dir: ".".to_string(),
+            cpg: None,
+        };
+        let out = binary_diff(&mut g, "/nonexistent/a.exe /nonexistent/b.exe");
+        assert!(out.contains("File not found"),
+            "should return File-not-found error, got: {out}");
+        // No nodes should be created when files don't exist.
+        assert_eq!(g.nodes.len(), 0,
+            "no graph nodes should be created when input files are missing");
+    }
 }

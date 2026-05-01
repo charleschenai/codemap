@@ -1993,3 +1993,74 @@ unaffected.
       needs a design pass (same-graph with versioned binary
       nodes, or cross-graph with separate diff edges between
       two scans?). Punted to its own design conversation.
+
+
+[2026-05-01] feat: 5.22.0 — binary_diff cross-graph promotion (Option B) (#56)
+  source: post-5.21.0 audit had G5 (binary_diff signature is
+  &mut Graph but ignored) flagged as the LAST remaining graph-
+  integration gap, deferred for design input. Charles picked
+  Option B (cross-graph): the diff result lives in a separate
+  diff: namespace so it never pollutes main-scan nodes.
+
+  Design (Option B cross-graph diff):
+
+  All diff nodes namespaced under diff:{session}: where session
+  is a stable FNV-1a 64-bit hash of both file paths. Re-running
+  the same diff produces the same node IDs → idempotent (no
+  ghost accumulation across runs). Order-sensitive (left vs
+  right matters: side a is always the first argument).
+
+  Nodes registered per binary_diff invocation:
+
+  Two PeBinary nodes (pe:diff:{session}:a and :b) with attrs
+    name, path, size, diff_session, diff_side, plus diff-summary
+    counts (diff_added_funcs / diff_removed_funcs /
+    diff_added_dlls / diff_removed_dlls / diff_size_delta).
+
+  One BinaryFunction node per unique imported symbol across
+    both sides, with diff_status attr in {added, removed,
+    unchanged}. Same node receives edges from BOTH binary nodes
+    when status is `unchanged` (so the function appears with
+    edges from both pe:diff:{session}:a AND :b). Cap of 5000
+    function nodes per call to stay consistent with other ML/
+    string caps.
+
+  One Dll node per imported library, same diff_status pattern.
+  Coarser-grained companion to the function-level promotion.
+
+  Killer queries unlocked:
+
+    attribute-filter diff_status=added           — new functions
+    attribute-filter diff_status=removed         — deleted functions
+    attribute-filter diff_session={hash}         — scope to one diff
+    pagerank --type bin_func                     — most central across both
+    meta-path "pe->bin_func"                     — per-side enumeration
+    pagerank --type dll                          — most-imported DLLs across both
+
+  Implementation: src/actions/reverse/pe.rs binary_diff signature
+  flipped from _graph: &mut Graph to graph: &mut Graph. Promotion
+  block inserted after the existing import-comparison logic
+  (collected added/removed/unchanged sets that previously only
+  produced text counts). New helper binary_diff_session_id() uses
+  FNV-1a 64-bit on path1 + null + path2.
+
+  Tests: 197 passing (was 195, +2). New unit tests in pe.rs:
+    - binary_diff_session_id_is_stable_and_order_sensitive
+      (idempotency + order-sensitivity + 16-char hex format)
+    - binary_diff_handles_missing_file_gracefully (returns
+      File-not-found, no graph nodes leaked)
+
+  Action count: 163 (unchanged). EntityKinds: 33 (unchanged —
+  reuses existing PeBinary / BinaryFunction / Dll via diff_status
+  attr).
+
+  ALL GRAPH-INTEGRATION GAPS NOW CLOSED.
+
+  Session arc 5.16.2 → 5.22.0 (8 releases): closed 8/8 audited
+  gaps, added 5 new EntityKinds (Secret + Dependency + MlTensor +
+  MlOperator + BinarySection), wired LSP / dep_tree / api_surface /
+  pe_debug / pe_meta / pe_resources / elf_info / macho_info /
+  cuda_info / pyc_info / gguf_info / safetensors_info / onnx_info /
+  pe_sections / binary_diff / secret_scan into the heterogeneous
+  graph. Tests 187 → 197 (+10). Action count steady at 163 (every
+  win was a quality promotion to existing actions).
