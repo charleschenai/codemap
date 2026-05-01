@@ -49,6 +49,22 @@ pub struct DisasmFunction {
     /// looping" indicator and as a denominator for the
     /// crypto-XOR-in-loop ratio.
     pub back_edge_count: usize,
+    /// CFF (Control-Flow Flattening) detection signal — Ship 3 #5.
+    /// In a flattened function, almost every basic block branches
+    /// back to a single dispatcher block which then re-dispatches
+    /// to the next state. Approximation without full basic-block
+    /// extraction: count back-edges per target VA; if one target
+    /// captures ≥ 3 back-edges AND the function has resolved
+    /// jump-table targets, the function is likely flattened.
+    /// `cff_dispatcher_va` = target VA with the most back-edges
+    /// (None if no clear dominant target). `cff_dispatcher_hits` =
+    /// how many back-edges converge there. `cff_score` = ratio of
+    /// dispatcher_hits to total_back_edges (1.0 = every back-edge
+    /// goes to the same dispatcher; near-1.0 + jump_targets > 0
+    /// → high CFF likelihood).
+    pub cff_dispatcher_va: Option<u64>,
+    pub cff_dispatcher_hits: usize,
+    pub cff_score: f64,
     pub is_entry: bool,
 }
 
@@ -437,6 +453,9 @@ fn functions_from_symbols(
             jump_targets: Vec::new(),
             crypto_xor_in_loop: 0,
             back_edge_count: 0,
+            cff_dispatcher_va: None,
+            cff_dispatcher_hits: 0,
+            cff_score: 0.0,
             is_entry: *va == entry_va,
         });
     }
@@ -591,6 +610,24 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             })
             .count();
 
+        // CFF detection — find the back-edge target with the most
+        // converging back-edges. In a flattened function, virtually
+        // every back-edge points at the dispatcher block.
+        let mut be_targets: std::collections::HashMap<u64, usize> =
+            std::collections::HashMap::with_capacity(back_edges.len());
+        for &(t, _s) in &back_edges {
+            *be_targets.entry(t).or_insert(0) += 1;
+        }
+        let (cff_dispatcher_va, cff_dispatcher_hits) = be_targets.iter()
+            .max_by_key(|(_va, n)| **n)
+            .map(|(&va, &n)| (Some(va), n))
+            .unwrap_or((None, 0));
+        let cff_score = if back_edges.is_empty() {
+            0.0
+        } else {
+            cff_dispatcher_hits as f64 / back_edges.len() as f64
+        };
+
         out.push(DisasmFunction {
             name: name.clone(),
             address: *start_va,
@@ -601,6 +638,9 @@ fn decode_functions(text: &[u8], text_va: u64, bitness: u32, starts: &[(String, 
             jump_targets,
             crypto_xor_in_loop,
             back_edge_count: back_edges.len(),
+            cff_dispatcher_va,
+            cff_dispatcher_hits,
+            cff_score,
             is_entry: *start_va == entry_va,
         });
     }
@@ -787,7 +827,9 @@ mod tests {
         let f = DisasmFunction {
             name: "x".to_string(), address: 0, size: 0, instruction_count: 0,
             calls: vec![], indirect_calls: 0, jump_targets: vec![],
-            crypto_xor_in_loop: 0, back_edge_count: 0, is_entry: false,
+            crypto_xor_in_loop: 0, back_edge_count: 0,
+            cff_dispatcher_va: None, cff_dispatcher_hits: 0, cff_score: 0.0,
+            is_entry: false,
         };
         let _ = format!("{f:?}");
     }

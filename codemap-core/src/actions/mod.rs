@@ -40,6 +40,7 @@ pub mod crypto_const;
 pub mod cuda_trace;
 pub mod crypto_loops;
 pub mod switch_recovery;
+pub mod cff_detect;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -288,6 +289,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // 1 #7's per-function jump_targets into structured SwitchTable
         // graph nodes with case_count / pattern / confidence.
         "switch-recovery" | "switches" | "dispatchers" | "switch-tables" => Ok(switch_recovery::switch_recovery(graph, target)),
+        // CFF detector (5.35.0 — Ship 3 #5). Heuristic v1: flags
+        // functions where back-edges converge on a single dispatcher
+        // AND a switch table is present. Real Blazytko-port = v2.
+        "cff-detect" | "find-cff" | "flatten-detect" | "obfuscation-detect" => Ok(cff_detect::cff_detect(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

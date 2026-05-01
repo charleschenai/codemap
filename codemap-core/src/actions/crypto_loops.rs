@@ -157,6 +157,9 @@ mod tests {
             jump_targets: vec![],
             crypto_xor_in_loop: xor,
             back_edge_count: be,
+            cff_dispatcher_va: None,
+            cff_dispatcher_hits: 0,
+            cff_score: 0.0,
             is_entry: false,
         }
     }

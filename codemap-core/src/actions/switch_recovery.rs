@@ -244,6 +244,9 @@ mod tests {
             jump_targets: jt.to_vec(),
             crypto_xor_in_loop: 0,
             back_edge_count: 0,
+            cff_dispatcher_va: None,
+            cff_dispatcher_hits: 0,
+            cff_score: 0.0,
             is_entry: false,
         }
     }

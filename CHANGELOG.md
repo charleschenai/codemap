@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.35.0] — 2026-05-01
+
+### Added (Ship 3 #5 — CFF detector, heuristic v1)
+- **New `cff-detect` action** (aliases: `find-cff`, `flatten-detect`, `obfuscation-detect`). Surfaces functions whose control flow looks **flattened** by Control-Flow Flattening obfuscators (OLLVM, custom packers, bytecode-style malware loaders). A flattened function abandons natural structured flow in favor of one giant switch dispatcher that re-dispatches to the next state — the giveaway is that virtually every back-edge points at the same target.
+
+  Heuristic (no basic-block CFG required for v1):
+  - **`cff_score`** = `dispatcher_hits / back_edge_count` — fraction of back-edges that converge on the single most-targeted address. 1.0 = every back-edge goes to one dispatcher.
+  - **High confidence:** `score ≥ 0.8` AND `back_edges ≥ 5` AND `jump_targets ≥ 8`.
+  - **Medium:** `score ≥ 0.6` AND `back_edges ≥ 3` AND `jump_targets ≥ 4`.
+  - **Low:** `score ≥ 0.6` AND `back_edges ≥ 5` AND `jump_targets == 0` (dispatcher-shaped but no switch — speculative).
+
+- **Three new fields on `DisasmFunction`**: `cff_dispatcher_va: Option<u64>`, `cff_dispatcher_hits: usize`, `cff_score: f64`. Computed inline in `decode_functions` from the back_edge data already collected for crypto-loop detection — zero added cost per instruction.
+
+- **Each flagged function becomes a `SwitchTable` graph node** with `pattern="cff_dispatcher"`, plus the cff_score / dispatcher_va / dispatcher_hits / confidence attrs. Reuses the SwitchTable EntityKind from Ship 4 #24 to keep the dispatcher family unified.
+
+### Honest limitations (v1 → v2)
+- **No basic-block CFG yet.** The real Tim Blazytko `calc_flattening_score` algorithm computes per-function dominator trees and checks `len(dominated(b)) / len(blocks) > 0.5` gated by a back-edge from inside the dominated set. v2 will port that algorithm once basic-block extraction lands inside `decode_functions`.
+- **State-machine-DFA false positives.** Hand-written parser DFAs / network-protocol state machines / interpreter dispatcher loops legitimately use the same shape (one back-edge target + switch dispatch). Confidence levels separate "obviously CFF" from "could be a real state machine" — analyst still needs to read the code.
+- **No CFF-without-switch detection.** Some CFF variants emit jump tables in non-standard ways the resolver doesn't catch (or use indirect calls instead of jumps). Those slip through with `score ≥ 0.6` but `jump_targets == 0`, captured as "low" confidence.
+
+### Tests
+- 268 → **274 tests** (+6). Confidence levels at high/medium/low, doesn't flag plain for-loops, doesn't flag plain switches without dispatchers, empty-hits report.
+
+---
+
 ## [5.34.1] — 2026-05-01
 
 ### Refactored
