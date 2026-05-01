@@ -614,6 +614,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         BinaryFingerprint => "shape=note, fillcolor=\"#f48fb1\", style=filled, fontsize=10",
         YaraRule          => "shape=note, fillcolor=\"#fff176\", style=filled, fontsize=10",
         YaraMatch         => "shape=ellipse, fillcolor=\"#ffd54f\", style=filled, fontsize=9",
+        Packer            => "shape=doubleoctagon, fillcolor=\"#ffab91\", style=filled, fontsize=10",
     }
 }
 
@@ -777,6 +778,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         BinaryFingerprint => "fingerprint",
         YaraRule          => "yara_rule",
         YaraMatch         => "yara_match",
+        Packer            => "packer",
     }
 }
 

@@ -54,6 +54,7 @@ pub mod endpoint_enrich;
 pub mod elf_os;
 pub mod signsrch;
 pub mod yara_scan;
+pub mod peid;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -345,6 +346,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // YARA scanner (5.48.0). Generic runtime engine for any
         // user-supplied YARA corpus. Pure-Rust via yara-x.
         "yara-scan" | "yara" | "yara-rules" => Ok(yara_scan::yara_scan(graph, target)),
+        // PEiD scanner (5.49.0 — Ship 5 #15/#04/#07). 4,445 wildcarded
+        // byte signatures from Detect-It-Easy's PEiD corpus.
+        "peid-scan" | "peid" | "pe-fingerprint" | "packer-id" | "detect-easy" =>
+            Ok(peid::peid_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

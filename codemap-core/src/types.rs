@@ -364,6 +364,24 @@ pub enum EntityKind {
     /// binary; attribute filter on `rule_name` extracts every
     /// hit of a specific rule.
     YaraMatch,
+    /// Packer / protector / installer / compiler / SFX-archive
+    /// fingerprint matched against the Detect-It-Easy PEiD signature
+    /// corpus (5.38.0 — Ship 5 #15/#04/#07 PEiD scanner). 4,445
+    /// wildcarded byte signatures bundled at compile time, broken
+    /// out by category. Most signatures (~88%) are anchored at the
+    /// PE entry point (`ep_only=true`); the rest scan the entire
+    /// file. Edges: binary → packer. attrs: name (full PEiD label
+    /// including author tag, e.g. "UPX 3.91 -> Markus Oberhumer,
+    /// Laszlo Molnar & John Reiser"), category (packer / protector
+    /// / installer / compiler / joiner / sfx_archive / file_format
+    /// / overlay / protection), offset (file offset of the match),
+    /// ep_only (true / false), source_db (which userdb file the
+    /// rule came from). Killer queries: `meta-path "pe->packer"`
+    /// enumerates the packer/installer landscape across a binary
+    /// corpus; `pagerank --type packer` ranks the most-prevalent
+    /// packers; attribute filter on `category=protector` finds
+    /// every commercially-protected sample.
+    Packer,
 }
 
 impl EntityKind {
@@ -413,6 +431,7 @@ impl EntityKind {
             EntityKind::BinaryFingerprint => "fingerprint",
             EntityKind::YaraRule => "yara_rule",
             EntityKind::YaraMatch => "yara_match",
+            EntityKind::Packer => "packer",
         }
     }
 
@@ -461,9 +480,10 @@ impl EntityKind {
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
             "com_class" | "comclass" | "clsid" | "comcls" => EntityKind::ComClass,
             "com_interface" | "cominterface" | "iid" | "comif" | "com_iface" | "interface" => EntityKind::ComInterface,
-            "fingerprint" | "binary_fingerprint" | "binaryfingerprint" | "die" | "packer-tag" | "die-tag" => EntityKind::BinaryFingerprint,
+            "binary_fingerprint" | "binaryfingerprint" | "die" | "packer-tag" | "die-tag" => EntityKind::BinaryFingerprint,
             "yara_rule" | "yararule" | "yararules" | "yara-rule" | "rule" => EntityKind::YaraRule,
             "yara_match" | "yaramatch" | "yara-match" | "yhit" | "yara_hit" => EntityKind::YaraMatch,
+            "packer" | "protector" | "peid" | "fingerprint" => EntityKind::Packer,
             _ => return None,
         })
     }

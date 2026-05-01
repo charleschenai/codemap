@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "codemap-cli"
-version = "5.48.0"
+version = "5.49.0"
 dependencies = [
  "clap",
  "codemap-core",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "codemap-core"
-version = "5.48.0"
+version = "5.49.0"
 dependencies = [
  "aho-corasick",
  "bincode 1.3.3",

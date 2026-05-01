@@ -185,6 +185,7 @@ pub fn to_gexf(graph: &Graph) -> String {
             BinaryFingerprint => (244, 143, 177),
             YaraRule          => (255, 241, 118),
             YaraMatch         => (255, 213,  79),
+            Packer            => (255, 171, 145),
         }
     }
 

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.49.0] — 2026-05-01
+
+### Added (Ship 5 #15/#04/#07 — PEiD packer/protector identifier)
+- **New `peid-scan` action** (aliases: `peid`, `pe-fingerprint`, `packer-id`, `detect-easy`). 4,445 wildcarded byte signatures from Detect-It-Easy's PEiD corpus, split by category (packer / protector / installer / compiler / joiner / sfx_archive / file_format / overlay).
+- **New `EntityKind::Packer`** with attributes `name` (full PEiD label), `category`, `offset`, `ep_only`, `source_db`.
+- **Bundled corpus**: 4,445+ entries vendored from horsicq/Detect-It-Easy (MIT). Most signatures (~88%) anchored at PE entry-point.
+- **Killer queries**: `meta-path "pe->packer"`, `pagerank --type packer`, `attribute-filter category=protector`.
+
+### Tests
+- 400 → **412 tests** (+12).
+
+---
+
 ## [5.48.0] — 2026-05-01
 
 ### Added (yara-x integration + `yara-scan` action + per-section scan)

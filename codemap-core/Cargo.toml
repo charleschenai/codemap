@@ -1,6 +1,6 @@
 [package]
 name = "codemap-core"
-version = "5.48.0"
+version = "5.49.0"
 edition = "2021"
 license = "MIT"
 description = "Heterogeneous-graph codebase analysis library — 164 actions (incl. `think` natural-language goal router), 33 EntityKinds, across source AST, binary RE (ARM/AArch64 + section-level promotion + diff-namespace cross-graph + DEX bytecode + Android permission heuristics), schema parsing, supply chain, recon-artifact ingestion, secret tracking, dependency analysis, ML model architecture"
@@ -40,23 +40,22 @@ iced-x86 = { version = "1", default-features = false, features = ["std", "decode
 # (real APKs always deflate-compress the large bytecode entries). No
 # system libs, MIT/Apache. Used only inside actions/apk.rs.
 miniz_oxide = "0.8"
-# Multi-pattern byte search.
+# 5.38.0 — PEiD packer/protector identifier (`peid-scan`) uses
+# Aho-Corasick over the literal anchors of 4445 wildcarded byte
+# signatures, falling back to `memchr` for first-byte filtering when
+# no anchor exists. Both crates are already in the tree transitively
+# via `regex`; declared explicitly so the dependency surface for
+# actions/peid.rs is visible.
 aho-corasick = "1"
 memchr = "2"
 # Pure-Rust graph crate. Powers cfg::dominators (simple_fast) and
 # cfg::loops (tarjan_scc). MIT/Apache, zero system deps.
 petgraph = "0.6"
-# 5.48.0: pure-Rust YARA scanner (BSD-3, official VirusTotal port).
-# Powers the `yara-scan` action.
+# Pure-Rust YARA scanner (BSD-3, official VirusTotal port).
 yara-x = "1"
 
 [build-dependencies]
-# Build-time XML → bincode conversion of data/signsrch.xml (3.4 MB,
-# 2,338 entries). Output blob is `include_bytes!`-d at runtime so the
-# 3.4 MB XML is paid only once at build time. serde+bincode are
-# already runtime deps; regex is reused for the simple line-by-line
-# XML parse (the corpus is dead-flat — one `<p t="…">HEX</p>` per line,
-# no nested elements).
+# Build-time XML → bincode conversion of data/signsrch.xml.
 serde   = { version = "1", features = ["derive"] }
 bincode = "1"
 regex   = "1"
