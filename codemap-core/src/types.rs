@@ -289,6 +289,21 @@ pub enum EntityKind {
     /// dispatchers in a binary; `meta-path source->switch_table`
     /// enumerates dispatcher-style code patterns.
     SwitchTable,
+    /// DiE-mined binary fingerprint (5.38.0 — Ship 5 #2). Each node
+    /// represents a single packer/protector/cryptor/installer/sfx/joiner/
+    /// patcher/compiler/library/format/tool/sign/game/dotnet/native/marker
+    /// hit produced by the `die-fingerprint` action. Edges:
+    /// binary → fingerprint. attrs: axis (one of the 7-axis taxonomy),
+    /// type (DiE meta type — same as axis except for buckets we collapse),
+    /// family (e.g. "UPX" / "Themida" / "VMProtect"), version (free-form,
+    /// often "2.X" / "3.91+" / ""), options (free-form, e.g. "Compressed",
+    /// "DotNET", "NRV best"), kind (`ep` / `sig` / `overlay`), source
+    /// (DiE script filename), confidence (`high` / `medium`). Killer
+    /// queries: `meta-path "pe->fingerprint"` enumerates the field-standard
+    /// fingerprint axes across a binary corpus; attribute filter on
+    /// `family` finds every UPX-packed binary; `pagerank --type
+    /// fingerprint` ranks the most-shared families.
+    BinaryFingerprint,
     /// C++ virtual function table (Ship 4 #19, heuristic v1).
     /// Detected by scanning data sections for runs of N consecutive
     /// pointer-sized values whose targets all land at function
@@ -346,6 +361,7 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::BinaryFingerprint => "fingerprint",
         }
     }
 
@@ -392,6 +408,7 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "fingerprint" | "binary_fingerprint" | "binaryfingerprint" | "die" | "packer-tag" | "die-tag" => EntityKind::BinaryFingerprint,
             _ => return None,
         })
     }

@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 5 #2 — DiE EP-pattern fingerprint detector)
+- **New `die-fingerprint` action** (aliases: `die`, `fingerprint`, `binary-fingerprint`). Identifies the packer / protector / cryptor / installer / sfx / joiner / patcher / compiler / library / format / tool / sign / game / dotnet / native / marker that produced a binary by matching mined byte patterns from Detect-It-Easy's hand-curated `.sg` detector scripts against the target's entry point, sections, and overlay.
+- **New `EntityKind::BinaryFingerprint`** (aliases: `fingerprint`, `binary_fingerprint`, `die`, `packer-tag`, `die-tag`). Each detection becomes a graph node attached to the binary, with attrs `axis`, `type`, `family`, `version`, `options`, `source`, `location`, `confidence`. Killer queries: `meta-path "pe->fingerprint"` enumerates fingerprints across a corpus; attribute-filter on `family` finds every UPX-packed binary; `pagerank --type fingerprint` ranks the most-shared families.
+- **Bundled mined corpus** at `codemap-core/data/die-epsig.json` — **2,198 unique** patterns extracted from 760 `.sg` scripts under `db/{PE,MSDOS,NE,LE,LX,Binary,...}`. Distribution across the 7-axis taxonomy: `protector` 835, `compiler` 414, `packer` 383, `installer` 191, `tool` 137, `sfx` 98, `cryptor` 68, `joiner` 31, `library` 29, `patcher` 9, `format` 2, `archive` 1.
+- **Standardised 7-axis fingerprint taxonomy** — same categories used by PEiD / Exeinfo / CFF Explorer / PEStudio. Most binaries get 1–3 axes assigned in a single scan.
+- **Three matching strategies per pattern:**
+  - `ep` — entry-point anchored (PE only for v1; uses PE optional-header EP RVA → file offset via section table walk).
+  - `sig` — anywhere-in-section scan (each PE section name is reported in `location`).
+  - `overlay` — scans the raw bytes past the last section's raw end (where installers / SFX archives stash payload).
+- **Wildcard semantics:** PEiD-style `??` byte wildcards plus DiE-style `.` nibble wildcards. Each pattern compiles into a per-byte `(Option<u8>, Option<u8>)` nibble matcher so half-wildcards (single nibble) work natively.
+- **New offline miner** at `tools/die_miner.py` — regex-extracts every `compareEP` / `isSignaturePresent` / `isSignatureInSectionPresent` / `findSignature` / `compareOverlay` literal from the DiE corpus, paired with each script's `meta(type, name)` declaration and the `sVersion` / `sOptions` strings assigned in the surrounding logical block. Re-run on every DiE upstream release: `python3 tools/die_miner.py --db ~/reference/codemap-research-targets/15-die/db --out codemap-core/data/die-epsig.json`.
+
+### Honest limitations (v1 → v2)
+- **DiE-DSL `$$/$$$$/$$$$$$$$` (auto-resolved relative-jump tokens) are downgraded to plain `??` byte wildcards** by the miner. Patterns where jump-target validation matters will still match the surrounding bytes — usually the discriminating part — but pathological jump-only patterns may false-positive. v2 = extend matcher with `$$` semantics (~250 LOC, deferred until precision matters).
+- **Negative wildcards `**` / `!!` / `__` are dropped** by the miner; the v1 matcher has no way to express "must not be these bytes". Few PE/*.sg patterns use them.
+- **`compareEP` offset arguments that aren't compile-time literals** (e.g. `PE.compareEP("807C") ? 27 : 0`) collapse to offset 0. Most patterns use literal offsets.
+- **EP recovery is PE-only for v1.** ELF/Mach-O fall back to single-section file scan, so non-EP-anchored DiE patterns (`isSignaturePresent` / `compareOverlay`) still match but EP-anchored ones don't.
+- **`sig` and `overlay` patterns require ≥ 6 fixed bytes** to fire (vs ≥ 4 for EP-anchored). Anywhere-in-section scans across hundreds of KB are too noisy with short patterns.
+- **Research summary's "3,000–5,000 patterns" estimate was optimistic.** The actual DiE PE corpus tops out at ~2,200 unique patterns once duplicates and stub helper scripts collapse. The expanded miner reaches it by also scanning MSDOS / NE / LE / LX / Binary subdirs (all binary-format scripts).
+- **License:** DiE is MIT — patterns are shipped as runtime-loaded JSON data, not statically inlined GPL source. Attribution: horsicq/Detect-It-Easy.
+
+### Tests
+- 168 → **175 lib tests** (+7). Corpus loads + meets minimum size (≥ 2,000 unique patterns), 7-axis taxonomy coverage (packer/protector/compiler/installer all present), pattern compile handles `?` wildcards correctly, byte-level pattern matching, window scan finds offset, empty-target emits usage, **synthetic UPX PE round-trip**: build a minimal valid PE32 with the canonical UPX 32-bit EP head bytes (`60 BE ?? ?? ?? ?? 8D BE ?? ?? ?? ?? 57`) → `die-fingerprint` correctly identifies it as `packer/UPX 0.70` via EP-anchored matching.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

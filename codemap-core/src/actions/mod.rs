@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod die_fingerprint;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,13 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // DiE fingerprint (5.38.0 — Ship 5 #2). Matches mined DiE
+        // entry-point byte patterns from `db/{PE,MSDOS,NE,LE,LX,Binary,...}`
+        // against a target binary, populating the standard 7-axis
+        // fingerprint taxonomy (packer/protector/cryptor/installer/sfx/
+        // joiner/patcher/compiler/library/format/tool/sign/game/dotnet/
+        // native/marker).
+        "die-fingerprint" | "die" | "fingerprint" | "binary-fingerprint" => Ok(die_fingerprint::die_fingerprint(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
