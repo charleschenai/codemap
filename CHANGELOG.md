@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.50.0] — 2026-05-01
+
+### Added (anti-analysis pack v2 — al-khaser + pafish unified corpus)
+- **`anti_analysis.rs` v2**: hardcoded 35-rule scanner replaced with YAML-loadable corpus from `data/anti-analysis/al-khaser.yaml` (1,488 lines) + `data/anti-analysis/pafish.yaml` (270 lines). 35 → ~250+ rules.
+- **Family sub-taxonomy** on `EntityKind::AntiAnalysis`: AntiDebug, AntiVmVbox/Vmware/Qemu/Bochs/Kvm/Xen/Parallels/Wine, AntiSandboxCuckoo/Sandboxie/Joebox/Generic, AntiAv, AntiDisasm, AntiDump, Timing, CodeInjection, RttHumanInteraction, HypervisorDriver.
+- **(API, constant) call-site matcher** — second propagator consumer.
+- **RTT detector** — IAT co-occurrence rule for human-interaction-required malware.
+
+### Tests
+- 412 → **440 tests** (+28).
+
+---
+
 ## [5.49.0] — 2026-05-01
 
 ### Added (Ship 5 #15/#04/#07 — PEiD packer/protector identifier)
