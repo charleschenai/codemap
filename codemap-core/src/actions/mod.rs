@@ -37,6 +37,7 @@ pub mod recon;
 pub mod think;
 pub mod anti_analysis;
 pub mod crypto_const;
+pub mod cuda_trace;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -273,6 +274,10 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // EOF from tensor offsets + ggml block sizes; flags trailing
         // bytes as overlay (hidden payload, watermark, signature).
         "gguf-overlay" | "gguf-carve" | "model-overlay" => Ok(ml::gguf_overlay(graph, target)),
+        // CUDA launch tracer (5.32.0 — Ship 2 #14). Detects CUDA host
+        // binaries by Runtime/Driver API imports and enumerates the
+        // GPU kernels they reference.
+        "cuda-trace" | "cuda-kernels" | "gpu-trace" | "find-cuda" => Ok(cuda_trace::cuda_trace(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

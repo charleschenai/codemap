@@ -606,6 +606,7 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         BinarySection     => "shape=folder, fillcolor=\"#cfd8dc\", style=filled, fontsize=9",
         AntiAnalysis      => "shape=octagon, fillcolor=\"#ef9a9a\", style=filled, fontsize=10",
         CryptoConstant    => "shape=hexagon, fillcolor=\"#fff59d\", style=filled, fontsize=10",
+        CudaKernel        => "shape=trapezium, fillcolor=\"#76b900\", style=filled, fontsize=10",
     }
 }
 
@@ -761,6 +762,7 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         BinarySection     => "section",
         AntiAnalysis      => "anti_tech",
         CryptoConstant    => "crypto",
+        CudaKernel        => "cuda_kernel",
     }
 }
 

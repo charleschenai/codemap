@@ -259,6 +259,20 @@ pub enum EntityKind {
     /// across a binary corpus; attribute filter on `algorithm`
     /// finds every binary using AES, etc.
     CryptoConstant,
+    /// CUDA kernel reference inside a CUDA host binary (Ship 2 #14).
+    /// Created when the binary imports CUDA Runtime / Driver APIs
+    /// (cuLaunchKernel, cudaLaunchKernel, __cudaPushCallConfiguration,
+    /// cuModuleLoadData, cuModuleGetFunction) and contains symbol
+    /// or string references that look like kernel names (Itanium-
+    /// mangled `_Z*` C++ kernels, `*_kernel` suffixes, names ending
+    /// in `__global__` markers from .nv_fatbin sections). Edges:
+    /// binary → cuda_kernel. attrs: name, mangled (raw _Z form),
+    /// source (`symbol` / `fatbin_string` / `import`), api
+    /// (runtime / driver / both). Killer queries: `meta-path
+    /// "pe->cuda_kernel"` enumerates GPU workload across a binary
+    /// corpus; `pagerank --type cuda_kernel` ranks shared kernels
+    /// across a CUDA-app suite.
+    CudaKernel,
 }
 
 impl EntityKind {
@@ -300,6 +314,7 @@ impl EntityKind {
             EntityKind::BinarySection => "section",
             EntityKind::AntiAnalysis => "anti_tech",
             EntityKind::CryptoConstant => "crypto",
+            EntityKind::CudaKernel => "cuda_kernel",
         }
     }
 
@@ -343,6 +358,7 @@ impl EntityKind {
             "section" | "binsection" | "binarysection" => EntityKind::BinarySection,
             "anti_tech" | "anti" | "anti-analysis" | "antitech" | "technique" => EntityKind::AntiAnalysis,
             "crypto" | "cryptoconst" | "crypto-const" | "cryptographic" => EntityKind::CryptoConstant,
+            "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             _ => return None,
         })
     }

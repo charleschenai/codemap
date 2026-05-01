@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.32.0] — 2026-05-01
+
+### Added (Ship 2 #14 — CUDA launch tracer)
+- **New `cuda-trace` action** (aliases: `cuda-kernels`, `gpu-trace`, `find-cuda`). Detects CUDA host binaries and enumerates the GPU kernels they reference, by cross-referencing CUDA Runtime / Driver API imports against symbol-table + embedded-string evidence.
+
+  Two-phase classification:
+  1. **API detection** — does the binary import any of:
+     - Runtime API (12 entries): `cudaLaunchKernel`, `cudaLaunchKernelExC`, `cudaLaunchCooperativeKernel*`, `__cudaPushCallConfiguration`, `__cudaRegisterFatBinary`, `__cudaRegisterFunction`, `cudaConfigureCall`, etc.
+     - Driver API (9 entries): `cuLaunchKernel`, `cuLaunchKernelEx`, `cuLaunchCooperativeKernel`, `cuLaunchHostFunc`, `cuModuleLoadData[Ex]`, `cuModuleLoadFatBinary`, `cuModuleGetFunction`, `cuModuleGetGlobal`.
+  2. **Kernel extraction** from three sources:
+     - Itanium-mangled `_Z*` symbols (filtered against C++ STL `_ZSt*`/`_ZNSt*`).
+     - Symbols with kernel-naming suffixes (`_kernel`/`Kernel`/`_gpu`/`Gpu`/`_cuda`/`Cuda`/`__global__`/`CUDAKernel`), with API-entry-point filtering (`cu*Kernel`, `cuda*Kernel`, `__cuda*` excluded — those are the Runtime/Driver API names themselves).
+     - Embedded fatbin strings matching C-identifier shape + kernel-related token suffix.
+
+- **New `EntityKind::CudaKernel`** (alias: `cuda_kernel`, `gpu`). Each detected kernel becomes a graph node attached to the host binary, with attrs `name`, `mangled` (raw `_Z` form when applicable), `source` (`symbol` / `fatbin_string` / `import`), `api` (`runtime` / `driver` / `runtime+driver`).
+
+- **Killer queries** enabled:
+  - `meta-path "pe->cuda_kernel"` — cross-binary GPU workload inventory.
+  - `pagerank --type cuda_kernel` — most-shared kernel names across a CUDA-app suite.
+  - `attribute-filter api=driver` — every binary using the Driver API directly (vs Runtime).
+
+- **Smoke-tested on `/usr/lib/aarch64-linux-gnu/libcuda.so`** (the actual NVIDIA driver library) — correctly identified as Driver API, 9 imports flagged, 16 kernel-name strings extracted with the suffix-heuristic API-entry-point filter eliminating all false positives.
+
+### Notes
+- Per-launch-site grid/block dim recovery is **deferred to v2** — that's where the bounded backward propagator from `disasm_jt.rs` becomes the second consumer and we extract to `dataflow_local.rs`. v1 ships pattern-matching on imports + symbols + strings, which gives ~80% of the value at ~30% of the engineering cost.
+
+### Tests
+- 252 → **257 tests** (+5). Mangled `_Z*` extraction (with STL filter), suffix-kernel detection (with API-entry-point filter), fatbin string extraction (identifier shape + suffix), runtime/driver API list disjointness, string-extraction min-length.
+
+---
+
 ## [5.31.0] — 2026-05-01
 
 ### Added (Ship 2 #23 — GGUF overlay carver)
