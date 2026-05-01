@@ -180,6 +180,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             CudaKernel        => (118, 185,   0), // NVIDIA green
             SwitchTable       => (179, 157, 219),
             VTable            => (128, 203, 196),
+            YaraRule          => (255, 241, 118),
+            YaraMatch         => (255, 213,  79),
         }
     }
 

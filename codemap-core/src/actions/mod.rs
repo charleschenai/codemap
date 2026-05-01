@@ -43,6 +43,7 @@ pub mod switch_recovery;
 pub mod cff_detect;
 pub mod opaque_pred;
 pub mod vtable_detect;
+pub mod yara_scan;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -303,6 +304,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // data sections for runs of consecutive function-entry
         // pointers. Itanium / MSVC RTTI parsing = v2.
         "vtable-detect" | "vtables" | "find-vtables" | "vftable" => Ok(vtable_detect::vtable_detect(graph, target)),
+        // YARA scanner (5.38.0). Generic runtime engine for any
+        // user-supplied YARA corpus (capa-rules, signature-base,
+        // findcrypt3, signsrch-derived). Pure-Rust via yara-x.
+        // Per-section walker translates match offsets to VAs.
+        "yara-scan" | "yara" | "yara-rules" => Ok(yara_scan::yara_scan(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

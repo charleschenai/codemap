@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (yara-x integration — generic YARA scanner)
+- **New `yara-scan` action** (aliases: `yara`, `yara-rules`). Drop-in runtime engine for any user-supplied YARA corpus — capa-rules-yara, Florian Roth's signature-base, findcrypt3, signsrch-derived sets, custom rules. Pure-Rust via `yara-x` (BSD-3, the official VirusTotal port; no libyara C-FFI).
+- **CLI:** `codemap yara-scan -- --rules-dir <dir>... --rules-file <file>... <target>...`. Both `--rules-dir` (recursive walk picks up `*.yar` / `*.yara`) and `--rules-file` (point at a single file) accepted; multiple of each are allowed.
+- **Two new EntityKinds:**
+  - **`YaraRule`** (one node per loaded rule, identified by `namespace::name`; carries tags + meta_* attrs).
+  - **`YaraMatch`** (one node per (rule, target, section, offset, pattern) match; carries the matched-bytes preview + computed virtual address).
+- **Per-section scanning** (yara4ida pick #4): when scanning a binary, the action walks PE `IMAGE_SECTION_HEADER` / ELF `Elf64_Shdr` / Mach-O `section_64` entries and re-scans each one in isolation. Match offsets translate to virtual addresses using each section's `VirtualAddress` / `sh_addr` / `vmaddr`. Whole-buffer scan still runs first for rules that reference file-format meta (`pe.entry_point`, etc.).
+- **Noise sections skipped** on the per-section pass: `.rsrc`, `.reloc`, `.bss`, `.idata`. The whole-buffer pass still covers them.
+- **Cuckoo-imported rules silently filtered.** The compiler is configured with `ignore_module("cuckoo")` so rules that depend on dynamic-analysis predicates (process tree, DNS observations, registry writes) drop cleanly without polluting the report.
+- **Edges:** `Binary → YaraMatch ← YaraRule`. Killer queries: `meta-path "pe->yara_match"` enumerates rule activity per binary; `pagerank --type yara_rule` ranks the most-fired rules across a corpus; attribute filters on `rule_name` / `namespace` / `section` slice the hit set.
+
+### Honest limitations
+- **No proximity primitive (`area_match`)** — yara4ida pick #2. yara-x doesn't expose a custom-module hook compatible with the IDA wrapper, so this is documented as future work; section bounds are the closest analog the v1 ships.
+- **Match-count cap of 64 per (rule, target)** to keep the graph tractable on rules that fire thousands of times in a single binary. Summary still reports the full count.
+
+### Tests
+- 283 → **291 tests** (+8). Coverage: arg parsing, format detection (PE/ELF/Mach-O magic), noise-section skip-list, synthetic single-rule/single-buffer fire, per-section VA translation on a hand-built minimal PE, cuckoo-import filtering, missing-rules usage path.
+
+### Dependency
+- Added `yara-x = "1"` (BSD-3) to `codemap-core`. Default features pull in YARA's standard module set (PE / ELF / Mach-O / DEX / dotnet / hash / math / etc.) — needed for capa-rules and signature-base compatibility.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

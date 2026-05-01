@@ -302,6 +302,30 @@ pub enum EntityKind {
     /// vtable` ranks the most-shared vtables; `meta-path
     /// "vtable->bin_func"` enumerates virtual methods per class.
     VTable,
+    /// YARA rule loaded by `yara-scan` (5.38.0). One node per rule
+    /// in the user-supplied corpus (capa-rules-yara, signature-base,
+    /// findcrypt3, signsrch-derived, custom). Edges: yara_rule →
+    /// yara_match (each match anchored to a target). attrs: name
+    /// (rule identifier), namespace (compiler namespace, "default"
+    /// if unspecified), tags (comma-joined), source_file (the .yar
+    /// path), meta_* (rule meta fields prefixed). Killer queries:
+    /// `pagerank --type yara_rule` finds the most-fired rules across
+    /// a binary corpus; `meta-path "yara_rule->yara_match"`
+    /// enumerates per-rule activity.
+    YaraRule,
+    /// Match emitted by `yara-scan` when a YaraRule fires on a
+    /// target. Edges: binary → yara_match ← yara_rule. attrs:
+    /// rule_name, namespace, target (the binary path), section
+    /// (PE/ELF/Mach-O section name when scanned per-section,
+    /// "<whole>" otherwise), offset (file offset within the section
+    /// or buffer), virtual_address (translated VA when section has
+    /// VA mapping; "" otherwise), pattern_id (`$a`/`$str1`/etc.),
+    /// match_len (length of the matched bytes), preview (first 32
+    /// bytes hex-escaped, ASCII where possible). Killer queries:
+    /// `meta-path "pe->yara_match"` enumerates rule hits per
+    /// binary; attribute filter on `rule_name` extracts every
+    /// hit of a specific rule.
+    YaraMatch,
 }
 
 impl EntityKind {
@@ -346,6 +370,8 @@ impl EntityKind {
             EntityKind::CudaKernel => "cuda_kernel",
             EntityKind::SwitchTable => "switch_table",
             EntityKind::VTable => "vtable",
+            EntityKind::YaraRule => "yara_rule",
+            EntityKind::YaraMatch => "yara_match",
         }
     }
 
@@ -392,6 +418,8 @@ impl EntityKind {
             "cuda_kernel" | "cuda" | "kernel" | "gpu" | "cudakernel" => EntityKind::CudaKernel,
             "switch_table" | "switch" | "switchtable" | "dispatch" | "dispatcher" => EntityKind::SwitchTable,
             "vtable" | "vftable" | "v_table" | "virtual_table" | "vmt" => EntityKind::VTable,
+            "yara_rule" | "yararule" | "yararules" | "yara-rule" | "rule" => EntityKind::YaraRule,
+            "yara_match" | "yaramatch" | "yara-match" | "yhit" | "yara_hit" | "yara" => EntityKind::YaraMatch,
             _ => return None,
         })
     }
