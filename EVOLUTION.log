@@ -1861,3 +1861,83 @@ unaffected.
       MlModel; tensors / operators not promoted).
     - Other follow-ups identified mid-session: nothing
       blocking, all extension work.
+
+
+[2026-05-01] feat: 5.20.0 — ML model granular nodes (#54)
+  source: post-5.19.0 audit identified G6 as the largest
+  remaining graph-integration gap — gguf / safetensors / onnx
+  parsers extracted full tensor lists + graph operators but only
+  registered the parent MlModel as a graph node. The structured
+  data died in text output. This release closes G6 by adding
+  two new EntityKinds and refactoring all three parsers to
+  expose their structured data for promotion.
+
+  New EntityKinds (30 → 32):
+
+  MlTensor — a tensor inside a model file (GGUF / SafeTensors /
+    ONNX initializer). attrs: name, dtype (F32 / F16 / Q4_K /
+    BF16 / etc.), shape (comma-joined dims), model_format,
+    optionally size_bytes / params. Edge: model → tensor.
+    Capped at 5000 per model (StringLiteral / LSP-symbol parity).
+
+  MlOperator — operator node in an ONNX graph (Conv / MatMul /
+    Add / Relu / etc.). attrs: name, op_type, count_in_model,
+    model_format. Aggregated by op_type so a 1000-node ResNet
+    surfaces as ~30 unique MlOperator nodes (one per type with
+    count attr) instead of 1000 individual nodes — keeps the
+    graph tractable on production-sized models. Edge: model →
+    operator.
+
+  Refactors:
+
+  parse_gguf — return type from Result<String> to
+    Result<(String, Vec<GgufTensorInfo>)>. The local TensorInfo
+    struct hoisted to module-scope GgufTensorInfo so the
+    promotion helper consumes the same shape. gguf_info now
+    calls promote_ml_tensors after parse, registering each tensor
+    as an MlTensor node.
+
+  parse_safetensors — same shape change. Local TensorEntry struct
+    hoisted to SafetensorsTensorInfo. Includes size_bytes from
+    data_offsets diff for cross-tensor inventory queries.
+
+  parse_onnx — return type adds (BTreeMap<String,usize>,
+    initializer_count). op_counts + initializer_count hoisted out
+    of the if-let-Some(graph_data) block to function scope so
+    they re visible at return. onnx_info aggregates op_counts by
+    op_type into MlOperator nodes; attaches initializer_count +
+    op_type_count as attrs on the parent MlModel for cross-model
+    architecture comparison.
+
+  Killer queries unlocked:
+    meta-path "model->tensor"           inventory tensor shapes
+                                        across a SafeTensors corpus
+    pagerank --type ml_operator        find dominant op types
+                                        across an ONNX-model corpus
+    attribute-filter dtype=Q4_K        find every quantized GGUF
+                                        tensor across a fleet
+    attribute-filter op_type=LSTM      find every model that
+                                        contains LSTM
+
+  Tests: 194 passing (was 193). +1 regression test
+  test_safetensors_info_promotes_tensors_to_graph — fabricates a
+  minimal valid safetensors file (3 tensors in JSON header), runs
+  safetensors-info via execute(), asserts:
+    - 3 MlTensor nodes registered with correct names
+    - each has model_format / dtype / shape attrs
+    - each has an edge from the parent MlModel
+    - EntityKind round-trips via from_str / as_str for both
+      tensor and ml_operator aliases
+
+  Implementation: src/actions/ml.rs ~120 LOC of additions, plus
+  ~10 LOC each of EntityKind plumbing in types.rs / graph_theory.rs /
+  exports_format.rs. No new dependencies.
+
+  Action count: 163 (unchanged — promotions added to existing
+  actions). EntityKinds: 30 → 32 (+MlTensor, +MlOperator).
+
+  Outstanding gaps after this ship — 2 left, both deferred:
+    G4 pe_sections — section table not graph nodes (would need
+      new PeSection EntityKind, marginal value alone).
+    G5 binary_diff — diff results not graph edges (needs design
+      pass: same-graph or cross-graph?).

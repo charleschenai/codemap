@@ -172,6 +172,8 @@ pub fn to_gexf(graph: &Graph) -> String {
             Permission        => (255, 204, 128),
             Secret            => (211, 47, 47),
             Dependency        => (179, 229, 252),
+            MlTensor          => (255, 224, 178),
+            MlOperator        => (206, 147, 216),
         }
     }
 

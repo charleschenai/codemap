@@ -152,8 +152,50 @@ pub fn gguf_info(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
     match parse_gguf(&data, target) {
-        Ok(info) => info,
+        Ok((info, tensors)) => {
+            // 5.20.0: each GGUF tensor promotes to an MlTensor graph
+            // node with edge from the parent MlModel. Capped at 5000
+            // per model to keep huge LLM tensor lists tractable
+            // (Llama-3-70B has ~700 tensors, well under cap).
+            promote_ml_tensors(graph, target, "gguf", &tensors);
+            info
+        }
         Err(e) => format!("GGUF parse error: {e}"),
+    }
+}
+
+/// Module-level tensor descriptor — used by both gguf_info and the public
+/// promotion helper. Hoisted out of `parse_gguf` (where it was a local
+/// struct) so the promotion path can consume the same shape.
+pub(crate) struct GgufTensorInfo {
+    pub name: String,
+    pub dims: Vec<u64>,
+    pub dtype: u32,
+}
+
+/// Cap on MlTensor / MlOperator nodes promoted per single ML-action call.
+/// Mirrors StringLiteral / LSP-symbol caps.
+const MAX_ML_NODES_PER_CALL: usize = 5000;
+
+fn promote_ml_tensors(graph: &mut Graph, target: &str, format: &str,
+                      tensors: &[GgufTensorInfo]) {
+    use crate::types::EntityKind;
+    let model_id = format!("model:{target}");
+    for (i, t) in tensors.iter().enumerate().take(MAX_ML_NODES_PER_CALL) {
+        let tensor_id = format!("tensor:{format}:{target}::{i}");
+        let dtype = ggml_type_name(t.dtype);
+        let shape: Vec<String> = t.dims.iter().map(|d| d.to_string()).collect();
+        let shape_str = shape.join(",");
+        let params: u64 = if t.dims.is_empty() { 0 } else { t.dims.iter().product() };
+        let params_str = params.to_string();
+        graph.ensure_typed_node(&tensor_id, EntityKind::MlTensor, &[
+            ("name", t.name.as_str()),
+            ("dtype", dtype),
+            ("shape", &shape_str),
+            ("model_format", format),
+            ("params", &params_str),
+        ]);
+        graph.add_edge(&model_id, &tensor_id);
     }
 }
 
@@ -334,7 +376,7 @@ fn read_gguf_value(data: &[u8], offset: usize, vtype: u32) -> Result<(String, us
     }
 }
 
-fn parse_gguf(data: &[u8], target: &str) -> Result<String, String> {
+fn parse_gguf(data: &[u8], target: &str) -> Result<(String, Vec<GgufTensorInfo>), String> {
     if data.len() < 24 {
         return Err("File too small for GGUF".to_string());
     }
@@ -458,13 +500,7 @@ fn parse_gguf(data: &[u8], target: &str) -> Result<String, String> {
     }
 
     // Parse tensor info entries
-    struct TensorInfo {
-        name: String,
-        dims: Vec<u64>,
-        dtype: u32,
-    }
-
-    let mut tensors: Vec<TensorInfo> = Vec::new();
+    let mut tensors: Vec<GgufTensorInfo> = Vec::new();
     for _ in 0..tensor_count {
         if pos >= data.len() {
             break;
@@ -493,7 +529,7 @@ fn parse_gguf(data: &[u8], target: &str) -> Result<String, String> {
         let _tensor_offset = read_u64_le(data, pos)?;
         pos += 8;
 
-        tensors.push(TensorInfo { name, dims, dtype });
+        tensors.push(GgufTensorInfo { name, dims, dtype });
     }
 
     // Display tensors
@@ -558,7 +594,7 @@ fn parse_gguf(data: &[u8], target: &str) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    Ok((out, tensors))
 }
 
 // ── 2. safetensors_info ───────────────────────────────────────────
@@ -570,8 +606,45 @@ pub fn safetensors_info(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
     match parse_safetensors(&data, target) {
-        Ok(info) => info,
+        Ok((info, tensors)) => {
+            // 5.20.0: each safetensors entry → MlTensor node.
+            promote_safetensors_tensors(graph, target, &tensors);
+            info
+        }
         Err(e) => format!("SafeTensors parse error: {e}"),
+    }
+}
+
+/// Public-shape safetensors descriptor matching the local TensorEntry
+/// inside parse_safetensors. Hoisted to module scope so the promotion
+/// helper sees the same struct.
+pub(crate) struct SafetensorsTensorInfo {
+    pub name: String,
+    pub dtype: String,
+    pub shape: Vec<u64>,
+    pub size_bytes: u64,
+}
+
+fn promote_safetensors_tensors(graph: &mut Graph, target: &str,
+                               tensors: &[SafetensorsTensorInfo]) {
+    use crate::types::EntityKind;
+    let model_id = format!("model:{target}");
+    for (i, t) in tensors.iter().enumerate().take(MAX_ML_NODES_PER_CALL) {
+        let tensor_id = format!("tensor:safetensors:{target}::{i}");
+        let shape: Vec<String> = t.shape.iter().map(|d| d.to_string()).collect();
+        let shape_str = shape.join(",");
+        let size_str = t.size_bytes.to_string();
+        let params: u64 = if t.shape.is_empty() { 0 } else { t.shape.iter().product() };
+        let params_str = params.to_string();
+        graph.ensure_typed_node(&tensor_id, EntityKind::MlTensor, &[
+            ("name", t.name.as_str()),
+            ("dtype", t.dtype.as_str()),
+            ("shape", &shape_str),
+            ("model_format", "safetensors"),
+            ("size_bytes", &size_str),
+            ("params", &params_str),
+        ]);
+        graph.add_edge(&model_id, &tensor_id);
     }
 }
 
@@ -585,7 +658,7 @@ fn dtype_element_size(dtype: &str) -> usize {
     }
 }
 
-fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
+fn parse_safetensors(data: &[u8], target: &str) -> Result<(String, Vec<SafetensorsTensorInfo>), String> {
     if data.len() < 8 {
         return Err("File too small for SafeTensors".to_string());
     }
@@ -619,14 +692,7 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
     out.push_str(&format!("File: {} ({})\n", filename, format_size_human(file_size)));
     out.push_str(&format!("Header size: {} bytes\n", format_size(header_size as u64)));
 
-    struct TensorEntry {
-        name: String,
-        dtype: String,
-        shape: Vec<u64>,
-        size_bytes: u64,
-    }
-
-    let mut tensors: Vec<TensorEntry> = Vec::new();
+    let mut tensors: Vec<SafetensorsTensorInfo> = Vec::new();
     let mut total_params: u64 = 0;
     let mut dtype_counts: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -666,7 +732,7 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
 
         *dtype_counts.entry(dtype.clone()).or_insert(0) += 1;
 
-        tensors.push(TensorEntry { name: name.clone(), dtype, shape, size_bytes });
+        tensors.push(SafetensorsTensorInfo { name: name.clone(), dtype, shape, size_bytes });
     }
 
     // Sort tensors by name for consistent display
@@ -740,7 +806,7 @@ fn parse_safetensors(data: &[u8], target: &str) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    Ok((out, tensors))
 }
 
 // ── 3. onnx_info ──────────────────────────────────────────────────
@@ -752,7 +818,36 @@ pub fn onnx_info(graph: &mut Graph, target: &str) -> String {
         Err(e) => return e,
     };
     match parse_onnx(&data, target) {
-        Ok(info) => info,
+        Ok((info, op_counts, initializer_count)) => {
+            // 5.20.0: aggregate ONNX operators by op_type (Conv, MatMul,
+            // Add, etc.) so a 1000-node ResNet doesn't generate 1000
+            // graph nodes — instead one MlOperator per type with `count`
+            // attr. Initializer count attached to the parent MlModel
+            // node for cross-model architecture inventory.
+            use crate::types::EntityKind;
+            let model_id = format!("model:{target}");
+            let mut promoted = 0usize;
+            for (op_type, count) in &op_counts {
+                if promoted >= MAX_ML_NODES_PER_CALL { break; }
+                let op_id = format!("ml_op:onnx:{target}::{op_type}");
+                let count_str = count.to_string();
+                graph.ensure_typed_node(&op_id, EntityKind::MlOperator, &[
+                    ("name", op_type.as_str()),
+                    ("op_type", op_type.as_str()),
+                    ("model_format", "onnx"),
+                    ("count_in_model", &count_str),
+                ]);
+                graph.add_edge(&model_id, &op_id);
+                promoted += 1;
+            }
+            if let Some(node) = graph.nodes.get_mut(&model_id) {
+                node.attrs.insert("onnx_initializer_count".into(),
+                    initializer_count.to_string());
+                node.attrs.insert("onnx_op_type_count".into(),
+                    op_counts.len().to_string());
+            }
+            info
+        }
         Err(e) => format!("ONNX parse error: {e}"),
     }
 }
@@ -880,7 +975,7 @@ fn proto_string(data: &[u8], field: &ProtoField) -> Option<String> {
     String::from_utf8(bytes.to_vec()).ok()
 }
 
-fn parse_onnx(data: &[u8], target: &str) -> Result<String, String> {
+fn parse_onnx(data: &[u8], target: &str) -> Result<(String, BTreeMap<String, usize>, u64), String> {
     if data.len() < 4 {
         return Err("File too small for ONNX".to_string());
     }
@@ -978,16 +1073,20 @@ fn parse_onnx(data: &[u8], target: &str) -> Result<String, String> {
         out.push_str(&format!("Opset: {}\n", opset_strs.join(", ")));
     }
 
+    // 5.20.0: hoisted out of the inner if-let so the return value can
+    // expose op_counts + initializer_count to the public onnx_info
+    // function for graph-node promotion. Empty when no graph proto present.
+    let mut op_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut initializer_count = 0u64;
+
     // Parse graph
     if let Some(gdata) = graph_data {
         let gfields = collect_proto_fields(gdata);
 
         let mut graph_name: Option<String> = None;
         let mut node_count = 0u64;
-        let mut op_counts: BTreeMap<String, usize> = BTreeMap::new();
         let mut input_names: Vec<String> = Vec::new();
         let mut output_names: Vec<String> = Vec::new();
-        let mut initializer_count = 0u64;
 
         for gf in &gfields {
             match gf.field_number {
@@ -1085,7 +1184,7 @@ fn parse_onnx(data: &[u8], target: &str) -> Result<String, String> {
         }
     }
 
-    Ok(out)
+    Ok((out, op_counts, initializer_count))
 }
 
 // ── 4. pyc_info ───────────────────────────────────────────────────

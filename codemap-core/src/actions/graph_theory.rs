@@ -601,6 +601,8 @@ fn dot_kind_attrs(kind: crate::types::EntityKind) -> &'static str {
         Permission        => "shape=parallelogram, fillcolor=\"#ffcc80\", style=filled, fontsize=9",
         Secret            => "shape=doubleoctagon, fillcolor=\"#d32f2f\", style=filled, fontcolor=white, fontsize=10",
         Dependency        => "shape=tab, fillcolor=\"#b3e5fc\", style=filled, fontsize=10",
+        MlTensor          => "shape=cylinder, fillcolor=\"#ffe0b2\", style=filled, fontsize=9",
+        MlOperator        => "shape=hexagon, fillcolor=\"#ce93d8\", style=filled, fontsize=10",
     }
 }
 
@@ -751,6 +753,8 @@ fn mermaid_kind_class(kind: crate::types::EntityKind) -> &'static str {
         Permission        => "permission",
         Secret            => "secret",
         Dependency        => "dependency",
+        MlTensor          => "tensor",
+        MlOperator        => "ml_operator",
     }
 }
 

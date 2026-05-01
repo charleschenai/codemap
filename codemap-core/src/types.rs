@@ -207,6 +207,23 @@ pub enum EntityKind {
     /// `pagerank --type dependency` for the most-used deps across a
     /// monorepo, attribute filter on `is_dead=true` for cleanup PRs.
     Dependency,
+    /// Tensor inside an ML model file (GGUF / SafeTensors / ONNX
+    /// initializers). Edges: model → tensor. attrs: name, dtype
+    /// (F32 / F16 / Q4_K / etc.), shape (comma-joined dims),
+    /// model_format (gguf / safetensors / onnx), optionally
+    /// size_bytes / params. Capped at 5000 per model. Killer
+    /// queries: `meta-path "model->tensor"` for cross-model
+    /// architecture inventory, `pagerank --type tensor` to find
+    /// shared tensor names across a model corpus.
+    MlTensor,
+    /// Operator node in an ONNX (or other graph-format) model.
+    /// Edges: model → operator. attrs: op_type (Conv / MatMul /
+    /// Add / etc.), name, count_in_model. Aggregated by op_type
+    /// to keep the graph tractable on large models. Killer
+    /// queries: `pagerank --type ml_operator` to find dominant
+    /// op types across a corpus, attribute filter on op_type for
+    /// "every model that uses LSTM".
+    MlOperator,
 }
 
 impl EntityKind {
@@ -243,6 +260,8 @@ impl EntityKind {
             EntityKind::Permission => "permission",
             EntityKind::Secret => "secret",
             EntityKind::Dependency => "dependency",
+            EntityKind::MlTensor => "tensor",
+            EntityKind::MlOperator => "ml_operator",
         }
     }
 
@@ -281,6 +300,8 @@ impl EntityKind {
             "permission" | "perm" => EntityKind::Permission,
             "secret" | "credential" | "leaked" => EntityKind::Secret,
             "dep" | "dependency" | "package" => EntityKind::Dependency,
+            "tensor" | "mltensor" | "weight" => EntityKind::MlTensor,
+            "ml_operator" | "mlop" | "op" | "operator" => EntityKind::MlOperator,
             _ => return None,
         })
     }

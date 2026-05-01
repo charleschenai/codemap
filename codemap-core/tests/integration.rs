@@ -1635,3 +1635,74 @@ def create_order():
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// Verifies 5.20.0's safetensors_info promotion: each tensor in the JSON
+/// header becomes an MlTensor graph node with edge from the parent
+/// MlModel. We fabricate a minimal valid safetensors file (just the
+/// header — the data section is empty, which the parser tolerates since
+/// it only computes lengths from declared offsets).
+#[test]
+fn test_safetensors_info_promotes_tensors_to_graph() {
+    let tmp = std::env::temp_dir().join(format!("codemap-st-promote-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    // Three tensors in a synthetic safetensors header.
+    let header = r#"{
+        "model.embed.weight": { "dtype": "F16", "shape": [4096, 32000], "data_offsets": [0, 262144000] },
+        "model.layer.0.weight": { "dtype": "F16", "shape": [4096, 4096], "data_offsets": [262144000, 295698432] },
+        "model.norm.weight": { "dtype": "F32", "shape": [4096], "data_offsets": [295698432, 295714816] }
+    }"#;
+    let header_bytes = header.as_bytes();
+    let header_size = header_bytes.len() as u64;
+
+    let path = tmp.join("model.safetensors");
+    let mut file = std::fs::File::create(&path).unwrap();
+    use std::io::Write;
+    file.write_all(&header_size.to_le_bytes()).unwrap();
+    file.write_all(header_bytes).unwrap();
+    drop(file);
+
+    let mut g = Graph {
+        nodes: HashMap::new(),
+        scan_dir: ".".to_string(),
+        cpg: None,
+    };
+    let _ = execute(&mut g, "safetensors-info", path.to_str().unwrap(), false).unwrap();
+
+    let tensors: Vec<&codemap_core::types::GraphNode> = g.nodes.values()
+        .filter(|n| n.kind == EntityKind::MlTensor).collect();
+
+    let names: Vec<&String> = tensors.iter()
+        .filter_map(|n| n.attrs.get("name")).collect();
+
+    assert!(names.iter().any(|n| n.as_str() == "model.embed.weight"),
+        "expected model.embed.weight MlTensor; got {names:?}");
+    assert!(names.iter().any(|n| n.as_str() == "model.layer.0.weight"),
+        "expected model.layer.0.weight MlTensor; got {names:?}");
+    assert!(names.iter().any(|n| n.as_str() == "model.norm.weight"),
+        "expected model.norm.weight MlTensor; got {names:?}");
+
+    // Each MlTensor should have an edge from the parent MlModel.
+    let model_id = format!("model:{}", path.to_str().unwrap());
+    let model_node = g.nodes.get(&model_id).expect("MlModel parent missing");
+    for t in &tensors {
+        assert!(model_node.imports.iter().any(|c| c == &t.id),
+            "expected MlModel → {} edge", t.id);
+    }
+
+    // All tensors should carry model_format=safetensors + dtype attr.
+    for t in &tensors {
+        assert_eq!(t.attrs.get("model_format").map(String::as_str), Some("safetensors"));
+        assert!(t.attrs.contains_key("dtype"));
+        assert!(t.attrs.contains_key("shape"));
+    }
+
+    // EntityKind round-trips
+    assert_eq!(EntityKind::from_str("tensor"), Some(EntityKind::MlTensor));
+    assert_eq!(EntityKind::MlTensor.as_str(), "tensor");
+    assert_eq!(EntityKind::from_str("ml_operator"), Some(EntityKind::MlOperator));
+    assert_eq!(EntityKind::MlOperator.as_str(), "ml_operator");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
