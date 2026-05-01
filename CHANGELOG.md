@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.38.0] — 2026-05-01
+
+### Added (Ship 4 — anti-analysis pack v2: al-khaser + pafish)
+- **YAML-loaded rule corpus** — `codemap-core/data/anti-analysis/{al-khaser,pafish}.yaml` (203 + 33 = 236 entries) embedded at compile time and parsed by an inline YAML-subset parser; no new crate dependency. Schema: `id / family / vendor / subkind / signature / severity / ref`.
+- **Family sub-taxonomy** — new `AntiAnalysisFamily` enum with 20 variants (`AntiDebug`, `AntiVmVbox`, `AntiVmVmware`, `AntiVmQemu`, `AntiVmBochs`, `AntiVmKvm`, `AntiVmXen`, `AntiVmParallels`, `AntiVmWine`, `AntiSandboxCuckoo`, `AntiSandboxSandboxie`, `AntiSandboxJoebox`, `AntiSandboxGeneric`, `AntiAv`, `AntiDisasm`, `AntiDump`, `Timing`, `CodeInjection`, `RttHumanInteraction`, `HypervisorDriver`). Every emitted v2 AntiAnalysis node carries `family=…`, enabling `pagerank --type anti_tech --filter family=anti-vm-vbox`.
+- **(API, constant) call-site matcher** — second consumer of `dataflow_local::RegFile`. Walks `.text`, tracks per-instruction register state, and at each `CALL [iat_va]` whose target resolves to a known anti-debug API (`NtQueryInformationProcess`, `NtSetInformationThread`, `NtQueryObject`, `NtQuerySystemInformation`) checks whether the calling-convention argument register holds the rule's expected magic constant (`ProcessDebugPort=0x07`, `ProcessDebugFlags=0x1F`, `ThreadHideFromDebugger=0x11`, `SystemKernelDebuggerInformation=0x23`, etc.). 7 high-confidence pairs in v2; the matcher itself scales to ~25 once the corpus catches up. Survives string-encryption packers because the constants live in code, not `.rdata`.
+- **RTT (reverse-Turing-test) detector** — IAT co-occurrence rule: `SetWindowsHookEx*` + ≥3 of `{GetSystemMetrics, GetCursorPos, GetDoubleClickTime, RegisterClass[AW], SetTimer, CreateWindowEx[AW]}` + `WH_MOUSE_LL=14` immediate + `WM_LBUTTONUP=0x0202` immediate. Tags as `RttHumanInteraction`. Catches the human-click-required malware family (UpClicker, ColdRiver, Gozi, APT15 MyWeb).
+- **Total ruleset: 277** (34 hardcoded + 236 YAML + 7 API/const). v1 was 35; v2 ≈ 8× growth with structured taxonomy.
+- **License hygiene.** al-khaser is GPL-2.0; pafish is GPL-3.0. Codemap is MIT. The bundled YAML carries only *facts* — driver names, MAC OUIs, registry keys, CPUID strings — re-derived from the source. No GPL'd code is linked into codemap. Attribution headers in each YAML file.
+
+### Tests
+- `yaml_loader_parses_both_corpora` — confirms both files parse, key entries present, every family enum value has at least one rule.
+- `yaml_string_match_vboxservice` / `yaml_import_api_match_wine` — both subkind dispatch paths fire.
+- `rtt_detector_fires_on_full_cluster` / `rtt_detector_does_not_fire_without_hookex` — RTT rule positive + negative.
+- `api_const_matcher_catches_processdebugport` — synthesize `xor r8,r8 ; mov edx,7 ; mov rcx,-1 ; call [rip+0]` and verify the matcher reports a `ProcessDebugPort` hit.
+- `api_const_matcher_skips_calls_with_wrong_constant` — same call site with `edx=0x42` produces no hit.
+- `family_taxonomy_round_trips` — `as_str` ↔ `from_yaml` for every variant.
+- `ruleset_total_meets_v2_target` — asserts `≥250` rules total.
+
+### Honest limitations
+- **`text` section only.** The (API, constant) matcher walks the executable section by name; binaries with renamed text sections fall back to "first non-zero raw section".
+- **No 32-bit stack-arg tracking.** The matcher reads constant-tracked GPRs only (RCX/RDX/R8/R9 on x64; ECX/EDX/R8D/R9D on x86 fastcall paths). Pure x86 stdcall `push ; push ; call` is matched only when the constant ends up in a register first.
+- **YAML parser is corpus-specific.** Handles `- key: value` records, `"quoted"` strings, and `# end-of-line` comments — sufficient for the bundled files. Not a general YAML parser.
+
+---
+
 ## [5.37.0] — 2026-05-01
 
 ### Added (Ship 4 #19 — VTable/RTTI detector, heuristic v1)

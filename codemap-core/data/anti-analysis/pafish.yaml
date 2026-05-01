@@ -1,0 +1,270 @@
+# pafish anti-analysis signature corpus
+#
+# Source: pafish v06 (Alberto Ortega / a0rtega, GPL-3.0)
+#   https://github.com/a0rtega/pafish
+#
+# Signatures here are factual — Oracle's actual driver names, IEEE's
+# actual MAC OUIs, vendor-defined CPUID strings — not creative
+# expression. No GPL'd pafish source code is included in codemap; this
+# file is permissively licensed (MIT) along with the rest of codemap.
+#
+# Pafish overlaps with al-khaser on most VBox/VMware regkeys + drivers;
+# entries here are the *complementary* picks (additional file paths,
+# device handles, generic-sandbox heuristics, and Bochs/QEMU CPU brand
+# strings) that pafish carries but al-khaser does not.
+#
+# Schema: see al-khaser.yaml header.
+
+# ── VirtualBox additions (paths pafish probes that al-khaser doesn't) ─
+- id: pafish-vbox-file-mouse-sys
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\drivers\\VBoxMouse.sys"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-guest-sys
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\drivers\\VBoxGuest.sys"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-sf-sys
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\drivers\\VBoxSF.sys"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-video-sys
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\drivers\\VBoxVideo.sys"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-vboxmrxnp-dll
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\vboxmrxnp.dll"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-vboxhook-dll
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "system32\\vboxhook.dll"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-file-guestadds-folder
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: file_path
+  signature: "program files\\oracle\\virtualbox guest additions"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-share-shared-folders
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: window_class
+  signature: "VirtualBox Shared Folders"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-pci-devid
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: pci_ven_id
+  signature: "PCI\\VEN_80EE&DEV_CAFE"
+  severity: high
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-wmi-pnpentity
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: wmi_query
+  signature: "SELECT DeviceId FROM Win32_PnPEntity"
+  severity: medium
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-regval-vbox
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: registry_key
+  signature: "VirtualBox"
+  severity: low
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-regdate-bios
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: registry_key
+  signature: "06/23/99"
+  severity: medium
+  ref: "pafish/vbox.c"
+- id: pafish-vbox-regid-scsiport0
+  family: anti-vm-vbox
+  vendor: VirtualBox
+  subkind: registry_key
+  signature: "HARDWARE\\DEVICEMAP\\Scsi\\Scsi Port 0\\Scsi Bus 0\\Target Id 0\\Logical Unit Id 0"
+  severity: high
+  ref: "pafish/vbox.c"
+
+# ── VMware additions ─────────────────────────────────────────────
+- id: pafish-vmware-wmi-bios-serial
+  family: anti-vm-vmware
+  vendor: VMware
+  subkind: wmi_query
+  signature: "SELECT SerialNumber FROM Win32_Bios"
+  severity: medium
+  ref: "pafish/vmware.c"
+- id: pafish-vmware-adapter-vmware
+  family: anti-vm-vmware
+  vendor: VMware
+  subkind: window_class
+  signature: "VMware"
+  severity: low
+  ref: "pafish/vmware.c"
+- id: pafish-vmware-regid-scsiport2
+  family: anti-vm-vmware
+  vendor: VMware
+  subkind: registry_key
+  signature: "VMWARE"
+  severity: low
+  ref: "pafish/vmware.c"
+
+# ── Bochs (CPU-brand fingerprints) ───────────────────────────────
+- id: pafish-bochs-brand-amd-athlon-lower-p
+  family: anti-vm-bochs
+  vendor: Bochs
+  subkind: cpuid_hv_vendor
+  signature: "AMD Athlon(tm) processor"
+  severity: high
+  ref: "pafish/bochs.c"
+- id: pafish-bochs-bios-version
+  family: anti-vm-bochs
+  vendor: Bochs
+  subkind: registry_key
+  signature: "BOCHS"
+  severity: high
+  ref: "pafish/bochs.c"
+
+# ── QEMU additions ───────────────────────────────────────────────
+- id: pafish-qemu-cpu-brand
+  family: anti-vm-qemu
+  vendor: QEMU
+  subkind: cpuid_hv_vendor
+  signature: "QEMU Virtual CPU"
+  severity: high
+  ref: "pafish/qemu.c"
+- id: pafish-qemu-regbios-qemu
+  family: anti-vm-qemu
+  vendor: QEMU
+  subkind: registry_key
+  signature: "QEMU"
+  severity: low
+  ref: "pafish/qemu.c"
+
+# ── Generic sandbox heuristics ───────────────────────────────────
+- id: pafish-gen-username-sandbox
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: sandbox_username
+  signature: "SANDBOX"
+  severity: high
+  ref: "pafish/gensandbox.c"
+- id: pafish-gen-username-virus
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: sandbox_username
+  signature: "VIRUS"
+  severity: high
+  ref: "pafish/gensandbox.c"
+- id: pafish-gen-username-malware
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: sandbox_username
+  signature: "MALWARE"
+  severity: high
+  ref: "pafish/gensandbox.c"
+- id: pafish-gen-path-sample
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: decoy_filename
+  signature: "\\SAMPLE"
+  severity: medium
+  ref: "pafish/gensandbox.c"
+- id: pafish-gen-path-virus
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: decoy_filename
+  signature: "\\VIRUS"
+  severity: high
+  ref: "pafish/gensandbox.c"
+- id: pafish-gen-isnativevhdboot
+  family: anti-sandbox-generic
+  vendor: generic
+  subkind: import_api
+  signature: "kernel32.dll!IsNativeVhdBoot"
+  severity: medium
+  ref: "pafish/gensandbox.c"
+
+# ── Cuckoo / Sandboxie / Wine — already covered by al-khaser; only
+#    add complementary signature paths pafish probes that don't
+#    appear in al-khaser. ─────────────────────────────────────────
+- id: pafish-wine-regkey-hkcu
+  family: anti-vm-wine
+  vendor: Wine
+  subkind: registry_key
+  signature: "HKCU\\SOFTWARE\\Wine"
+  severity: high
+  ref: "pafish/wine.c"
+
+# ── Anti-debug API imports surfaced by pafish (overlaps al-khaser
+#    but pafish documents only these three — duplicates skipped) ──
+
+# (No new entries — pafish anti-debug = subset of al-khaser anti-debug.)
+
+# ── RTT (reverse-Turing-test) human-interaction APIs ─────────────
+# Static IAT signatures used by the dispatcher's RTT detector.
+# These also serve as direct rule hits when a binary imports them.
+- id: pafish-rtt-setwindowshookex-w
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!SetWindowsHookExW"
+  severity: medium
+  ref: "pafish/rtt.c"
+- id: pafish-rtt-setwindowshookex-a
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!SetWindowsHookExA"
+  severity: medium
+  ref: "pafish/rtt.c"
+- id: pafish-rtt-getsystemmetrics
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!GetSystemMetrics"
+  severity: low
+  ref: "pafish/rtt.c"
+- id: pafish-rtt-getcursorpos
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!GetCursorPos"
+  severity: low
+  ref: "pafish/rtt.c"
+- id: pafish-rtt-getdoubleclicktime
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!GetDoubleClickTime"
+  severity: low
+  ref: "pafish/rtt.c"
+- id: pafish-rtt-getlastinputinfo
+  family: rtt-human-interaction
+  vendor: RTT
+  subkind: import_api
+  signature: "user32.dll!GetLastInputInfo"
+  severity: medium
+  ref: "pafish/rtt.c"
