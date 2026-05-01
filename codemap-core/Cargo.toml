@@ -46,6 +46,9 @@ miniz_oxide = "0.8"
 # pass (5.38.0 — signsrch corpus absorption).
 aho-corasick = "1"
 memchr = "2"
+# Pure-Rust graph crate. Powers cfg::dominators (simple_fast) and
+# cfg::loops (tarjan_scc). MIT/Apache, zero system deps.
+petgraph = "0.6"
 
 [build-dependencies]
 # Build-time XML → bincode conversion of data/signsrch.xml (3.4 MB,
