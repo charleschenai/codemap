@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.42.0] — 2026-05-01
+
+### Added (Ship 5 — Source-language identification)
+- **New `lang-id` action** (aliases: `language`, `detect-language`, `source-lang`). Tags PE / ELF / Mach-O binaries with `language=rust|go|dotnet|unknown`, plus `language_version` when a rustc commit-hash or Go pclntab magic is present. Modeled on FLARE FLOSS's `floss/language/identify.py` but extended past FLOSS's PE-only scope.
+- **Three independent detectors:** Rust commit-hash + version-string scan; Go pclntab magic-byte scan with header validation; .NET PE COM_DESCRIPTOR check.
+- **Bundled `data/rustc_versions.toml`** — 119 commit-hash → version mappings covering rustc 1.0 .. 1.74.
+- **Auto-attribute** — writes `language` + `language_version` onto the existing PE/ELF/Mach-O binary node. No new EntityKind.
+
+### Tests
+- 307 → **320 tests** (+13).
+
+---
+
 ## [5.41.0] — 2026-05-01
 
 ### Added (Ship 5 #1 — COM CLSID/IID GUID database, capa-derived)

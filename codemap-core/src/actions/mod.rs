@@ -45,6 +45,7 @@ pub mod opaque_pred;
 pub mod vtable_detect;
 pub mod pe_carve;
 pub mod com_scan;
+pub mod lang_id;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -314,6 +315,11 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // 25,306 IIDs from capa (Apache-2.0). Two-pass: ASCII GUID
         // regex + raw 16-byte (with Microsoft byte-order swap).
         "com-scan" | "com" | "com-guids" | "clsid-iid" | "windows-com" => Ok(com_scan::com_scan(graph, target)),
+        // Source-language identification (5.42.0 — Ship 5). Tags PE /
+        // ELF / Mach-O binaries with language=rust|go|dotnet, plus
+        // version when a rustc commit-hash or Go pclntab magic is
+        // present. FLOSS-derived but extended past PE-only.
+        "lang-id" | "language" | "detect-language" | "source-lang" => Ok(lang_id::lang_id(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }
