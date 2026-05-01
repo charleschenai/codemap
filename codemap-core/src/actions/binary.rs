@@ -144,6 +144,50 @@ pub fn elf_info(graph: &mut Graph, target: &str) -> String {
         Ok(d) => d,
         Err(e) => return e,
     };
+    // 5.38.0: stamp os/os_source/language attrs on the ElfBinary node
+    // so downstream actions (audit, pagerank --type elf, leiden) can
+    // cluster by target OS without a separate elf-os pass. The cascade
+    // is cheap (~ms) — same buffer we just loaded for elf_info.
+    let bin_id = format!("elf:{target}");
+    let guesses = crate::actions::elf_os::detect_elf_os_all(&data);
+    if let Some(winner) = guesses.iter().max_by_key(|g| {
+        // Same ranking the elf-os action uses; we duplicate here to
+        // avoid importing a private helper. confidence() is implicit
+        // through the heuristic ordering — pick the strongest fire.
+        match g.source {
+            crate::actions::elf_os::OsHeuristic::PhNote        => 10u8,
+            crate::actions::elf_os::OsHeuristic::ShNote        => 9,
+            crate::actions::elf_os::OsHeuristic::Linker        => 8,
+            crate::actions::elf_os::OsHeuristic::GlibcVerneed  => 7,
+            crate::actions::elf_os::OsHeuristic::NeededDep     => 7,
+            crate::actions::elf_os::OsHeuristic::GoBuildinfo   => 6,
+            crate::actions::elf_os::OsHeuristic::Symtab        => 5,
+            crate::actions::elf_os::OsHeuristic::IdentComment  => 4,
+            crate::actions::elf_os::OsHeuristic::OsabiByte     => 3,
+        }
+    }) {
+        let os_str = winner.os.as_str();
+        let src_str: &str = match winner.source {
+            crate::actions::elf_os::OsHeuristic::PhNote        => "ph-note",
+            crate::actions::elf_os::OsHeuristic::ShNote        => "sh-note",
+            crate::actions::elf_os::OsHeuristic::Linker        => "linker",
+            crate::actions::elf_os::OsHeuristic::GlibcVerneed  => "glibc-verneed",
+            crate::actions::elf_os::OsHeuristic::NeededDep     => "needed-dep",
+            crate::actions::elf_os::OsHeuristic::IdentComment  => "ident-comment",
+            crate::actions::elf_os::OsHeuristic::Symtab        => "symtab",
+            crate::actions::elf_os::OsHeuristic::GoBuildinfo   => "go-buildinfo",
+            crate::actions::elf_os::OsHeuristic::OsabiByte     => "osabi-byte",
+        };
+        graph.ensure_typed_node(&bin_id, EntityKind::ElfBinary, &[
+            ("os", os_str),
+            ("os_source", src_str),
+        ]);
+    }
+    if let Some(lang) = crate::actions::elf_os::detect_elf_language(&data) {
+        graph.ensure_typed_node(&bin_id, EntityKind::ElfBinary, &[
+            ("language", lang),
+        ]);
+    }
     match parse_elf_with_deps(&data) {
         Ok((info, needed, entry)) => {
             // Register every NEEDED library as a Dll node with edges from

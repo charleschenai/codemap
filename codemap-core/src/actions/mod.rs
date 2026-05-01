@@ -51,6 +51,7 @@ pub mod disalign_bytes;
 pub mod die_fingerprint;
 pub mod apk_fingerprint;
 pub mod endpoint_enrich;
+pub mod elf_os;
 
 use crate::types::Graph;
 use crate::CodemapError;
@@ -329,6 +330,8 @@ pub(crate) fn dispatch_inner(graph: &mut Graph, action: &str, target: &str, tree
         // LOLBin scanner (5.45.0 — Ship B).
         "lolbin-scan" | "find-lolbins" | "lolbins"
             => Ok(endpoint_enrich::lolbin_scan(graph, target)),
+        // ELF OS detection cascade (5.46.0 — Ship 5 #2).
+        "elf-os" | "os" | "detect-os" => Ok(elf_os::elf_os(graph, target)),
         _ => Err(CodemapError::UnknownAction(action.to_string())),
     }
 }

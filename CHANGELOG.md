@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [5.46.0] — 2026-05-01
+
+### Added (Ship 5 #2 — ELF OS detection cascade)
+- **New `elf-os` action** (aliases: `os`, `detect-os`). Ports capa's 9-heuristic `detect_elf_os` into Rust: PT_NOTE / SHT_NOTE / PT_INTERP / GLIBC verneed / NEEDED libs / .comment GCC / symtab / Go buildinfo / OS-ABI byte.
+- Tags every ElfBinary node with `os` + `os_source` + `language` attributes.
+- 24-variant OS enum.
+
+### Tests
+- 356 → **368 tests** (+12).
+
+---
+
 ## [5.45.0] — 2026-05-01
 
 ### Added (APK protector fingerprint + endpoint enrichment)
